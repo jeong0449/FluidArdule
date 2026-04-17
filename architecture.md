@@ -26,7 +26,7 @@ flowchart LR
     %% --- UI CONTROL (UNO-1) ---
     UNO1[UNO-1<br/>UI Controller] -->|Serial / Events| PI
     UNO1 --> LCD[TFT / LCD Display]
-    UNO1 --> CTRL[Buttons / Encoder]
+    UNO1 --> CTRL[Buttons / Encoder / Pot]
 
     %% --- AUDIO OUTPUT ---
     FS --> DAC[I2S DAC / USB Audio]
