@@ -7,11 +7,11 @@ into a compact custom-built instrument platform.
 
 ## Overview
 
-- Raspberry Pi: synthesis engine (FluidSynth, playback, control)
-- UNO-1: UI controller (buttons, encoder, display)
+- Raspberry Pi: synthesis engine (FluidSynth, playback, control, TFT-LCD)
+- UNO-1: UI controller (buttons, encoder, potentiometer)
 - UNO-2: MIDI router / bridge subsystem (USB and DIN MIDI ingress)
 
-UNO-2 is maintained as a separate project due to its strong independence.
+UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong independence.
 
 ## Related Projects
 
