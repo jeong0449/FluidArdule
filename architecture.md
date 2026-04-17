@@ -8,15 +8,18 @@
 flowchart LR
 
     %% --- MIDI INPUT ---
-    KBD1[USB MIDI Keyboard] --> UNO2[UNO-2<br/>MIDI Router / Bridge]
+    KBD1[USB MIDI Keyboard] -->|USB| UNO2[UNO-2<br/>MIDI Router / Bridge]
     KBD2[DIN MIDI Keyboard] --> UNO2
+
+    %% direct path
+    KBD1 -->|USB direct| PI[Raspberry Pi]
 
     %% --- MIDI ROUTING ---
     UNO2 -->|DIN MIDI| EXT[External MIDI Module]
     UNO2 -->|USB-serial raw MIDI| BRIDGE[uno-midi-bridge<br/>Python / C]
 
     %% --- PI ENGINE ---
-    BRIDGE -->|ALSA MIDI| PI[Raspberry Pi]
+    BRIDGE -->|ALSA MIDI| PI
 
     PI --> FS[FluidSynth / Player Engine]
 
