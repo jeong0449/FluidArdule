@@ -18,7 +18,7 @@ flowchart LR
     BRIDGE -->|ALSA MIDI| PI
 
     PI --> FS[FluidSynth / Player Engine]
-    PI --> TFT[TFT / LCD Display]
+    PI --> TFT[TFT-LCD]
 
     CTRL[Buttons / Encoder / Potentiometer] --> UNO1[UNO-1<br/>UI Controller]
     UNO1 -->|Serial / Events| PI
