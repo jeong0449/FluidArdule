@@ -7,28 +7,22 @@
 ```mermaid
 flowchart LR
 
-    %% --- MIDI INPUT ---
     KBD1[USB MIDI Keyboard] -->|USB| UNO2[UNO-2<br/>MIDI Router / Bridge]
     KBD2[DIN MIDI Keyboard] --> UNO2
 
-    %% direct path
-    KBD1 -->|USB direct| PI[Raspberry Pi]
+    KBD1 -->|USB direct, treated as raw MIDI| PI[Raspberry Pi]
 
-    %% --- MIDI ROUTING ---
     UNO2 -->|DIN MIDI| EXT[External MIDI Module]
-    UNO2 -->|USB-serial raw MIDI| BRIDGE[uno-midi-bridge<br/>Python / C]
+    UNO2 -->|USB-serial| BRIDGE[uno-midi-bridge<br/>Python / C]
 
-    %% --- PI ENGINE ---
     BRIDGE -->|ALSA MIDI| PI
 
     PI --> FS[FluidSynth / Player Engine]
+    PI --> TFT[TFT / LCD Display]
 
-    %% --- UI CONTROL (UNO-1) ---
     UNO1[UNO-1<br/>UI Controller] -->|Serial / Events| PI
-    UNO1 --> LCD[TFT / LCD Display]
     UNO1 --> CTRL[Buttons / Encoder / Potentiometer]
 
-    %% --- AUDIO OUTPUT ---
     FS --> DAC[I2S DAC / USB Audio]
     DAC --> OUT[Audio Output]
 ```
