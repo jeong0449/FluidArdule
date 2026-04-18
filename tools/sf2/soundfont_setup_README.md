@@ -57,7 +57,7 @@ SalC5Light2.sf2
 Place all downloaded files into:
 
 ```
-sf2/
+~/sf2/
 ├── FluidR3_GM.sf2
 ├── GeneralUser_GS.sf2
 └── SalC5Light2.sf2
