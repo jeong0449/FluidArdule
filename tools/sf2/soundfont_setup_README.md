@@ -12,7 +12,7 @@ Please download them manually from the official sources below.
 
 - Official source: https://member.keymusician.com/Member/FluidR3_GM/index.html
 
-Download the file and place it in your `sf2/` directory.
+Download the file and place it in your `~/sf2/` directory.
 
 Recommended filename:
 ```
