@@ -44,7 +44,7 @@ const unsigned long LCD_REFRESH_MS = 120;
 const unsigned long POT_SEND_MS = 60;
 const unsigned long LINK_TIMEOUT_MS = 3000;
 const unsigned long LINK_BLINK_MS = 300;
-const unsigned long MIDI_LED_PULSE_MS = 300;
+const unsigned long MIDI_LED_PULSE_MS = 70;
 const unsigned long PLAY_LED_BLINK_MS = 500;
 const int           POT_DELTA_MIN = 4;
 
