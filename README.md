@@ -2,7 +2,7 @@
 
 A DIY Raspberry Pi and Arduino based MIDI sound module system.
 
-FluidArdule combines software synthesis, hardware control, and MIDI routing
+Fluid Ardule combines software synthesis, hardware control, and MIDI routing
 into a compact custom-built instrument platform.
 
 ## Overview
