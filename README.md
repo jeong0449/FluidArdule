@@ -15,7 +15,7 @@ UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong in
 
 ## Related Projects
 
-- [NanoArdule](https://github.com/jeong0449/NanoArdule)
+- [Nano Ardule](https://github.com/jeong0449/NanoArdule)
 - [uno-midi-bridge](https://github.com/jeong0449/uno-midi-bridge)
 
 ## Status
