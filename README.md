@@ -6,6 +6,12 @@ Fluid Ardule combines software synthesis, hardware control, and MIDI routing int
 
 ---
 
+## System Overview
+
+<img src="images/fluid-ardule-overview.png" width="480">
+
+---
+
 ## 🎬 Demo
 
 [![Watch Demo](https://img.youtube.com/vi/FQxRp7cAwEk/0.jpg)](https://www.youtube.com/watch?v=FQxRp7cAwEk)
