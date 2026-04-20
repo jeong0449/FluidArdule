@@ -74,6 +74,13 @@ See the full wiring diagram for detailed connections.
 
 ---
 
+## Installation / Build
+
+🚧 Work in progress  
+A full setup guide (hardware, OS, and software installation) will be added soon.
+
+---
+
 ## Related Projects
 
 - [Nano Ardule](https://github.com/jeong0449/NanoArdule)
