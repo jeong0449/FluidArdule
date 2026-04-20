@@ -2,7 +2,16 @@
 
 A DIY Raspberry Pi and Arduino-based MIDI sound module system that supports instant keyboard playback, General MIDI synthesis (FluidSynth), real-time synthesis (Yoshimi), and audio file playback in a single integrated platform.
 
-Fluid Ardule combines software synthesis, hardware control, and MIDI routing into a compact, flexible, custom-built instrument platform.
+---
+
+## What is "Fluid Ardule"?
+
+**Fluid Ardule** is a compound name combining:
+
+- **Fluid** — referring to FluidSynth, the software synthesizer used in the system 
+- **Ardule** — a coined term derived from *Arduino* and *module*, representing a modular Arduino-based hardware system  
+
+Together, *Fluid Ardule* describes a hybrid MIDI sound module that integrates software synthesis with Arduino-based hardware control.
 
 ---
 
