@@ -85,7 +85,8 @@ UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong in
   <img src="images/fluid-ardule-system-wiring-diagram.png" width="480">
 </a>
 
-See the [full wiring diagram](/images/fluid-ardule-system-wiring-diagram.png) for detailed connections.
+Click the diagram to enlarge.  
+See [components.md](docs/components.md) for the parts list.
 
 ---
 
