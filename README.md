@@ -108,3 +108,9 @@ A full setup guide (hardware, OS, and software installation) will be added soon.
 🚧 Work in progress  
 
 This repository documents the evolving system architecture and integration of related components.
+
+---
+
+## Naming
+
+The name "Fluid Ardule" was chosen after considering alternatives such as "Fluid Canvas," which was already in use.
