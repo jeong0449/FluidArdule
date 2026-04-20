@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// v2026-04-14h
+// 260420a version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -21,7 +21,8 @@
 //   D13 : blink until Pi link established, then steady ON
 //   D12 : PLAY status LED
 //   D11 : activity pulse only on ACT:MIDI from Pi
-//   1602 LCD : local input monitor only (no Pi state text)
+//   1602 LCD : local input monitor only
+//   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -46,6 +47,7 @@ const unsigned long LINK_TIMEOUT_MS = 3000;
 const unsigned long LINK_BLINK_MS = 300;
 const unsigned long MIDI_LED_PULSE_MS = 70;
 const unsigned long PLAY_LED_BLINK_MS = 500;
+const unsigned long DEBUG_TAG_HOLD_MS = 1200;
 const int           POT_DELTA_MIN = 4;
 
 // ---- A0 thresholds (5.00V reference assumed) ----
@@ -91,6 +93,10 @@ unsigned long playLedLastToggleMs = 0;
 
 String l1Text = "FluidArdule UNO";
 String l2Text = "Booting...";
+
+// Right-side 6-char debug tag on LCD line 1
+String debugTag = "";
+unsigned long debugTagUntilMs = 0;
 
 // ---- Keypad state ----
 KeyCode stableKey = KEY_NONE;
@@ -167,6 +173,13 @@ void printPadded16(const String &s) {
   lcd.print(t);
 }
 
+String padRight(const String &s, uint8_t width) {
+  String t = s;
+  if (t.length() > width) t = t.substring(0, width);
+  while (t.length() < width) t += ' ';
+  return t;
+}
+
 const __FlashStringHelper* accelName(uint8_t p) {
   switch (p) {
     case 1: return F("MILD");
@@ -187,10 +200,38 @@ const __FlashStringHelper* keyName(KeyCode k) {
   }
 }
 
-void showButtonEvent(const String &name, bool isLongPress) {
+String makeButtonDebugTag(KeyCode k, bool isLongPress) {
+  String head;
+  switch (k) {
+    case KEY_LEFT:   head = "L"; break;
+    case KEY_UP:     head = "U"; break;
+    case KEY_DOWN:   head = "D"; break;
+    case KEY_RIGHT:  head = "R"; break;
+    case KEY_SELECT: head = "S"; break;
+    default:         head = "?"; break;
+  }
+  String tail = isLongPress ? "-LP" : "-SP";
+  return padRight(head + tail, 6);
+}
+
+void setDebugTag(const String &tag) {
+  debugTag = padRight(tag, 6);
+  debugTagUntilMs = millis() + DEBUG_TAG_HOLD_MS;
+}
+
+void updateDebugTagTimeout() {
+  if (debugTag.length() == 0) return;
+  if (millis() >= debugTagUntilMs) {
+    debugTag = "";
+    debugTagUntilMs = 0;
+  }
+}
+
+void showButtonEvent(const String &name, bool isLongPress, KeyCode k) {
   String line1 = "BTN:" + name;
   String line2 = isLongPress ? "LONG" : "SHORT";
   setLocalDisplay(line1, line2);
+  setDebugTag(makeButtonDebugTag(k, isLongPress));
 }
 
 void showEncoderEvent(int step) {
@@ -216,8 +257,17 @@ void showAccelSetupScreen() {
 }
 
 void drawStatus() {
+  updateDebugTagTimeout();
+
   lcd.setCursor(0, 0);
-  printPadded16(l1Text);
+
+  String line1 = l1Text;
+  if (line1.length() > 10) line1 = line1.substring(0, 10);
+  while (line1.length() < 10) line1 += ' ';
+
+  String right6 = debugTag.length() > 0 ? padRight(debugTag, 6) : "      ";
+  lcd.print(line1 + right6);
+
   lcd.setCursor(0, 1);
   printPadded16(l2Text);
 }
@@ -313,7 +363,7 @@ void applyAndExitAccelSettingMode() {
   accelProfile = accelDraft;
   accelSettingMode = false;
   sendAccelProfile();
-  setLocalDisplay("ACCEL APPLIED", "P" + String(accelProfile) + " " + String(accelName(accelProfile)));
+  setLocalDisplay("ACCEL APPL", "P" + String(accelProfile) + " " + String(accelName(accelProfile)));
 }
 
 void sendButtonMessage(KeyCode k, bool isLongPress) {
@@ -325,7 +375,7 @@ void sendButtonMessage(KeyCode k, bool isLongPress) {
     case KEY_SELECT: sendLine(isLongPress ? "BTN:SEL_LP"   : "BTN:SEL"); break;
     default: break;
   }
-  showButtonEvent(String(keyName(k)), isLongPress);
+  showButtonEvent(String(keyName(k)), isLongPress, k);
 }
 
 void updateKeypad() {
@@ -361,7 +411,7 @@ void updateKeypad() {
           case KEY_UP:     setAccelDraftDelta(+1); break;
           case KEY_DOWN:   setAccelDraftDelta(-1); break;
           case KEY_SELECT: applyAndExitAccelSettingMode(); break;
-          case KEY_LEFT:   accelSettingMode = false; setLocalDisplay("ACCEL CANCELED", "P" + String(accelProfile)); break;
+          case KEY_LEFT:   accelSettingMode = false; setLocalDisplay("ACCEL CANC", "P" + String(accelProfile)); break;
           default: break;
         }
       } else {
@@ -417,7 +467,8 @@ void updateEncoder() {
       encSwLongSent = false;
       if (!accelSettingMode) {
         sendLine("BTN:ENC_PUSH");
-        setLocalDisplay("BTN:ENC_PUSH", "SHORT");
+        setLocalDisplay("BTN:ENCPSH", "SHORT");
+        setDebugTag("E-SP  ");
       }
     } else {
       encSwPressedMs = 0;
@@ -428,8 +479,10 @@ void updateEncoder() {
   if (encSwStable == LOW && !encSwLongSent && encSwPressedMs != 0 && (now - encSwPressedMs) >= LONGPRESS_MS) {
     if (!accelSettingMode) {
       enterAccelSettingMode();
+      setDebugTag("E-LP  ");
     } else {
       applyAndExitAccelSettingMode();
+      setDebugTag("E-LP  ");
     }
     encSwLongSent = true;
   }
@@ -526,7 +579,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  setLocalDisplay("FluidArdule UNO", "WAIT HELLO/HB");
+  setLocalDisplay("FluidArdul", "WAIT HELLO/HB");
   drawStatus();
 
   delay(80);
