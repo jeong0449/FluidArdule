@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # =========================================================
-# Final (260419o)
+# Final (260417j)
 # - Stable RAW/SEQ/UNO-2 MIDI input modes
 # - ALSA SEQ auto-connect and quiet already-subscribed handling
 # - UNO-2 bridge integrated (uno_midi_bridge)
@@ -267,6 +267,7 @@ fluid_log_handle = None
 player_proc = None
 player_log_handle = None
 serial_handle = None
+last_enc_time = 0.0
 serial_lock = threading.Lock()
 last_serial_hb_time = 0.0
 serial_write_error_count = 0
@@ -3527,6 +3528,13 @@ def handle_serial_line(line: str) -> None:
 
 
 def handle_encoder_value(value: str) -> None:
+    global last_enc_time
+
+    now = time.time()
+    if now - last_enc_time < 0.02:   # 20ms debounce
+        return
+    last_enc_time = now
+
     try:
         step = int(value)
     except ValueError:
