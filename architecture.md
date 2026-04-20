@@ -1,4 +1,4 @@
-# FluidArdule Architecture
+# Fluid Ardule Architecture
 
 **Created:** 2026-04-17
 
