@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # =========================================================
-# Final (260417j)
+# Final (260419o)
 # - Stable RAW/SEQ/UNO-2 MIDI input modes
 # - ALSA SEQ auto-connect and quiet already-subscribed handling
 # - UNO-2 bridge integrated (uno_midi_bridge)
@@ -38,7 +38,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260419o"
+SCRIPT_VERSION = "v2.9-stage8-260420"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
