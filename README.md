@@ -93,7 +93,11 @@ See [components.md](docs/components.md) for the parts list.
 ## Installation / Build
 
 🚧 Work in progress  
-A full setup guide (hardware, OS, and software installation) will be added soon.
+
+A setup guide for OS and software installation is currently being prepared.  
+Hardware assembly can be inferred from the system overview and components list.
+
+👉 [Software Setup Guide](docs/software-setup.md)
 
 ---
 
