@@ -2,38 +2,15 @@
 
 A DIY Raspberry Pi and Arduino-based MIDI sound module system that supports instant keyboard playback, General MIDI synthesis (FluidSynth), real-time synthesis (Yoshimi), and audio file playback in a single integrated platform.
 
-Fluid Ardule combines software synthesis, hardware control, and MIDI routing into a compact, custom-built instrument platform.
+Fluid Ardule combines software synthesis, hardware control, and MIDI routing into a compact, flexible, custom-built instrument platform.
 
-```mermaid
-flowchart LR
+---
 
-    KBD1[USB MIDI Keyboard] -->|USB| UNO2[UNO-2<br/>MIDI Router / Bridge]
-    KBD2[DIN MIDI Keyboard] --> UNO2
+## 🎬 Demo
 
-    KBD1 -->|USB direct, <br>treated as raw MIDI| PI[Raspberry Pi]
+[![Watch Demo](https://img.youtube.com/vi/FQxRp7cAwEk/0.jpg)](https://www.youtube.com/watch?v=FQxRp7cAwEk)
 
-    UNO2 -->|DIN MIDI| EXT[External MIDI Module]
-    UNO2 -->|USB-serial| BRIDGE[uno-midi-bridge<br/>Python / C]
-
-    BRIDGE -->|ALSA MIDI| PI
-
-    PI --> FS[FluidSynth / Player Engine]
-    PI --> TFT[TFT-LCD]
-
-    CTRL[Buttons / Encoder / Potentiometer] --> UNO1[UNO-1<br/>UI Controller]
-    UNO1 -->|Serial / Events| PI
-
-    FS --> DAC[I2S DAC / USB Audio]
-    DAC --> OUT[Audio Output]
-````
-
-## System Overview
-
-- Raspberry Pi: synthesis engine (FluidSynth, Yoshimi, playback, control, PCM5102A-based I<sup>2</sup>S DAC, CP2102-based USB-to-UART bridge, TFT-LCD)
-- UNO-1: UI controller (buttons, encoder, potentiometer, LEDs)
-- UNO-2: MIDI router / bridge subsystem (USB and DIN MIDI ingress; not required if using a USB MIDI keyboard controller)
-
-UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong independence.
+---
 
 ## What does it do?
 
@@ -44,17 +21,68 @@ UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong in
 - Control parameters via hardware UI (UNO-1)
 - Output audio via I2S DAC or USB DAC
 
+---
+
+## System Architecture
+
+```mermaid
+flowchart LR
+
+    KBD1[USB MIDI Keyboard] -->|USB| UNO2[UNO-2<br/>MIDI Router / Bridge]
+    KBD2[DIN MIDI Keyboard] --> UNO2
+
+    KBD1 -->|USB direct<br/>raw MIDI| PI[Raspberry Pi]
+
+    UNO2 -->|DIN MIDI| EXT[External MIDI Module]
+    UNO2 -->|USB-serial| BRIDGE[uno-midi-bridge<br/>Python / C]
+
+    BRIDGE -->|ALSA MIDI| PI
+
+    PI --> FS[FluidSynth / Yoshimi / Player]
+    PI --> TFT[TFT-LCD]
+
+    CTRL[Buttons / Encoder / Potentiometer] --> UNO1[UNO-1<br/>UI Controller]
+    UNO1 -->|Serial / Events| PI
+
+    FS --> DAC[I2S DAC / USB Audio]
+    DAC --> OUT[Audio Output]
+```
+
+The system is designed as a modular architecture separating UI control, MIDI routing, and synthesis engine for flexibility and scalability.
+
+→ See [architecture.md](architecture.md) for details.
+
+---
+
+## System Overview
+
+- **Raspberry Pi**: synthesis engine (FluidSynth, Yoshimi), playback, control, I²S DAC, USB-UART, TFT display  
+- **UNO-1**: UI controller (buttons, encoder, potentiometer, LEDs)  
+- **UNO-2**: MIDI router / bridge (USB ↔ DIN), optional if using USB MIDI keyboard  
+
+UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong independence.
+
+---
+
+## Hardware Layout
+
+<a href="images/fluid-ardule-system-wiring-diagram.png">
+  <img src="images/fluid-ardule-system-wiring-diagram.png" width="480">
+</a>
+
+See the full wiring diagram for detailed connections.
+
+---
+
 ## Related Projects
 
 - [Nano Ardule](https://github.com/jeong0449/NanoArdule)
-- [uno-midi-bridge](https://github.com/jeong0449/uno-midi-bridge) (now essentially identical to UNO-2)
+- [uno-midi-bridge](https://github.com/jeong0449/uno-midi-bridge)
+
+---
 
 ## Status
 
-Work in progress. This repository documents the overall system architecture
-and integrates components developed across related projects.
+🚧 Work in progress  
 
-## Status
-
-🎬 **Latest Demo (YouTube Shorts)**  
-https://www.youtube.com/shorts/FQxRp7cAwEk
+This repository documents the evolving system architecture and integration of related components.
