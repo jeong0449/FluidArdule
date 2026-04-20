@@ -27,7 +27,7 @@ flowchart LR
     DAC --> OUT[Audio Output]
 ````
 
-## Overview
+## System Overview
 
 - Raspberry Pi: synthesis engine (FluidSynth, Yoshimi, playback, control, PCM5102A-based I<sup>2</sup>S DAC, CP2102-based USB-to-UART bridge, TFT-LCD)
 - UNO-1: UI controller (buttons, encoder, potentiometer, LEDs)
