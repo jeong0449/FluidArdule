@@ -18,6 +18,8 @@ https://www.raspberrypi.com/software/
 
 > Be careful to select the correct device to avoid data loss.
 
+This guide assumes the default Raspberry Pi OS user account `pi`.
+
 ---
 
 ### 1.2 Initial Configuration (raspi-config)
