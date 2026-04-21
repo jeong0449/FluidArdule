@@ -94,10 +94,10 @@ See [components.md](docs/components.md) for the parts list.
 
 🚧 Work in progress  
 
-A setup guide for OS and software installation is currently being prepared.  
-Hardware assembly can be inferred from the system overview and components list.
+An installation guide for OS and software setup is currently being prepared.  
+Hardware assembly can be inferred from the system overview and components documentation.
 
-👉 [Software Setup Guide](docs/software-setup.md)
+👉 [Installation Guide](docs/installation.md)
 
 ---
 
