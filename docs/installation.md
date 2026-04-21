@@ -44,11 +44,11 @@ sudo reboot
 
 Install the required packages:
 
-````bash
+```bash
 sudo apt update
 sudo apt upgrade
 sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi rsyslog dhcdcd5
-````
+```
 
 ---
 
@@ -90,7 +90,7 @@ Use the following commands to identify services that slow down the boot process:
 ```bash
 systemd-analyze
 systemd-analyze blame | head -20
-````
+```
 
 ### 1.4 Privilege and Audio Configuration
 
@@ -105,22 +105,22 @@ without requiring a password, update the sudoers configuration.
 
 Edit the sudoers file using `visudo`:
 
-````
+```
 sudo visudo
-````
+```
 
 By default, `visudo` uses `nano`.
 To use `vim` for this session:
 
-````
+```
 sudo EDITOR=vim visudo
-````
+```
 
 Add the following line at the end of the file:
 
-````
+```
 pi ALL=(ALL) NOPASSWD: /usr/sbin/shutdown, /usr/sbin/reboot
-````
+```
 
 Make sure the command paths are correct on your system.
 
@@ -129,22 +129,22 @@ Make sure the command paths are correct on your system.
 
 To improve audio stability and reduce latency, add the user to the `audio` group:
 
-````
+```
 sudo usermod -aG audio $USER
-````
+```
 
 Then edit:
 
-````
+```
 sudo nano /etc/security/limits.conf
-````
+```
 
 Add the following lines:
 
-````
+```
 @audio   -  rtprio     95
 @audio   -  memlock    unlimited
-````
+```
 
 These settings allow higher thread priority and prevent memory swapping
 for audio processes.
@@ -156,15 +156,15 @@ including Raspberry Pi OS.
 
 You can verify it with:
 
-````
+```
 getent group audio
-````
+```
 
 Example output:
 
-````
+```
 audio:x:29:
-````
+```
 
 A logout or reboot is required for group membership changes to take effect.
 
