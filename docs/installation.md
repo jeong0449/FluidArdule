@@ -31,7 +31,7 @@ sudo raspi-config
 ```
 
 Recommended:
-- Enable SPI
+- Interface Options → SPI → Enable
 - Enable Serial (enable login shell) if you want to use UART as a console interface, for example via PuTTY.
 - Set locale/timezone
 - Expand filesystem
@@ -197,10 +197,13 @@ Edit:
 sudo nano /boot/firmware/config.txt
 ```
 
-Add:
+Add the following line, or uncomment it if it already exists:
 
 ```plaintext
-dtoverlay=ili9486,spi0-0,rotate=180,speed=32000000
+dtparam=spi=on
+dtoverlay=vc4-fkms-v3d
+max_framebuffers=2
+dtoverlay=piscreen,spi0-0,rotate=90,speed=32000000,fps=30
 ```
 
 Reboot:
@@ -212,6 +215,7 @@ sudo reboot
 Verify framebuffer:
 
 ```bash
+ls /dev/spidev*
 ls /dev/fb*
 ```
 
