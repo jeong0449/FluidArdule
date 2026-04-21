@@ -42,6 +42,14 @@ Reboot:
 sudo reboot
 ```
 
+Install the required packages:
+
+````bash
+sudo apt update
+sudo apt upgrade
+sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi rsyslog
+````
+
 ---
 
 ### 1.3 Network Configuration (without NetworkManager)
