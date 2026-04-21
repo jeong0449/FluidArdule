@@ -90,7 +90,7 @@ Use the following commands to identify services that slow down the boot process:
 ```bash
 systemd-analyze
 systemd-analyze blame | head -20
-````bash
+````
 
 ---
 
