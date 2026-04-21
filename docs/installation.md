@@ -92,6 +92,8 @@ systemd-analyze
 systemd-analyze blame | head -20
 ```
 
+---
+
 ### 1.4 Privilege and Audio Configuration
 
 This section configures system permissions required for safe shutdown/reboot
@@ -124,6 +126,7 @@ pi ALL=(ALL) NOPASSWD: /usr/sbin/shutdown, /usr/sbin/reboot
 
 Make sure the command paths are correct on your system.
 
+---
 
 #### Configure audio group and real-time priority
 
@@ -148,6 +151,8 @@ Add the following lines:
 
 These settings allow higher thread priority and prevent memory swapping
 for audio processes.
+
+---
 
 #### Verify audio group
 
