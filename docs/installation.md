@@ -47,7 +47,7 @@ Install the required packages:
 ````bash
 sudo apt update
 sudo apt upgrade
-sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi rsyslog
+sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi rsyslog dhcdcd5
 ````
 
 ---
@@ -63,7 +63,10 @@ Instead, it uses:
 Edit:
 
 ```bash
+sudo systemctl stop NetworkManager.service
+sudo systemctl disable NetworkManager.service
 sudo nano /etc/wpa_supplicant/wpa_supplicant.conf
+sudo apt purge cloud-init -y
 ```
 
 Example:
@@ -81,6 +84,13 @@ Apply:
 ```bash
 sudo wpa_cli -i wlan0 reconfigure
 ```
+
+Use the following commands to identify services that slow down the boot process:
+
+```bash
+systemd-analyze
+systemd-analyze blame | head -20
+````bash
 
 ---
 
