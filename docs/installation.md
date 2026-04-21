@@ -31,6 +31,8 @@ sudo raspi-config
 ```
 
 Recommended:
+- Systems Option → Boot / Auto Login → Select 'Console'
+- Systems Option → Interface Options → SSH Enable
 - Interface Options → SPI → Enable
 - Enable Serial (enable login shell) if you want to use UART as a console interface, for example via PuTTY.
 - Set locale/timezone
@@ -91,6 +93,21 @@ Use the following commands to identify services that slow down the boot process:
 systemd-analyze
 systemd-analyze blame | head -20
 ```
+
+Reduce boot time by disabling unnecessary systemd services:
+
+````bash
+sudo systemctl disable bluetooth
+sudo systemctl disable avahi-daemon
+sudo systemctl disable triggerhappy
+sudo systemctl disable hciuart
+# Desktop version only:
+sudo systemctl set-default multi-user.target
+sudo systemctl disable lightdm
+````
+> Note: Some services may not be installed on your system.
+
+Setting `gpu_mem=16` and `hdmi_force_hotplug=1` in `/boot/firmware/config.txt` can slightly reduce system overhead by minimizing GPU memory allocation and disabling unnecessary HDMI detection.
 
 ---
 
@@ -227,6 +244,13 @@ sudo fbi -T 1 -d /dev/fb1 -a FluidArdule.png
 sudo dd if=/dev/zero of=/dev/fb1
 ```
 
+To completely disable output, add the following settings to /boot/firmware/config.txt:
+
+````
+hdmi_ignore_hotplug=1
+disable_splash=1
+boot_delay=0
+````
 ---
 
 ### 2.2 I2S DAC Setup
@@ -321,11 +345,201 @@ aplay /usr/share/sounds/alsa/Front_Center.wav
 
 ### 3.1 Audio Playback Software
 
+Install packages required to play common audio formats such as MP3, OGG, and WMA.
+
+```bash
+sudo apt update
+sudo apt install mpv vorbis-tools mpg123
+```
+
+- `mpv` — versatile media player (supports MP3, OGG, WMA, and more)  
+- `vorbis-tools` — provides `ogg123` for lightweight OGG playback  
+- `mpg123` — lightweight MP3 player  
+
+---
+
+The media playback feature of [`launch_fluidardule.py`](../scripts/launch_fluidardule.py) scans `/home/pi/media`.  
+Store audio files in this directory.
+
+USB flash drives can be automatically mounted to `/home/pi/media/usb`.  
+See the separate documentation for setup instructions.
+
+#### Test audio playback
+
+```bash
+mpv your_file.mp3
+mpv your_file.ogg
+mpv your_file.wma
+```
+
+---
+
+#### Optional: lightweight players
+
+```bash
+ogg123 your_file.ogg
+mpg123 your_file.mp3
+```
+
+These tools are useful for quick testing or low-overhead playback.
+
+---
+
 ### 3.2 FluidSynth and MIDI Test
+
+### 3.2 FluidSynth and MIDI Test
+
+This section verifies that FluidSynth is working correctly with the I2S DAC configured as the default ALSA device.
+
+---
+
+#### Run FluidSynth (using default audio device)
+
+```bash
+fluidsynth -i ~/sf2/your_soundfont.sf2
+```
+
+- `-i` — start without interactive shell (runs in background-friendly mode)
+- Uses the default ALSA device defined in `/etc/asound.conf`
+
+If configured correctly, audio output should be routed to the I2S DAC.
+
+---
+
+#### Test with a MIDI file
+
+In another terminal:
+
+```bash
+aplaymidi -l
+```
+
+Example output:
+
+```text
+Port    Client name                      Port name
+128:0   FLUID Synth                      Synth input port (128:0)
+```
+
+Then play a MIDI file:
+
+```bash
+aplaymidi -p 128:0 your_file.mid
+```
+
+You should hear audio through the DAC.
+
+---
+
+#### Test with a MIDI keyboard
+
+List available MIDI input devices:
+
+```bash
+aconnect -l
+```
+
+Example output:
+
+```text
+client 20: 'USB MIDI Keyboard' [type=kernel,card=1]
+    0 'USB MIDI Keyboard MIDI 1'
+client 128: 'FLUID Synth' [type=user]
+    0 'Synth input port (128:0)'
+```
+
+Connect the keyboard to FluidSynth:
+
+```bash
+aconnect 20:0 128:0
+```
+
+Play the keyboard — sound should be produced immediately.
+
+---
+
+#### Notes
+
+> [!NOTE]
+> The client and port numbers (e.g., `20:0`, `128:0`) may vary depending on your system.
+
+> [!TIP]
+> Use `aconnect -x` to disconnect all MIDI connections if needed.
+
+---
 
 ### 3.3 Directory Structure
 
-### 3.4 Build MIDI Bridge
+The Fluid Ardule system uses a simple directory layout under `/home/pi`:
+
+- `/home/pi/sf2` — stores SoundFont (`.sf2`) files used by FluidSynth
+- `/home/pi/scripts` — contains main scripts and supporting Python programs
+
+Ensure these directories exist:
+
+```bash
+mkdir -p ~/sf2
+mkdir -p ~/scripts
+```
+
+Place your SoundFont files in `~/sf2` and your control or launcher scripts in `~/scripts`.
+
+---
+
+### 3.4 Build and Pre-test MIDI Bridge
+
+Before relying on the compiled bridge in the main Fluid Ardule workflow, verify that UNO-2 is correctly sending MIDI data over USB serial.  
+The required build tools must be installed to compile the MIDI bridge.
+
+Build the C bridge binary:
+
+```bash
+sudo apt update
+sudo apt install build-essential
+cd ~/scripts
+gcc -o uno_midi_bridge_sp uno_midi_bridge.c
+```
+
+---
+
+#### Pre-test with Python diagnostic script
+
+For a quick pre-test, use the Python diagnostic script `uno_midi_serial_dump.py`:
+
+```bash
+cd ~/scripts
+python3 uno_midi_serial_dump.py
+```
+
+This script prints incoming serial data from UNO-2 in a human-readable form, allowing you to confirm that MIDI messages are being received correctly.
+
+After starting the script, connect a MIDI source to UNO-2 and play a few notes. If communication is working correctly, MIDI-related messages should appear in the terminal.
+
+---
+
+#### What to check
+
+- UNO-2 is powered and running  
+- The correct serial device is detected  
+- MIDI input is reaching the Raspberry Pi over USB serial  
+
+---
+
+#### Run the bridge
+
+Once serial MIDI data is confirmed, run the bridge:
+
+```bash
+cd ~/scripts
+./uno_midi_bridge_sp
+```
+
+This creates a virtual MIDI port that can be connected to FluidSynth using `aconnect`.  
+When UNO-2 is selected as the MIDI input device, the bridge binary is started automatically by `launch_fluidardule.py`.
+
+> [!NOTE]
+> The exact build process may vary depending on your implementation of the MIDI bridge.
+
 
 ---
 
