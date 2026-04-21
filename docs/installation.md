@@ -179,17 +179,11 @@ A logout or reboot is required for group membership changes to take effect.
 
 ## 2. Hardware Interface Setup
 
-### 2.1 SPI TFT (ILI9486) Setup (without LCD-show)
+### 2.1 SPI TFT Display (ILI9486) Setup (without LCD-show)
 
 Vendor scripts like LCD-show are intentionally avoided because they overwrite system configurations and can break updates.
 
 Instead, use standard device tree overlays.
-
-Enable SPI:
-
-```bash
-sudo raspi-config
-```
 
 Edit:
 
@@ -217,6 +211,10 @@ Verify framebuffer:
 ```bash
 ls /dev/spidev*
 ls /dev/fb*
+
+# Expected output:
+# /dev/fb0 (HDMI)
+# /dev/fb1 (TFT-LCD)
 ```
 
 Test display (use [FluidArdule.png](/images/FluidArdule.png)):
@@ -224,6 +222,9 @@ Test display (use [FluidArdule.png](/images/FluidArdule.png)):
 ```bash
 sudo apt install fbi
 sudo fbi -T 1 -d /dev/fb1 -a FluidArdule.png
+
+# Manually clear the framebuffer (/dev/fb1)
+sudo dd if=/dev/zero of=/dev/fb1
 ```
 
 ---
