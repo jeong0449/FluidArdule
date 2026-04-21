@@ -13,11 +13,6 @@ Fluid Ardule runs on Raspberry Pi OS. The **32-bit Lite version is strongly reco
 Download Raspberry Pi OS from the official website:
 https://www.raspberrypi.com/software/operating-systems/
 
-Write the OS image to an SD card:
-
-```bash
-sudo dd if=raspios.img of=/dev/sdX bs=4M status=progress
-```
 For Windows users, Raspberry Pi Imager is the recommended tool for installing Raspberry Pi OS:
 https://www.raspberrypi.com/software/
 
