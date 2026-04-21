@@ -317,9 +317,21 @@ aplay /usr/share/sounds/alsa/Front_Center.wav
 
 ---
 
-## 3. System Integration
+## 3. Software Setup
 
-### 3.1 TFT Splash Screen Service
+### 3.1 Audio Playback Software
+
+### 3.2 FluidSynth and MIDI Test
+
+### 3.3 Directory Structure
+
+### 3.4 Build MIDI Bridge
+
+---
+
+## 4. System Integration
+
+### 4.1 TFT Splash Screen Service
 
 Provides immediate visual feedback during boot.
 
@@ -348,7 +360,7 @@ sudo systemctl enable fluidardule-splash
 
 ---
 
-### 3.2 Main Service
+### 4.2 Main Service
 
 Runs the system automatically at boot.
 
@@ -365,9 +377,9 @@ Restart=always
 
 ---
 
-## 4. Logging and Debugging
+## 5. Logging and Debugging
 
-### 4.1 journalctl (Primary Logging System)
+### 5.1 journalctl (Primary Logging System)
 
 Modern Raspberry Pi OS uses **systemd-journald**, not traditional syslog.
 
@@ -385,7 +397,7 @@ journalctl -u fluid_ardule.service -f
 
 ---
 
-### 4.2 Persistent Logs
+### 5.2 Persistent Logs
 
 By default, logs may not survive reboot.
 
@@ -398,7 +410,7 @@ sudo systemctl restart systemd-journald
 
 ---
 
-### 4.3 syslog is NOT Installed by Default
+### 5.3 syslog is NOT Installed by Default
 
 Unlike traditional Linux systems, `/var/log/syslog` may not exist.
 
@@ -421,14 +433,14 @@ will be available.
 
 ---
 
-### 4.4 When to Use Which
+### 5.4 When to Use Which
 
 - `journalctl` → primary, real-time debugging
 - `syslog` → optional, text-based logs
 
 ---
 
-## 5. Verification
+## 6. Verification
 
 - Audio works
 - MIDI works
@@ -436,7 +448,7 @@ will be available.
 
 ---
 
-## 6. Notes
+## 7. Notes
 
 - Always use card name instead of index
 - I2S DAC has no hardware mixer
