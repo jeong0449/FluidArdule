@@ -215,11 +215,11 @@ Verify framebuffer:
 ls /dev/fb*
 ```
 
-Test display:
+Test display (use [FluidArdule.png](/images/FluidArdule.png)):
 
 ```bash
 sudo apt install fbi
-sudo fbi -T 1 -d /dev/fb1 -a test.png
+sudo fbi -T 1 -d /dev/fb1 -a FluidArdule.png
 ```
 
 ---
