@@ -32,7 +32,7 @@ sudo raspi-config
 
 Recommended:
 - Enable SPI
-- Enable Serial (disable login shell)
+- Enable Serial (enable login shell) if you want to use UART as a console interface, for example via PuTTY.
 - Set locale/timezone
 - Expand filesystem
 
