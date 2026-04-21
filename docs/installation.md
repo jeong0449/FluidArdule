@@ -92,6 +92,84 @@ systemd-analyze
 systemd-analyze blame | head -20
 ````
 
+### 1.4 Privilege and Audio Configuration
+
+This section configures system permissions required for safe shutdown/reboot
+and improves audio performance for real-time applications.
+
+
+#### Grant passwordless sudo for shutdown/reboot
+
+To allow the system (e.g., via Arduino input) to perform shutdown or reboot
+without requiring a password, update the sudoers configuration.
+
+Edit the sudoers file using `visudo`:
+
+````
+sudo visudo
+````
+
+By default, `visudo` uses `nano`.
+To use `vim` for this session:
+
+````
+sudo EDITOR=vim visudo
+````
+
+Add the following line at the end of the file:
+
+````
+pi ALL=(ALL) NOPASSWD: /usr/sbin/shutdown, /usr/sbin/reboot
+````
+
+Make sure the command paths are correct on your system.
+
+
+#### Configure audio group and real-time priority
+
+To improve audio stability and reduce latency, add the user to the `audio` group:
+
+````
+sudo usermod -aG audio $USER
+````
+
+Then edit:
+
+````
+sudo nano /etc/security/limits.conf
+````
+
+Add the following lines:
+
+````
+@audio   -  rtprio     95
+@audio   -  memlock    unlimited
+````
+
+These settings allow higher thread priority and prevent memory swapping
+for audio processes.
+
+#### Verify audio group
+
+The `audio` group is typically pre-existing on Debian-based systems,
+including Raspberry Pi OS.
+
+You can verify it with:
+
+````
+getent group audio
+````
+
+Example output:
+
+````
+audio:x:29:
+````
+
+A logout or reboot is required for group membership changes to take effect.
+
+
+
 ---
 
 ## 2. Hardware Interface Setup
