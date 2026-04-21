@@ -1,1 +1,340 @@
-🚧 This document is under construction.
+# Installation Guide
+
+🚧 This document is currently under construction and may contain errors or incomplete instructions.
+
+---
+
+## 1. Base System Setup
+
+### 1.1 OS Installation
+
+Fluid Ardule runs on Raspberry Pi OS. The **32-bit Lite version is strongly recommended** for maximum compatibility and stability with low-level interfaces such as I2S audio, SPI displays, and ALSA/MIDI components.
+
+Download Raspberry Pi OS from the official website:
+https://www.raspberrypi.com/software/operating-systems/
+
+Write the OS image to an SD card:
+
+```bash
+sudo dd if=raspios.img of=/dev/sdX bs=4M status=progress
+```
+For Windows users, Raspberry Pi Imager is the recommended tool for installing Raspberry Pi OS:
+https://www.raspberrypi.com/software/
+
+> Be careful to select the correct device to avoid data loss.
+
+---
+
+### 1.2 Initial Configuration (raspi-config)
+
+After the first boot, configure essential system settings. This ensures required interfaces (SPI, serial) are enabled and the system is properly localized.
+
+```bash
+sudo raspi-config
+```
+
+Recommended:
+- Enable SPI
+- Enable Serial (disable login shell)
+- Set locale/timezone
+- Expand filesystem
+
+Reboot:
+
+```bash
+sudo reboot
+```
+
+---
+
+### 1.3 Network Configuration (without NetworkManager)
+
+This project avoids NetworkManager to keep the system lightweight and predictable.
+
+Instead, it uses:
+- `dhcpcd` (IP management)
+- `wpa_supplicant` (Wi-Fi)
+
+Edit:
+
+```bash
+sudo nano /etc/wpa_supplicant/wpa_supplicant.conf
+```
+
+Example:
+
+```plaintext
+country=KR
+network={
+    ssid="YOUR_SSID"
+    psk="YOUR_PASSWORD"
+}
+```
+
+Apply:
+
+```bash
+sudo wpa_cli -i wlan0 reconfigure
+```
+
+---
+
+## 2. Hardware Interface Setup
+
+### 2.1 SPI TFT (ILI9486) Setup (without LCD-show)
+
+Vendor scripts like LCD-show are intentionally avoided because they overwrite system configurations and can break updates.
+
+Instead, use standard device tree overlays.
+
+Enable SPI:
+
+```bash
+sudo raspi-config
+```
+
+Edit:
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+Add:
+
+```plaintext
+dtoverlay=ili9486,spi0-0,rotate=180,speed=32000000
+```
+
+Reboot:
+
+```bash
+sudo reboot
+```
+
+Verify framebuffer:
+
+```bash
+ls /dev/fb*
+```
+
+Test display:
+
+```bash
+sudo apt install fbi
+sudo fbi -T 1 -d /dev/fb1 -a test.png
+```
+
+---
+
+### 2.2 I2S DAC Setup
+
+Enable high-quality audio output via GPIO-based I2S.
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+```plaintext
+dtparam=audio=off
+dtoverlay=hifiberry-dac
+```
+
+Reboot:
+
+```bash
+sudo reboot
+```
+
+---
+
+### 2.3 Verify Audio Device
+
+Check that the DAC is detected:
+
+```bash
+aplay -l
+```
+
+---
+
+### 2.4 Configure ALSA Default Device
+
+Fix the default audio output to prevent device index changes.
+
+```bash
+sudo nano /etc/asound.conf
+```
+
+```plaintext
+pcm.!default {
+    type plug
+    slave.pcm "hw:sndrpihifiberry"
+}
+
+ctl.!default {
+    type hw
+    card sndrpihifiberry
+}
+```
+
+---
+
+### 2.5 Add Software Volume Control (softvol)
+
+Most I2S DAC modules have no hardware volume control.
+
+```plaintext
+pcm.softvol {
+    type softvol
+    slave.pcm "hw:sndrpihifiberry"
+    control {
+        name "Master"
+        card sndrpihifiberry
+    }
+}
+
+pcm.!default {
+    type plug
+    slave.pcm "softvol"
+}
+
+ctl.!default {
+    type hw
+    card sndrpihifiberry
+}
+```
+
+---
+
+### 2.6 Test Audio Output
+
+```bash
+aplay /usr/share/sounds/alsa/Front_Center.wav
+```
+
+---
+
+## 3. System Integration
+
+### 3.1 TFT Splash Screen Service
+
+Provides immediate visual feedback during boot.
+
+```bash
+sudo nano /etc/systemd/system/fluidardule-splash.service
+```
+
+```ini
+[Unit]
+Description=Fluid Ardule TFT Splash Screen
+After=multi-user.target
+
+[Service]
+User=pi
+ExecStart=/usr/bin/fbi -T 1 -d /dev/fb1 -a /home/pi/images/splash.png
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+
+```bash
+sudo systemctl enable fluidardule-splash
+```
+
+---
+
+### 3.2 Main Service
+
+Runs the system automatically at boot.
+
+```bash
+sudo nano /etc/systemd/system/fluid_ardule.service
+```
+
+```ini
+[Service]
+User=pi
+ExecStart=/usr/bin/python3 /home/pi/scripts/launch_fluidardule.py
+Restart=always
+```
+
+---
+
+## 4. Logging and Debugging
+
+### 4.1 journalctl (Primary Logging System)
+
+Modern Raspberry Pi OS uses **systemd-journald**, not traditional syslog.
+
+View logs:
+
+```bash
+journalctl -u fluid_ardule.service
+```
+
+Real-time:
+
+```bash
+journalctl -u fluid_ardule.service -f
+```
+
+---
+
+### 4.2 Persistent Logs
+
+By default, logs may not survive reboot.
+
+Enable persistence:
+
+```bash
+sudo mkdir -p /var/log/journal
+sudo systemctl restart systemd-journald
+```
+
+---
+
+### 4.3 syslog is NOT Installed by Default
+
+Unlike traditional Linux systems, `/var/log/syslog` may not exist.
+
+This can be confusing if you expect classic log files.
+
+To restore traditional logging:
+
+```bash
+sudo apt update
+sudo apt install rsyslog
+```
+
+After installation:
+
+```bash
+/var/log/syslog
+```
+
+will be available.
+
+---
+
+### 4.4 When to Use Which
+
+- `journalctl` → primary, real-time debugging
+- `syslog` → optional, text-based logs
+
+---
+
+## 5. Verification
+
+- Audio works
+- MIDI works
+- UI works
+
+---
+
+## 6. Notes
+
+- Always use card name instead of index
+- I2S DAC has no hardware mixer
+- journald is the default logging system
