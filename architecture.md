@@ -28,7 +28,7 @@ flowchart LR
 ````
 This diagram illustrates the data flow within the FluidArdule system.
 
-MIDI performance data enters either through UNO-2 (USB/DIN routing) or directly via USB to the Raspberry Pi, while user control inputs (buttons, encoder, potentiometer) are handled by UNO-1 and forwarded to the Pi.
+MIDI performance data enters directly via USB to the Raspberry Pi, or optionally through UNO-2 (for USB/DIN routing), while user control inputs are handled by UNO-1 and forwarded to the Pi.
 
 The Raspberry Pi acts as the central processing unit, running FluidSynth and managing playback, while also driving the display output.
 
