@@ -197,7 +197,7 @@ Edit:
 sudo nano /boot/firmware/config.txt
 ```
 
-Add the following line, or uncomment it if it already exists:
+Uncomment or add the following lines:
 
 ```plaintext
 dtparam=spi=on
