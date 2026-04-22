@@ -58,7 +58,7 @@ Install the required packages:
 ```bash
 sudo apt update
 sudo apt upgrade
-sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi dhcpdcd
+sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi dhcpcd
 ```
 
 ---
@@ -193,8 +193,6 @@ audio:x:29:
 
 A logout or reboot is required for group membership changes to take effect.
 
-
-
 ---
 
 ## 2. Hardware Interface Setup
@@ -292,6 +290,10 @@ aplay -l
 Fix the default audio output to prevent device index changes.
 
 ```bash
+sudo nano /etc/asound.conf
+```
+
+```plaintext
 pcm.softvol {
     type softvol
     slave.pcm "hw:CARD=sndrpihifiberry,DEV=0"
@@ -485,7 +487,7 @@ cd ~
 git clone https://github.com/jeong0449/FluidArdule.git
 ```
 
-Then move tje required directories into place:
+Then move the required directories into place:
 
 ```bash
 mv FluidArdule/sf2 ~/
