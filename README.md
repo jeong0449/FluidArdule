@@ -28,7 +28,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - **UNO-1**: UI controller (buttons, encoder, potentiometer, LEDs)
 - **UNO-2**: MIDI bridge for devices with 5-pin DIN only (keyboard controllers or external sound modules)
 
-UNO-2 (Uno MIDI Bridge) is maintained as a separate project due to its strong independence.
+[UNO-2](https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host) (Ardule MIDI Bridge) is maintained as a separate project due to its strong independence, and is therefore omitted from the diagram above.
 
 ---
 
