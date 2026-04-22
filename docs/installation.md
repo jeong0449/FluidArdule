@@ -92,7 +92,7 @@ sudo apt purge cloud-init -y
 
 These components (dhcpcd + wpa_supplicant) must be properly configured to enable reliable automatic Wi-Fi connectivity.  
 
-For detailed configuration and troubleshooting, see the [Networking Guide](docs/networking_guide.md).
+For detailed configuration and troubleshooting, see the [Networking Guide](networking_guide.md).
 
 ---
 
