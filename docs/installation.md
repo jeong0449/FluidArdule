@@ -490,8 +490,8 @@ git clone https://github.com/jeong0449/FluidArdule.git
 Then move the required directories into place:
 
 ```bash
-mv FluidArdule/sf2 ~/
-mv FluidArdule/scripts ~/
+mv ~/FluidArdule/sf2 ~/
+mv ~/FluidArdule/scripts ~/
 ```
 
 - `/home/pi/sf2` — resource directory containing:
@@ -562,6 +562,90 @@ When UNO-2 is selected as the MIDI input device, the bridge binary is started au
 
 ---
 
+### 3.5 Pre-Service Configuration
+
+Before enabling the main service, several device-specific settings in [`launch_fluidardule.py`](/scripts/launch_fluidardule.py) must be adjusted:
+
+- `SERIAL_PORT`
+- `SOUNDFONTS`
+- `KNOWN_USB_DACS`
+- `RAW_MIDI_PREFERRED_HINTS`
+
+---
+#### Identify optional USB DAC devices
+
+Connect your USB DAC, then run:
+
+```bash
+aplay -l
+```
+
+Example output:
+
+```text
+**** List of PLAYBACK Hardware Devices ****
+card 0: sndrpihifiberry [snd_rpi_hifiberry_dac], device 0: HifiBerry DAC HiFi pcm5102a-hifi-0 [HifiBerry DAC HiFi pcm5102a-hifi-0]
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+card 1: O22 [Onyx Producer 2-2], device 0: USB Audio [USB Audio]
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+
+```
+
+Use the **card name** (e.g., `O22` or `Onyx Producer 2-2`) when configuring `KNOWN_USB_DACS`.
+
+> Avoid using card index numbers (e.g., `card 1`), as they may change across reboots.
+
+---
+
+#### Identify MIDI devices (raw / ALSA)
+
+Connect your MIDI device, then run:
+
+```bash
+aconnect -l
+```
+
+Example output:
+
+```text
+client 20: 'USB MIDI Keyboard' [type=kernel]
+    0 'USB MIDI Keyboard MIDI 1'
+```
+
+You may also check raw MIDI devices:
+
+```bash
+amidi -l
+```
+
+Example output:
+
+```text
+Dir Device    Name
+IO  hw:1,0,0  MPK Mini Mk II MIDI 1
+```
+---
+
+#### Why this matters
+
+Device indices (e.g., `hw:1,0`) are assigned dynamically by the system and may change depending on:
+
+- USB connection order  
+- Power-on timing  
+- Presence of other devices  
+
+To ensure stable operation, Fluid Ardule uses **name-based matching** instead of fixed indices.
+
+This allows the system to:
+
+- Automatically select the correct USB DAC  
+- Prefer specific MIDI input devices  
+- Remain robust across reboots and hardware changes
+
+---
+
 ## 4. System Integration
 
 ### 4.1 TFT Splash Screen Service
@@ -574,15 +658,17 @@ sudo nano /etc/systemd/system/fluidardule-splash.service
 
 ```ini
 [Unit]
-Description=Fluid Ardule TFT Splash Screen
-After=multi-user.target
-
+Description=TFT splash screen
+DefaultDependencies=no
+After=local-fs.target
+ 
 [Service]
-User=pi
-ExecStart=/usr/bin/fbi -T 1 -d /dev/fb1 -a /home/pi/images/splash.png
-
+Type=oneshot
+ExecStart=/home/pi/scripts/tft-splash.sh
+RemainAfterExit=yes
+ 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sysinit.target
 ```
 
 Enable:
@@ -592,7 +678,6 @@ sudo systemctl enable fluidardule-splash
 ```
 
 ---
-
 ### 4.2 Main Service
 
 Runs the system automatically at boot.
@@ -602,10 +687,26 @@ sudo nano /etc/systemd/system/fluid_ardule.service
 ```
 
 ```ini
+[Unit]
+Description=FluidArdule Main Service
+After=multi-user.target sound.target
+Wants=multi-user.target
+
 [Service]
+Type=simple
 User=pi
+WorkingDirectory=/home/pi/scripts
 ExecStart=/usr/bin/python3 /home/pi/scripts/launch_fluidardule.py
-Restart=always
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ---
