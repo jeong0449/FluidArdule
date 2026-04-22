@@ -1,0 +1,1712 @@
+{
+  "source_file": "FluidR3_GM.sf2",
+  "source_path": "/home/pi/sf2/FluidR3_GM.sf2",
+  "format": "sf2-preset-list",
+  "version": 1,
+  "preset_count": 189,
+  "melodic_preset_count": 158,
+  "drum_preset_count": 31,
+  "presets": [
+    {
+      "name": "Yamaha Grand Piano",
+      "bank": 0,
+      "program": 0,
+      "preset_bag_index": 776,
+      "library": 1,
+      "genre": 0,
+      "morphology": 1607008255
+    },
+    {
+      "name": "Bright Yamaha Grand",
+      "bank": 0,
+      "program": 1,
+      "preset_bag_index": 766,
+      "library": 4212916375,
+      "genre": 4219469975,
+      "morphology": 4199809175
+    },
+    {
+      "name": "Electric Piano",
+      "bank": 0,
+      "program": 2,
+      "preset_bag_index": 844,
+      "library": 3932160,
+      "genre": 65536,
+      "morphology": 0
+    },
+    {
+      "name": "Honky Tonk",
+      "bank": 0,
+      "program": 3,
+      "preset_bag_index": 747,
+      "library": 195297413,
+      "genre": 3539077,
+      "morphology": 604565504
+    },
+    {
+      "name": "Rhodes EP",
+      "bank": 0,
+      "program": 4,
+      "preset_bag_index": 540,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Legend EP 2",
+      "bank": 0,
+      "program": 5,
+      "preset_bag_index": 355,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Harpsichord",
+      "bank": 0,
+      "program": 6,
+      "preset_bag_index": 345,
+      "library": 311759,
+      "genre": 349015,
+      "morphology": 348377
+    },
+    {
+      "name": "Clavinet",
+      "bank": 0,
+      "program": 7,
+      "preset_bag_index": 886,
+      "library": 577241088,
+      "genre": 553320449,
+      "morphology": 575406081
+    },
+    {
+      "name": "Celesta",
+      "bank": 0,
+      "program": 8,
+      "preset_bag_index": 909,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Glockenspiel",
+      "bank": 0,
+      "program": 9,
+      "preset_bag_index": 1003,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Music Box",
+      "bank": 0,
+      "program": 10,
+      "preset_bag_index": 855,
+      "library": 4078567428,
+      "genre": 4181721092,
+      "morphology": 2890137604
+    },
+    {
+      "name": "Vibraphone",
+      "bank": 0,
+      "program": 11,
+      "preset_bag_index": 789,
+      "library": 7602309,
+      "genre": 3539076,
+      "morphology": 32043008
+    },
+    {
+      "name": "Marimba",
+      "bank": 0,
+      "program": 12,
+      "preset_bag_index": 899,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Xylophone",
+      "bank": 0,
+      "program": 13,
+      "preset_bag_index": 560,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Tubular Bells",
+      "bank": 0,
+      "program": 14,
+      "preset_bag_index": 1021,
+      "library": 11333632,
+      "genre": 3539077,
+      "morphology": 7864321
+    },
+    {
+      "name": "Dulcimer",
+      "bank": 0,
+      "program": 15,
+      "preset_bag_index": 613,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "DrawbarOrgan",
+      "bank": 0,
+      "program": 16,
+      "preset_bag_index": 736,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Percussive Organ",
+      "bank": 0,
+      "program": 17,
+      "preset_bag_index": 633,
+      "library": 32512,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Rock Organ",
+      "bank": 0,
+      "program": 18,
+      "preset_bag_index": 623,
+      "library": 2898002052,
+      "genre": 1439694980,
+      "morphology": 1446248585
+    },
+    {
+      "name": "Church Organ",
+      "bank": 0,
+      "program": 19,
+      "preset_bag_index": 663,
+      "library": 786566,
+      "genre": 2130706432,
+      "morphology": 1863084129
+    },
+    {
+      "name": "Reed Organ",
+      "bank": 0,
+      "program": 20,
+      "preset_bag_index": 202,
+      "library": 2687108,
+      "genre": 725876833,
+      "morphology": 1179780
+    },
+    {
+      "name": "Accordian",
+      "bank": 0,
+      "program": 21,
+      "preset_bag_index": 141,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Harmonica",
+      "bank": 0,
+      "program": 22,
+      "preset_bag_index": 13,
+      "library": 2687110,
+      "genre": 1447297188,
+      "morphology": 1179782
+    },
+    {
+      "name": "Bandoneon",
+      "bank": 0,
+      "program": 23,
+      "preset_bag_index": 950,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Nylon String Guitar",
+      "bank": 0,
+      "program": 24,
+      "preset_bag_index": 603,
+      "library": 443084800,
+      "genre": 3801227,
+      "morphology": 439615552
+    },
+    {
+      "name": "Steel String Guitar",
+      "bank": 0,
+      "program": 25,
+      "preset_bag_index": 592,
+      "library": 3539076,
+      "genre": 536870913,
+      "morphology": 1179780
+    },
+    {
+      "name": "Jazz Guitar",
+      "bank": 0,
+      "program": 26,
+      "preset_bag_index": 800,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Clean Guitar",
+      "bank": 0,
+      "program": 27,
+      "preset_bag_index": 366,
+      "library": 0,
+      "genre": 0,
+      "morphology": 72876032
+    },
+    {
+      "name": "Palm Muted Guitar",
+      "bank": 0,
+      "program": 28,
+      "preset_bag_index": 939,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Overdrive Guitar",
+      "bank": 0,
+      "program": 29,
+      "preset_bag_index": 334,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Distortion Guitar",
+      "bank": 0,
+      "program": 30,
+      "preset_bag_index": 324,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Guitar Harmonics",
+      "bank": 0,
+      "program": 31,
+      "preset_bag_index": 929,
+      "library": 4207149056,
+      "genre": 151,
+      "morphology": 0
+    },
+    {
+      "name": "Acoustic Bass",
+      "bank": 0,
+      "program": 32,
+      "preset_bag_index": 865,
+      "library": 0,
+      "genre": 4294967295,
+      "morphology": 6619136
+    },
+    {
+      "name": "Fingered Bass",
+      "bank": 0,
+      "program": 33,
+      "preset_bag_index": 591,
+      "library": 3432816640,
+      "genre": 786568,
+      "morphology": 4246732932
+    },
+    {
+      "name": "Picked Bass",
+      "bank": 0,
+      "program": 34,
+      "preset_bag_index": 590,
+      "library": 151,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Fretless Bass",
+      "bank": 0,
+      "program": 35,
+      "preset_bag_index": 953,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Slap Bass",
+      "bank": 0,
+      "program": 36,
+      "preset_bag_index": 14,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Pop Bass",
+      "bank": 0,
+      "program": 37,
+      "preset_bag_index": 18,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Bass 1",
+      "bank": 0,
+      "program": 38,
+      "preset_bag_index": 344,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Bass 2",
+      "bank": 0,
+      "program": 39,
+      "preset_bag_index": 958,
+      "library": 0,
+      "genre": 4159176704,
+      "morphology": 1934950551
+    },
+    {
+      "name": "Violin",
+      "bank": 0,
+      "program": 40,
+      "preset_bag_index": 172,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Viola",
+      "bank": 0,
+      "program": 41,
+      "preset_bag_index": 162,
+      "library": 151,
+      "genre": 0,
+      "morphology": 20185088
+    },
+    {
+      "name": "Cello",
+      "bank": 0,
+      "program": 42,
+      "preset_bag_index": 152,
+      "library": 1165492357,
+      "genre": 1172045957,
+      "morphology": 1113063557
+    },
+    {
+      "name": "Contrabass",
+      "bank": 0,
+      "program": 43,
+      "preset_bag_index": 810,
+      "library": 133,
+      "genre": 0,
+      "morphology": 13369344
+    },
+    {
+      "name": "Tremolo",
+      "bank": 0,
+      "program": 44,
+      "preset_bag_index": 226,
+      "library": 720109651,
+      "genre": 1179781,
+      "morphology": 61440
+    },
+    {
+      "name": "Pizzicato Section",
+      "bank": 0,
+      "program": 45,
+      "preset_bag_index": 142,
+      "library": 2687108,
+      "genre": 1779695779,
+      "morphology": 1179780
+    },
+    {
+      "name": "Harp",
+      "bank": 0,
+      "program": 46,
+      "preset_bag_index": 1044,
+      "library": 151,
+      "genre": 0,
+      "morphology": 4168613888
+    },
+    {
+      "name": "Timpani",
+      "bank": 0,
+      "program": 47,
+      "preset_bag_index": 725,
+      "library": 4066115584,
+      "genre": 1826816002,
+      "morphology": 4065787906
+    },
+    {
+      "name": "Strings",
+      "bank": 0,
+      "program": 48,
+      "preset_bag_index": 216,
+      "library": 34275460,
+      "genre": 1364066304,
+      "morphology": 1159757568
+    },
+    {
+      "name": "Slow Strings",
+      "bank": 0,
+      "program": 49,
+      "preset_bag_index": 206,
+      "library": 777519237,
+      "genre": 770965636,
+      "morphology": 734003332
+    },
+    {
+      "name": "Synth Strings 1",
+      "bank": 0,
+      "program": 50,
+      "preset_bag_index": 822,
+      "library": 1122500746,
+      "genre": 138,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Strings 2",
+      "bank": 0,
+      "program": 51,
+      "preset_bag_index": 821,
+      "library": 61440,
+      "genre": 0,
+      "morphology": 1161560064
+    },
+    {
+      "name": "Ahh Choir",
+      "bank": 0,
+      "program": 52,
+      "preset_bag_index": 833,
+      "library": 1731522560,
+      "genre": 2883716,
+      "morphology": 0
+    },
+    {
+      "name": "Ohh Voices",
+      "bank": 0,
+      "program": 53,
+      "preset_bag_index": 550,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Voice",
+      "bank": 0,
+      "program": 54,
+      "preset_bag_index": 991,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Orchestra Hit",
+      "bank": 0,
+      "program": 55,
+      "preset_bag_index": 1032,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Trumpet",
+      "bank": 0,
+      "program": 56,
+      "preset_bag_index": 386,
+      "library": 4065128448,
+      "genre": 2687109,
+      "morphology": 4061659184
+    },
+    {
+      "name": "Trombone",
+      "bank": 0,
+      "program": 57,
+      "preset_bag_index": 643,
+      "library": 2293911,
+      "genre": 858980352,
+      "morphology": 192184064
+    },
+    {
+      "name": "Tuba",
+      "bank": 0,
+      "program": 58,
+      "preset_bag_index": 981,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Muted Trumpet",
+      "bank": 0,
+      "program": 59,
+      "preset_bag_index": 376,
+      "library": 198377478,
+      "genre": 214892550,
+      "morphology": 2890137606
+    },
+    {
+      "name": "French Horns",
+      "bank": 0,
+      "program": 60,
+      "preset_bag_index": 653,
+      "library": 133,
+      "genre": 0,
+      "morphology": 2336227328
+    },
+    {
+      "name": "Brass Section",
+      "bank": 0,
+      "program": 61,
+      "preset_bag_index": 182,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Brass 1",
+      "bank": 0,
+      "program": 62,
+      "preset_bag_index": 239,
+      "library": 2490368,
+      "genre": 1372125646,
+      "morphology": 1179780
+    },
+    {
+      "name": "Synth Brass 2",
+      "bank": 0,
+      "program": 63,
+      "preset_bag_index": 238,
+      "library": 61440,
+      "genre": 0,
+      "morphology": 1713897472
+    },
+    {
+      "name": "Soprano Sax",
+      "bank": 0,
+      "program": 64,
+      "preset_bag_index": 90,
+      "library": 33,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Alto Sax",
+      "bank": 0,
+      "program": 65,
+      "preset_bag_index": 1,
+      "library": 181460,
+      "genre": 200916,
+      "morphology": 193495
+    },
+    {
+      "name": "Tenor Sax",
+      "bank": 0,
+      "program": 66,
+      "preset_bag_index": 80,
+      "library": 134,
+      "genre": 0,
+      "morphology": 13631488
+    },
+    {
+      "name": "Baritone Sax",
+      "bank": 0,
+      "program": 67,
+      "preset_bag_index": 70,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Oboe",
+      "bank": 0,
+      "program": 68,
+      "preset_bag_index": 971,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "English Horn",
+      "bank": 0,
+      "program": 69,
+      "preset_bag_index": 961,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Bassoon",
+      "bank": 0,
+      "program": 70,
+      "preset_bag_index": 131,
+      "library": 24903813,
+      "genre": 875692032,
+      "morphology": 8421120
+    },
+    {
+      "name": "Clarinet",
+      "bank": 0,
+      "program": 71,
+      "preset_bag_index": 875,
+      "library": 4285530112,
+      "genre": 151,
+      "morphology": 0
+    },
+    {
+      "name": "Piccolo",
+      "bank": 0,
+      "program": 72,
+      "preset_bag_index": 121,
+      "library": 25428119,
+      "genre": 4166779014,
+      "morphology": 4197974167
+    },
+    {
+      "name": "Flute",
+      "bank": 0,
+      "program": 73,
+      "preset_bag_index": 111,
+      "library": 18612357,
+      "genre": 4272685198,
+      "morphology": 441712781
+    },
+    {
+      "name": "Recorder",
+      "bank": 0,
+      "program": 74,
+      "preset_bag_index": 919,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Pan Flute",
+      "bank": 0,
+      "program": 75,
+      "preset_bag_index": 101,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Bottle Chiff",
+      "bank": 0,
+      "program": 76,
+      "preset_bag_index": 1015,
+      "library": 4231589888,
+      "genre": 3539095,
+      "morphology": 1
+    },
+    {
+      "name": "Shakuhachi",
+      "bank": 0,
+      "program": 77,
+      "preset_bag_index": 201,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Whistle",
+      "bank": 0,
+      "program": 78,
+      "preset_bag_index": 949,
+      "library": 2661609472,
+      "genre": 3276944,
+      "morphology": 3686793216
+    },
+    {
+      "name": "Ocarina",
+      "bank": 0,
+      "program": 79,
+      "preset_bag_index": 955,
+      "library": 2189991936,
+      "genre": 2286944401,
+      "morphology": 925565073
+    },
+    {
+      "name": "Square Lead",
+      "bank": 0,
+      "program": 80,
+      "preset_bag_index": 1038,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Saw Wave",
+      "bank": 0,
+      "program": 81,
+      "preset_bag_index": 1041,
+      "library": 1243348993,
+      "genre": 1179787,
+      "morphology": 340848640
+    },
+    {
+      "name": "Calliope Lead",
+      "bank": 0,
+      "program": 82,
+      "preset_bag_index": 580,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Chiffer Lead",
+      "bank": 0,
+      "program": 83,
+      "preset_bag_index": 570,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Charang",
+      "bank": 0,
+      "program": 84,
+      "preset_bag_index": 1028,
+      "library": 455999488,
+      "genre": 2890137600,
+      "morphology": 3932160
+    },
+    {
+      "name": "Solo Vox",
+      "bank": 0,
+      "program": 85,
+      "preset_bag_index": 735,
+      "library": 1830289549,
+      "genre": 1810628749,
+      "morphology": 141
+    },
+    {
+      "name": "Fifth Sawtooth Wave",
+      "bank": 0,
+      "program": 86,
+      "preset_bag_index": 1034,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Bass & Lead",
+      "bank": 0,
+      "program": 87,
+      "preset_bag_index": 1035,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Fantasia",
+      "bank": 0,
+      "program": 88,
+      "preset_bag_index": 1023,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Warm Pad",
+      "bank": 0,
+      "program": 89,
+      "preset_bag_index": 820,
+      "library": 0,
+      "genre": 0,
+      "morphology": 3440181248
+    },
+    {
+      "name": "Polysynth",
+      "bank": 0,
+      "program": 90,
+      "preset_bag_index": 365,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Space Voice",
+      "bank": 0,
+      "program": 91,
+      "preset_bag_index": 1002,
+      "library": 131204,
+      "genre": 382730240,
+      "morphology": 1179780
+    },
+    {
+      "name": "Bowed Glass",
+      "bank": 0,
+      "program": 92,
+      "preset_bag_index": 1027,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Metal Pad",
+      "bank": 0,
+      "program": 93,
+      "preset_bag_index": 240,
+      "library": 16908288,
+      "genre": 8,
+      "morphology": 3330
+    },
+    {
+      "name": "Halo Pad",
+      "bank": 0,
+      "program": 94,
+      "preset_bag_index": 1022,
+      "library": 2130706432,
+      "genre": 817135360,
+      "morphology": 139
+    },
+    {
+      "name": "Sweep Pad",
+      "bank": 0,
+      "program": 95,
+      "preset_bag_index": 1016,
+      "library": 60616704,
+      "genre": 2687110,
+      "morphology": 57147410
+    },
+    {
+      "name": "Ice Rain",
+      "bank": 0,
+      "program": 96,
+      "preset_bag_index": 1014,
+      "library": 1966212,
+      "genre": 61440,
+      "morphology": 16908288
+    },
+    {
+      "name": "Soundtrack",
+      "bank": 0,
+      "program": 97,
+      "preset_bag_index": 1018,
+      "library": 789094400,
+      "genre": 237240453,
+      "morphology": 2037579908
+    },
+    {
+      "name": "Crystal",
+      "bank": 0,
+      "program": 98,
+      "preset_bag_index": 898,
+      "library": 3539077,
+      "genre": 1538785281,
+      "morphology": 1179781
+    },
+    {
+      "name": "Atmosphere",
+      "bank": 0,
+      "program": 99,
+      "preset_bag_index": 602,
+      "library": 2987393159,
+      "genre": 2977955975,
+      "morphology": 2904555655
+    },
+    {
+      "name": "Brightness",
+      "bank": 0,
+      "program": 100,
+      "preset_bag_index": 1001,
+      "library": 504358,
+      "genre": 479029,
+      "morphology": 504342
+    },
+    {
+      "name": "Goblin",
+      "bank": 0,
+      "program": 101,
+      "preset_bag_index": 957,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Echo Drops",
+      "bank": 0,
+      "program": 102,
+      "preset_bag_index": 897,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Star Theme",
+      "bank": 0,
+      "program": 103,
+      "preset_bag_index": 746,
+      "library": 134,
+      "genre": 0,
+      "morphology": 55050240
+    },
+    {
+      "name": "Sitar",
+      "bank": 0,
+      "program": 104,
+      "preset_bag_index": 15,
+      "library": 881913856,
+      "genre": 2687108,
+      "morphology": 878444706
+    },
+    {
+      "name": "Banjo",
+      "bank": 0,
+      "program": 105,
+      "preset_bag_index": 1013,
+      "library": 1868955780,
+      "genre": 1551070318,
+      "morphology": 1785618786
+    },
+    {
+      "name": "Shamisen",
+      "bank": 0,
+      "program": 106,
+      "preset_bag_index": 236,
+      "library": 3895783424,
+      "genre": 2687111,
+      "morphology": 3892314191
+    },
+    {
+      "name": "Koto",
+      "bank": 0,
+      "program": 107,
+      "preset_bag_index": 237,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Kalimba",
+      "bank": 0,
+      "program": 108,
+      "preset_bag_index": 1024,
+      "library": 3151757318,
+      "genre": 1179786,
+      "morphology": 3162566656
+    },
+    {
+      "name": "BagPipe",
+      "bank": 0,
+      "program": 109,
+      "preset_bag_index": 203,
+      "library": 4187549696,
+      "genre": 2687108,
+      "morphology": 4184080464
+    },
+    {
+      "name": "Fiddle",
+      "bank": 0,
+      "program": 110,
+      "preset_bag_index": 823,
+      "library": 202637445,
+      "genre": 458227845,
+      "morphology": 408158341
+    },
+    {
+      "name": "Shenai",
+      "bank": 0,
+      "program": 111,
+      "preset_bag_index": 100,
+      "library": 843469614,
+      "genre": 4282646528,
+      "morphology": 1179799
+    },
+    {
+      "name": "Tinker Bell",
+      "bank": 0,
+      "program": 112,
+      "preset_bag_index": 16,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Agogo",
+      "bank": 0,
+      "program": 113,
+      "preset_bag_index": 786,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Steel Drums",
+      "bank": 0,
+      "program": 114,
+      "preset_bag_index": 956,
+      "library": 140,
+      "genre": 0,
+      "morphology": 74973184
+    },
+    {
+      "name": "Woodblock",
+      "bank": 0,
+      "program": 115,
+      "preset_bag_index": 787,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Taiko Drum",
+      "bank": 0,
+      "program": 116,
+      "preset_bag_index": 896,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Melodic Tom",
+      "bank": 0,
+      "program": 117,
+      "preset_bag_index": 959,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Drum",
+      "bank": 0,
+      "program": 118,
+      "preset_bag_index": 960,
+      "library": 1179781,
+      "genre": 1631121408,
+      "morphology": 524421
+    },
+    {
+      "name": "Reverse Cymbal",
+      "bank": 0,
+      "program": 119,
+      "preset_bag_index": 799,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Fret Noise",
+      "bank": 0,
+      "program": 120,
+      "preset_bag_index": 954,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Breath Noise",
+      "bank": 0,
+      "program": 121,
+      "preset_bag_index": 1025,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Sea Shore",
+      "bank": 0,
+      "program": 122,
+      "preset_bag_index": 843,
+      "library": 0,
+      "genre": 4158390272,
+      "morphology": 1179780
+    },
+    {
+      "name": "Bird Tweet",
+      "bank": 0,
+      "program": 123,
+      "preset_bag_index": 885,
+      "library": 4325514,
+      "genre": 61440,
+      "morphology": 1765933056
+    },
+    {
+      "name": "Telephone",
+      "bank": 0,
+      "program": 124,
+      "preset_bag_index": 1026,
+      "library": 3145862,
+      "genre": 4076601444,
+      "morphology": 1179782
+    },
+    {
+      "name": "Helicopter",
+      "bank": 0,
+      "program": 125,
+      "preset_bag_index": 17,
+      "library": 2875256832,
+      "genre": 2818183,
+      "morphology": 2877046587
+    },
+    {
+      "name": "Applause",
+      "bank": 0,
+      "program": 126,
+      "preset_bag_index": 788,
+      "library": 1704074,
+      "genre": 61440,
+      "morphology": 197132288
+    },
+    {
+      "name": "Gun Shot",
+      "bank": 0,
+      "program": 127,
+      "preset_bag_index": 0,
+      "library": 2949259,
+      "genre": 1040449536,
+      "morphology": 1179787
+    },
+    {
+      "name": "Detuned EP 1",
+      "bank": 8,
+      "program": 4,
+      "preset_bag_index": 69,
+      "library": 28261,
+      "genre": 0,
+      "morphology": 4099670016
+    },
+    {
+      "name": "Detuned EP 2",
+      "bank": 8,
+      "program": 5,
+      "preset_bag_index": 68,
+      "library": 632029318,
+      "genre": 638582925,
+      "morphology": 618922125
+    },
+    {
+      "name": "Coupled Harpsichord",
+      "bank": 8,
+      "program": 6,
+      "preset_bag_index": 65,
+      "library": 3284987904,
+      "genre": 3291480208,
+      "morphology": 3271819408
+    },
+    {
+      "name": "Church Bell",
+      "bank": 8,
+      "program": 14,
+      "preset_bag_index": 61,
+      "library": 1179786,
+      "genre": 3907317760,
+      "morphology": 1835146
+    },
+    {
+      "name": "Detuned Organ 1",
+      "bank": 8,
+      "program": 16,
+      "preset_bag_index": 60,
+      "library": 1179786,
+      "genre": 3917803520,
+      "morphology": 3539082
+    },
+    {
+      "name": "Detuned Organ 2",
+      "bank": 8,
+      "program": 17,
+      "preset_bag_index": 58,
+      "library": 4166778880,
+      "genre": 1179782,
+      "morphology": 4218482688
+    },
+    {
+      "name": "Church Organ 2",
+      "bank": 8,
+      "program": 19,
+      "preset_bag_index": 56,
+      "library": 3539078,
+      "genre": 836763649,
+      "morphology": 1179782
+    },
+    {
+      "name": "Italian Accordion",
+      "bank": 8,
+      "program": 21,
+      "preset_bag_index": 54,
+      "library": 44040327,
+      "genre": 2185232519,
+      "morphology": 2178678918
+    },
+    {
+      "name": "Ukulele",
+      "bank": 8,
+      "program": 24,
+      "preset_bag_index": 53,
+      "library": 288096390,
+      "genre": 294649997,
+      "morphology": 274989197
+    },
+    {
+      "name": "12 String Guitar",
+      "bank": 8,
+      "program": 25,
+      "preset_bag_index": 51,
+      "library": 439676928,
+      "genre": 131211,
+      "morphology": 381681664
+    },
+    {
+      "name": "Hawaiian Guitar",
+      "bank": 8,
+      "program": 26,
+      "preset_bag_index": 50,
+      "library": 138,
+      "genre": 0,
+      "morphology": 3592945664
+    },
+    {
+      "name": "Funk Guitar",
+      "bank": 8,
+      "program": 28,
+      "preset_bag_index": 11,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Feedback Guitar",
+      "bank": 8,
+      "program": 30,
+      "preset_bag_index": 48,
+      "library": 0,
+      "genre": 3599761408,
+      "morphology": 3546284170
+    },
+    {
+      "name": "Guitar Feedback",
+      "bank": 8,
+      "program": 31,
+      "preset_bag_index": 47,
+      "library": 4208197783,
+      "genre": 4201644183,
+      "morphology": 151
+    },
+    {
+      "name": "Synth Bass 3",
+      "bank": 8,
+      "program": 38,
+      "preset_bag_index": 45,
+      "library": 445120512,
+      "genre": 446955661,
+      "morphology": 141
+    },
+    {
+      "name": "Synth Bass 4",
+      "bank": 8,
+      "program": 39,
+      "preset_bag_index": 44,
+      "library": 2432,
+      "genre": 0,
+      "morphology": 174850048
+    },
+    {
+      "name": "Slow Violin",
+      "bank": 8,
+      "program": 40,
+      "preset_bag_index": 43,
+      "library": 298622976,
+      "genre": 1835149,
+      "morphology": 243007620
+    },
+    {
+      "name": "Orchestral Pad",
+      "bank": 8,
+      "program": 48,
+      "preset_bag_index": 40,
+      "library": 760742025,
+      "genre": 741081225,
+      "morphology": 747634825
+    },
+    {
+      "name": "Synth Strings 3",
+      "bank": 8,
+      "program": 50,
+      "preset_bag_index": 38,
+      "library": 3539078,
+      "genre": 2950754304,
+      "morphology": 2944139408
+    },
+    {
+      "name": "Brass 2",
+      "bank": 8,
+      "program": 61,
+      "preset_bag_index": 36,
+      "library": 134,
+      "genre": 0,
+      "morphology": 4077125632
+    },
+    {
+      "name": "Synth Brass 3",
+      "bank": 8,
+      "program": 62,
+      "preset_bag_index": 33,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Synth Brass 4",
+      "bank": 8,
+      "program": 63,
+      "preset_bag_index": 30,
+      "library": 3584094208,
+      "genre": 3577479313,
+      "morphology": 3570925713
+    },
+    {
+      "name": "Sine Wave",
+      "bank": 8,
+      "program": 80,
+      "preset_bag_index": 29,
+      "library": 2490506,
+      "genre": 2550984704,
+      "morphology": 2557477008
+    },
+    {
+      "name": "Taisho Koto",
+      "bank": 8,
+      "program": 107,
+      "preset_bag_index": 27,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Castanets",
+      "bank": 8,
+      "program": 115,
+      "preset_bag_index": 26,
+      "library": 138,
+      "genre": 0,
+      "morphology": 1277427712
+    },
+    {
+      "name": "Concert Bass Drum",
+      "bank": 8,
+      "program": 116,
+      "preset_bag_index": 25,
+      "library": 61440,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Melo Tom 2",
+      "bank": 8,
+      "program": 117,
+      "preset_bag_index": 23,
+      "library": 0,
+      "genre": 1082982399,
+      "morphology": 6684806
+    },
+    {
+      "name": "808 Tom",
+      "bank": 8,
+      "program": 118,
+      "preset_bag_index": 22,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Burst Noise",
+      "bank": 9,
+      "program": 125,
+      "preset_bag_index": 20,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Mandolin",
+      "bank": 16,
+      "program": 25,
+      "preset_bag_index": 19,
+      "library": 2394423434,
+      "genre": 2387869834,
+      "morphology": 4167041162
+    },
+    {
+      "name": "Standard",
+      "bank": 128,
+      "program": 0,
+      "preset_bag_index": 716,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 1",
+      "bank": 128,
+      "program": 1,
+      "preset_bag_index": 531,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 2",
+      "bank": 128,
+      "program": 2,
+      "preset_bag_index": 522,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 3",
+      "bank": 128,
+      "program": 3,
+      "preset_bag_index": 513,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 4",
+      "bank": 128,
+      "program": 4,
+      "preset_bag_index": 504,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 5",
+      "bank": 128,
+      "program": 5,
+      "preset_bag_index": 495,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 6",
+      "bank": 128,
+      "program": 6,
+      "preset_bag_index": 486,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Standard 7",
+      "bank": 128,
+      "program": 7,
+      "preset_bag_index": 477,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room",
+      "bank": 128,
+      "program": 8,
+      "preset_bag_index": 423,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 1",
+      "bank": 128,
+      "program": 9,
+      "preset_bag_index": 459,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 2",
+      "bank": 128,
+      "program": 10,
+      "preset_bag_index": 450,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 3",
+      "bank": 128,
+      "program": 11,
+      "preset_bag_index": 441,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 4",
+      "bank": 128,
+      "program": 12,
+      "preset_bag_index": 432,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 5",
+      "bank": 128,
+      "program": 13,
+      "preset_bag_index": 468,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 6",
+      "bank": 128,
+      "program": 14,
+      "preset_bag_index": 414,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Room 7",
+      "bank": 128,
+      "program": 15,
+      "preset_bag_index": 405,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Power",
+      "bank": 128,
+      "program": 16,
+      "preset_bag_index": 707,
+      "library": 4195414016,
+      "genre": 3801224,
+      "morphology": 4191944771
+    },
+    {
+      "name": "Power 1",
+      "bank": 128,
+      "program": 17,
+      "preset_bag_index": 259,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Power 2",
+      "bank": 128,
+      "program": 18,
+      "preset_bag_index": 250,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Power 3",
+      "bank": 128,
+      "program": 19,
+      "preset_bag_index": 241,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Electronic",
+      "bank": 128,
+      "program": 24,
+      "preset_bag_index": 699,
+      "library": 3539077,
+      "genre": 1538785281,
+      "morphology": 1179781
+    },
+    {
+      "name": "TR-808",
+      "bank": 128,
+      "program": 25,
+      "preset_bag_index": 690,
+      "library": 0,
+      "genre": 0,
+      "morphology": 905969664
+    },
+    {
+      "name": "Jazz",
+      "bank": 128,
+      "program": 32,
+      "preset_bag_index": 396,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Jazz 1",
+      "bank": 128,
+      "program": 33,
+      "preset_bag_index": 315,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Jazz 2",
+      "bank": 128,
+      "program": 34,
+      "preset_bag_index": 306,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Jazz 3",
+      "bank": 128,
+      "program": 35,
+      "preset_bag_index": 297,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Jazz 4",
+      "bank": 128,
+      "program": 36,
+      "preset_bag_index": 288,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Brush",
+      "bank": 128,
+      "program": 40,
+      "preset_bag_index": 680,
+      "library": 1297350789,
+      "genre": 1303904389,
+      "morphology": 1310457989
+    },
+    {
+      "name": "Brush 1",
+      "bank": 128,
+      "program": 41,
+      "preset_bag_index": 278,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Brush 2",
+      "bank": 128,
+      "program": 42,
+      "preset_bag_index": 268,
+      "library": 0,
+      "genre": 0,
+      "morphology": 0
+    },
+    {
+      "name": "Orchestra Kit",
+      "bank": 128,
+      "program": 48,
+      "preset_bag_index": 673,
+      "library": 496500886,
+      "genre": 503054486,
+      "morphology": 483393686
+    }
+  ]
+}
