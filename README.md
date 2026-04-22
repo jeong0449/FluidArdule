@@ -94,6 +94,7 @@ Hardware assembly can be inferred from the system overview and components docume
 ## Related Projects
 
 - [Nano Ardule](https://github.com/jeong0449/NanoArdule)
+- [Ardule USB MIDI Host (UNO-2)](https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host)
 - [uno-midi-bridge](https://github.com/jeong0449/uno-midi-bridge)
 
 ---
