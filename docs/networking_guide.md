@@ -1,4 +1,4 @@
-# Networking Guide (v2 - Refined)
+# Networking Guide
 
 This document explains the networking configuration used in Fluid Ardule, focusing on a lightweight and predictable setup.
 
