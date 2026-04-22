@@ -20,6 +20,16 @@ https://www.raspberrypi.com/software/
 
 This guide assumes the default Raspberry Pi OS user account `pi`.
 
+#### Environment (reference system)
+
+This guide was tested on the following system (as of 2026-04-22):
+
+```plaintext
+Raspberry Pi OS (Raspbian) 13 (trixie), 32-bit
+Kernel: Linux 6.12.75+rpt-rpi-v7
+Architecture: armv7l
+```
+
 ---
 
 ### 1.2 Initial Configuration (raspi-config)
@@ -31,12 +41,12 @@ sudo raspi-config
 ```
 
 Recommended:
-- Systems Option → Boot / Auto Login → Select 'Console'
-- Systems Option → Interface Options → SSH Enable
-- Interface Options → SPI → Enable
-- Enable Serial (enable login shell) if you want to use UART as a console interface, for example via PuTTY.
-- Set locale/timezone
-- Expand filesystem
+- Systems Options → Boot → Console
+- Interface Options → SSH → Yes
+- Interface Options → SPI → Yes
+- Interface Options → Serial Port → Yes 
+- Enable Serial (enable login shell) if     you want to use UART as a console interface, for example via PuTTY.
+- Localisation Options → Choose as you want
 
 Reboot:
 
@@ -49,43 +59,12 @@ Install the required packages:
 ```bash
 sudo apt update
 sudo apt upgrade
-sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi dhcdcd5
+sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi dhcpdcd
 ```
 
 ---
 
 ### 1.3 Network Configuration (without NetworkManager)
-
-This project avoids NetworkManager to keep the system lightweight and predictable.
-
-Instead, it uses:
-- `dhcpcd` (IP management)
-- `wpa_supplicant` (Wi-Fi)
-
-Edit:
-
-```bash
-sudo systemctl stop NetworkManager.service
-sudo systemctl disable NetworkManager.service
-sudo nano /etc/wpa_supplicant/wpa_supplicant.conf
-sudo apt purge cloud-init -y
-```
-
-Example:
-
-```plaintext
-country=KR
-network={
-    ssid="YOUR_SSID"
-    psk="YOUR_PASSWORD"
-}
-```
-
-Apply:
-
-```bash
-sudo wpa_cli -i wlan0 reconfigure
-```
 
 Use the following commands to identify services that slow down the boot process:
 
@@ -94,17 +73,42 @@ systemd-analyze
 systemd-analyze blame | head -20
 ```
 
-Reduce boot time by disabling unnecessary systemd services:
+In many cases, you will find that NetworkManager consumes a significant amount of boot time. This project avoids NetworkManager to keep the system lightweight and predictable.
 
-````bash
+Instead, it uses:
+
+- `dhcpcd` (IP management)
+- `wpa_supplicant` (Wi-Fi)
+
+Consider disabling or removing unnecessary services to improve boot performance:
+
+```bash
+sudo systemctl stop NetworkManager.service
+sudo systemctl disable NetworkManager.service
+
+# Optional (for minimal/headless setups):
+sudo apt purge cloud-init -y
+```
+
+These components (dhcpcd + wpa_supplicant) must be properly configured to enable reliable automatic Wi-Fi connectivity.  
+
+For detailed configuration and troubleshooting, see the [Networking Guide](docs/networking_guide.md).
+
+---
+
+You can also review and disable other services to further optimize boot time:
+
+```bash
 sudo systemctl disable bluetooth
 sudo systemctl disable avahi-daemon
 sudo systemctl disable triggerhappy
 sudo systemctl disable hciuart
+
 # Desktop version only:
 sudo systemctl set-default multi-user.target
 sudo systemctl disable lightdm
-````
+```
+
 > Note: Some services may not be installed on your system.
 
 Setting `gpu_mem=16` and `hdmi_force_hotplug=1` in `/boot/firmware/config.txt` can slightly reduce system overhead by minimizing GPU memory allocation and disabling unnecessary HDMI detection.
