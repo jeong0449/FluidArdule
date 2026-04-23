@@ -8,7 +8,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 
 ## What does it do?
 
-- Act as a standalone General MIDI (GM) sound module — connect a keyboard and play instantly (Yoshimi-based real-time synthesis planned)
+- Act as a standalone MIDI sound module with instant playability — connect a keyboard and play immediately (supporting FluidSynth and planned real-time synthesis via Yoshimi)
 - Control parameters via dedicated hardware UI (UNO-1)
 - Accept MIDI input from USB or DIN (DIN I/O via UNO-2 MIDI bridge)
 - Play MIDI files using FluidSynth
