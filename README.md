@@ -80,6 +80,28 @@ See [components.md](docs/components.md) for the parts list.
 
 ---
 
+## Performance Notes
+
+### Real-time Safe UI Rendering
+
+To ensure stable real-time MIDI performance, TFT rendering is designed to minimize interference with audio processing.
+
+- User-triggered updates (buttons, encoder) are rendered immediately
+- Background screen updates are rate-limited (`RENDER_MIN_INTERVAL`)
+
+This prevents frequent framebuffer updates from disrupting FluidSynth timing,
+especially on resource-constrained systems like Raspberry Pi 3.
+
+As a result:
+
+- Audio glitches during live MIDI playback are significantly reduced
+- Both `alsa_raw` and `alsa_seq` modes benefit from improved stability
+- UI remains responsive when user interaction occurs
+
+This approach aligns with dedicated hardware synthesizers, where display updates are deprioritized during active performance.
+
+---
+
 ## Installation / Build
 
 🚧 Work in progress  
