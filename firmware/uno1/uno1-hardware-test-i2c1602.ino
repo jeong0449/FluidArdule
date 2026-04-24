@@ -42,7 +42,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);   // change to 0x3F if needed
 // --------------------------------------------------
 // Measured threshold map from user's board
 // --------------------------------------------------
-const int ADC_THR_LEFT   = 120;
+const int ADC_THR_LEFT   = 180;
 const int ADC_THR_UP     = 280;
 const int ADC_THR_DOWN   = 450;
 const int ADC_THR_RIGHT  = 650;

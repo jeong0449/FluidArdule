@@ -51,11 +51,11 @@ const unsigned long DEBUG_TAG_HOLD_MS = 1200;
 const int           POT_DELTA_MIN = 4;
 
 // ---- A0 thresholds (5.00V reference assumed) ----
-const int TH_LEFT_MAX   = 119;
-const int TH_UP_MAX     = 279;
-const int TH_DOWN_MAX   = 449;
-const int TH_RIGHT_MAX  = 649;
-const int TH_SELECT_MAX = 899;
+const int TH_LEFT_MAX   = 180;
+const int TH_UP_MAX     = 280;
+const int TH_DOWN_MAX   = 450;
+const int TH_RIGHT_MAX  = 650;
+const int TH_SELECT_MAX = 900;
 
 enum KeyCode {
   KEY_NONE = 0,
