@@ -15,7 +15,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
 - Output audio via I2S DAC or USB DAC
 
-> 🚧 Advanced performance features such as preset editing, user preset management, layering, combination patches, keyboard split, and Yoshimi-based performance are not yet implemented and are planned for future development.
+> 🚧 Advanced performance features such as preset editing, user preset management, layering, combination patches, and keyboard split are not yet implemented and are planned for future development.
 
 ---
 
