@@ -320,13 +320,53 @@ This configuration enables software-based volume control using ALSA.
 
 ---
 
-### 2.6 Test Audio Output
+### 2.5 Test Audio Output
 
 ```bash
 aplay /usr/share/sounds/alsa/Front_Center.wav
 ```
 
 ---
+
+### 2.6 Arduino Firmware Setup
+
+Fluid Ardule uses two Arduino Uno boards:
+
+- **UNO-1** — UI controller (buttons, encoder, LCD)
+- **UNO-2** — MIDI router / bridge
+
+Before proceeding, make sure both boards are flashed with the correct firmware.
+
+---
+
+#### UNO-1 (UI controller)
+
+UNO-1 runs the Fluid Ardule UI firmware, which handles:
+
+- Button input (analog keypad)
+- Rotary encoder
+- LCD display
+- Serial communication with Raspberry Pi
+
+Refer to the firmware provided in this repository (or the appropriate UI firmware file you are using).
+
+---
+
+#### UNO-2 (MIDI engine)
+
+UNO-2 firmware is maintained in the NanoArdule repository:
+
+👉 https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host
+
+Upload the firmware (`ardule-usb-midi-host.ino`) to the Arduino Uno used as UNO-2.
+
+This firmware enables:
+- USB MIDI host input
+- DIN MIDI input/output
+- USB-serial MIDI forwarding to Raspberry Pi
+
+---
+
 
 ## 3. Software Setup
 
