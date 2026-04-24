@@ -7,6 +7,31 @@ extract_sf2_presets.py
 Read preset headers (phdr) directly from an SF2 file and export them to JSON.
 No third-party Python package is required.
 
+This version writes an extended v2 "instrument-list" format while preserving
+the legacy per-preset fields used by existing Fluid Ardule scripts:
+
+    name
+    bank
+    program
+    preset_bag_index
+    library
+    genre
+    morphology
+
+New v2 fields are additive:
+
+Top-level:
+    engine
+    source_type
+    format
+    version
+
+Per preset:
+    id
+    category
+    is_drum
+    sf2
+
 Output file:
     <same directory>/<soundfont-stem>.presets.json
 
@@ -31,6 +56,26 @@ class SF2ParseError(Exception):
     pass
 
 
+GM_CATEGORY_NAMES = [
+    "Piano",
+    "Chromatic Percussion",
+    "Organ",
+    "Guitar",
+    "Bass",
+    "Strings",
+    "Ensemble",
+    "Brass",
+    "Reed",
+    "Pipe",
+    "Synth Lead",
+    "Synth Pad",
+    "Synth Effects",
+    "Ethnic",
+    "Percussive",
+    "Sound Effects",
+]
+
+
 def read_exact(f: BinaryIO, size: int) -> bytes:
     data = f.read(size)
     if len(data) != size:
@@ -46,6 +91,27 @@ def decode_c_string(raw: bytes) -> str:
 def skip_pad_byte_if_needed(f: BinaryIO, size: int) -> None:
     if size % 2 == 1:
         f.seek(1, 1)
+
+
+def categorize_preset(bank: int, program: int, name: str = "") -> str:
+    """Return a practical GM-style category for UI grouping."""
+    if int(bank) == 128:
+        return "Drums"
+    try:
+        return GM_CATEGORY_NAMES[max(0, min(15, int(program) // 8))]
+    except Exception:
+        return "Other"
+
+
+def make_instrument_id(source_file: str, bank: int, program: int, name: str) -> str:
+    """
+    Stable-enough ID for Fluid Ardule Performance references.
+
+    The name suffix helps distinguish rare SF2 files that contain duplicate
+    bank/program preset headers.
+    """
+    safe_name = "-".join((name or "Unnamed").strip().split())
+    return f"sf2:{source_file}:{int(bank)}:{int(program)}:{safe_name}"
 
 
 def find_phdr_chunk(sf2_path: Path) -> bytes:
@@ -97,9 +163,10 @@ def find_phdr_chunk(sf2_path: Path) -> bytes:
     raise SF2ParseError("Could not find pdta/phdr chunk in the SF2 file.")
 
 
-def parse_phdr_records(phdr_data: bytes) -> list[dict]:
+def parse_phdr_records(phdr_data: bytes, source_file: str) -> list[dict]:
     """
     phdr record size = 38 bytes
+
     struct sfPresetHeader:
         char     achPresetName[20]
         uint16   wPreset
@@ -125,39 +192,62 @@ def parse_phdr_records(phdr_data: bytes) -> list[dict]:
         )
         name = decode_c_string(name_raw)
 
+        # The last record is the terminal preset header "EOP" and should be ignored.
+        if name == "EOP":
+            continue
+
+        category = categorize_preset(bank, program, name)
+        is_drum = bank == 128
+
+        # Keep legacy fields at the top level for current launch_fluidardule.py compatibility.
         records.append(
             {
+                "id": make_instrument_id(source_file, bank, program, name),
                 "name": name,
                 "bank": bank,
                 "program": program,
+                "category": category,
+                "is_drum": is_drum,
+
+                # Legacy SF2 fields retained.
                 "preset_bag_index": preset_bag_index,
                 "library": library,
                 "genre": genre,
                 "morphology": morphology,
+
+                # Engine-specific detail block for future common instrument-list handling.
+                "sf2": {
+                    "preset_bag_index": preset_bag_index,
+                    "library": library,
+                    "genre": genre,
+                    "morphology": morphology,
+                },
             }
         )
 
-    # The last record is the terminal preset header "EOP" and should be ignored.
-    if records and records[-1]["name"] == "EOP":
-        records.pop()
-
-    # Sort for stable JSON output
+    # Sort for stable JSON output.
     records.sort(key=lambda x: (x["bank"], x["program"], x["name"].lower()))
     return records
 
 
 def build_output(sf2_path: Path, presets: list[dict]) -> dict:
-    melodic_count = sum(1 for p in presets if p["bank"] != 128)
-    drum_count = sum(1 for p in presets if p["bank"] == 128)
+    melodic_count = sum(1 for p in presets if not p.get("is_drum", False))
+    drum_count = sum(1 for p in presets if p.get("is_drum", False))
 
     return {
+        # New common metadata.
+        "engine": "fluidsynth",
+        "source_type": "sf2",
+        "format": "instrument-list",
+        "version": 2,
+
+        # Legacy metadata retained.
         "source_file": sf2_path.name,
         "source_path": str(sf2_path),
-        "format": "sf2-preset-list",
-        "version": 1,
         "preset_count": len(presets),
         "melodic_preset_count": melodic_count,
         "drum_preset_count": drum_count,
+
         "presets": presets,
     }
 
@@ -194,7 +284,7 @@ def main() -> int:
 
     try:
         phdr_data = find_phdr_chunk(sf2_path)
-        presets = parse_phdr_records(phdr_data)
+        presets = parse_phdr_records(phdr_data, sf2_path.name)
         payload = build_output(sf2_path, presets)
     except SF2ParseError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -211,6 +301,7 @@ def main() -> int:
             f.write("\n")
 
     print(f"Wrote {output_path}")
+    print(f"Format: {payload['format']} v{payload['version']}")
     print(f"Preset count: {payload['preset_count']}")
     print(f"Melodic presets: {payload['melodic_preset_count']}")
     print(f"Drum presets: {payload['drum_preset_count']}")

@@ -1,1712 +1,3415 @@
 {
+  "engine": "fluidsynth",
+  "source_type": "sf2",
+  "format": "instrument-list",
+  "version": 2,
   "source_file": "FluidR3_GM.sf2",
   "source_path": "/home/pi/sf2/FluidR3_GM.sf2",
-  "format": "sf2-preset-list",
-  "version": 1,
   "preset_count": 189,
   "melodic_preset_count": 158,
   "drum_preset_count": 31,
   "presets": [
     {
+      "id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
       "name": "Yamaha Grand Piano",
       "bank": 0,
       "program": 0,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 776,
       "library": 1,
       "genre": 0,
-      "morphology": 1607008255
+      "morphology": 1607008255,
+      "sf2": {
+        "preset_bag_index": 776,
+        "library": 1,
+        "genre": 0,
+        "morphology": 1607008255
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:1:Bright-Yamaha-Grand",
       "name": "Bright Yamaha Grand",
       "bank": 0,
       "program": 1,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 766,
       "library": 4212916375,
       "genre": 4219469975,
-      "morphology": 4199809175
+      "morphology": 4199809175,
+      "sf2": {
+        "preset_bag_index": 766,
+        "library": 4212916375,
+        "genre": 4219469975,
+        "morphology": 4199809175
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:2:Electric-Piano",
       "name": "Electric Piano",
       "bank": 0,
       "program": 2,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 844,
       "library": 3932160,
       "genre": 65536,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 844,
+        "library": 3932160,
+        "genre": 65536,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:3:Honky-Tonk",
       "name": "Honky Tonk",
       "bank": 0,
       "program": 3,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 747,
       "library": 195297413,
       "genre": 3539077,
-      "morphology": 604565504
+      "morphology": 604565504,
+      "sf2": {
+        "preset_bag_index": 747,
+        "library": 195297413,
+        "genre": 3539077,
+        "morphology": 604565504
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
       "name": "Rhodes EP",
       "bank": 0,
       "program": 4,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 540,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 540,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:5:Legend-EP-2",
       "name": "Legend EP 2",
       "bank": 0,
       "program": 5,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 355,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 355,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:6:Harpsichord",
       "name": "Harpsichord",
       "bank": 0,
       "program": 6,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 345,
       "library": 311759,
       "genre": 349015,
-      "morphology": 348377
+      "morphology": 348377,
+      "sf2": {
+        "preset_bag_index": 345,
+        "library": 311759,
+        "genre": 349015,
+        "morphology": 348377
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:7:Clavinet",
       "name": "Clavinet",
       "bank": 0,
       "program": 7,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 886,
       "library": 577241088,
       "genre": 553320449,
-      "morphology": 575406081
+      "morphology": 575406081,
+      "sf2": {
+        "preset_bag_index": 886,
+        "library": 577241088,
+        "genre": 553320449,
+        "morphology": 575406081
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:8:Celesta",
       "name": "Celesta",
       "bank": 0,
       "program": 8,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 909,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 909,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:9:Glockenspiel",
       "name": "Glockenspiel",
       "bank": 0,
       "program": 9,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 1003,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1003,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:10:Music-Box",
       "name": "Music Box",
       "bank": 0,
       "program": 10,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 855,
       "library": 4078567428,
       "genre": 4181721092,
-      "morphology": 2890137604
+      "morphology": 2890137604,
+      "sf2": {
+        "preset_bag_index": 855,
+        "library": 4078567428,
+        "genre": 4181721092,
+        "morphology": 2890137604
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:11:Vibraphone",
       "name": "Vibraphone",
       "bank": 0,
       "program": 11,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 789,
       "library": 7602309,
       "genre": 3539076,
-      "morphology": 32043008
+      "morphology": 32043008,
+      "sf2": {
+        "preset_bag_index": 789,
+        "library": 7602309,
+        "genre": 3539076,
+        "morphology": 32043008
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:12:Marimba",
       "name": "Marimba",
       "bank": 0,
       "program": 12,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 899,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 899,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:13:Xylophone",
       "name": "Xylophone",
       "bank": 0,
       "program": 13,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 560,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 560,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:14:Tubular-Bells",
       "name": "Tubular Bells",
       "bank": 0,
       "program": 14,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 1021,
       "library": 11333632,
       "genre": 3539077,
-      "morphology": 7864321
+      "morphology": 7864321,
+      "sf2": {
+        "preset_bag_index": 1021,
+        "library": 11333632,
+        "genre": 3539077,
+        "morphology": 7864321
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:15:Dulcimer",
       "name": "Dulcimer",
       "bank": 0,
       "program": 15,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 613,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 613,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:16:DrawbarOrgan",
       "name": "DrawbarOrgan",
       "bank": 0,
       "program": 16,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 736,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 736,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:17:Percussive-Organ",
       "name": "Percussive Organ",
       "bank": 0,
       "program": 17,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 633,
       "library": 32512,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 633,
+        "library": 32512,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:18:Rock-Organ",
       "name": "Rock Organ",
       "bank": 0,
       "program": 18,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 623,
       "library": 2898002052,
       "genre": 1439694980,
-      "morphology": 1446248585
+      "morphology": 1446248585,
+      "sf2": {
+        "preset_bag_index": 623,
+        "library": 2898002052,
+        "genre": 1439694980,
+        "morphology": 1446248585
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:19:Church-Organ",
       "name": "Church Organ",
       "bank": 0,
       "program": 19,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 663,
       "library": 786566,
       "genre": 2130706432,
-      "morphology": 1863084129
+      "morphology": 1863084129,
+      "sf2": {
+        "preset_bag_index": 663,
+        "library": 786566,
+        "genre": 2130706432,
+        "morphology": 1863084129
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:20:Reed-Organ",
       "name": "Reed Organ",
       "bank": 0,
       "program": 20,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 202,
       "library": 2687108,
       "genre": 725876833,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 202,
+        "library": 2687108,
+        "genre": 725876833,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:21:Accordian",
       "name": "Accordian",
       "bank": 0,
       "program": 21,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 141,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 141,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:22:Harmonica",
       "name": "Harmonica",
       "bank": 0,
       "program": 22,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 13,
       "library": 2687110,
       "genre": 1447297188,
-      "morphology": 1179782
+      "morphology": 1179782,
+      "sf2": {
+        "preset_bag_index": 13,
+        "library": 2687110,
+        "genre": 1447297188,
+        "morphology": 1179782
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:23:Bandoneon",
       "name": "Bandoneon",
       "bank": 0,
       "program": 23,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 950,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 950,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:24:Nylon-String-Guitar",
       "name": "Nylon String Guitar",
       "bank": 0,
       "program": 24,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 603,
       "library": 443084800,
       "genre": 3801227,
-      "morphology": 439615552
+      "morphology": 439615552,
+      "sf2": {
+        "preset_bag_index": 603,
+        "library": 443084800,
+        "genre": 3801227,
+        "morphology": 439615552
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:25:Steel-String-Guitar",
       "name": "Steel String Guitar",
       "bank": 0,
       "program": 25,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 592,
       "library": 3539076,
       "genre": 536870913,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 592,
+        "library": 3539076,
+        "genre": 536870913,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:26:Jazz-Guitar",
       "name": "Jazz Guitar",
       "bank": 0,
       "program": 26,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 800,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 800,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:27:Clean-Guitar",
       "name": "Clean Guitar",
       "bank": 0,
       "program": 27,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 366,
       "library": 0,
       "genre": 0,
-      "morphology": 72876032
+      "morphology": 72876032,
+      "sf2": {
+        "preset_bag_index": 366,
+        "library": 0,
+        "genre": 0,
+        "morphology": 72876032
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:28:Palm-Muted-Guitar",
       "name": "Palm Muted Guitar",
       "bank": 0,
       "program": 28,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 939,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 939,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:29:Overdrive-Guitar",
       "name": "Overdrive Guitar",
       "bank": 0,
       "program": 29,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 334,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 334,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:30:Distortion-Guitar",
       "name": "Distortion Guitar",
       "bank": 0,
       "program": 30,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 324,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 324,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:31:Guitar-Harmonics",
       "name": "Guitar Harmonics",
       "bank": 0,
       "program": 31,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 929,
       "library": 4207149056,
       "genre": 151,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 929,
+        "library": 4207149056,
+        "genre": 151,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:32:Acoustic-Bass",
       "name": "Acoustic Bass",
       "bank": 0,
       "program": 32,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 865,
       "library": 0,
       "genre": 4294967295,
-      "morphology": 6619136
+      "morphology": 6619136,
+      "sf2": {
+        "preset_bag_index": 865,
+        "library": 0,
+        "genre": 4294967295,
+        "morphology": 6619136
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
       "name": "Fingered Bass",
       "bank": 0,
       "program": 33,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 591,
       "library": 3432816640,
       "genre": 786568,
-      "morphology": 4246732932
+      "morphology": 4246732932,
+      "sf2": {
+        "preset_bag_index": 591,
+        "library": 3432816640,
+        "genre": 786568,
+        "morphology": 4246732932
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:34:Picked-Bass",
       "name": "Picked Bass",
       "bank": 0,
       "program": 34,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 590,
       "library": 151,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 590,
+        "library": 151,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:35:Fretless-Bass",
       "name": "Fretless Bass",
       "bank": 0,
       "program": 35,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 953,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 953,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:36:Slap-Bass",
       "name": "Slap Bass",
       "bank": 0,
       "program": 36,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 14,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 14,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:37:Pop-Bass",
       "name": "Pop Bass",
       "bank": 0,
       "program": 37,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 18,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 18,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:38:Synth-Bass-1",
       "name": "Synth Bass 1",
       "bank": 0,
       "program": 38,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 344,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 344,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:39:Synth-Bass-2",
       "name": "Synth Bass 2",
       "bank": 0,
       "program": 39,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 958,
       "library": 0,
       "genre": 4159176704,
-      "morphology": 1934950551
+      "morphology": 1934950551,
+      "sf2": {
+        "preset_bag_index": 958,
+        "library": 0,
+        "genre": 4159176704,
+        "morphology": 1934950551
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:40:Violin",
       "name": "Violin",
       "bank": 0,
       "program": 40,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 172,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 172,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:41:Viola",
       "name": "Viola",
       "bank": 0,
       "program": 41,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 162,
       "library": 151,
       "genre": 0,
-      "morphology": 20185088
+      "morphology": 20185088,
+      "sf2": {
+        "preset_bag_index": 162,
+        "library": 151,
+        "genre": 0,
+        "morphology": 20185088
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:42:Cello",
       "name": "Cello",
       "bank": 0,
       "program": 42,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 152,
       "library": 1165492357,
       "genre": 1172045957,
-      "morphology": 1113063557
+      "morphology": 1113063557,
+      "sf2": {
+        "preset_bag_index": 152,
+        "library": 1165492357,
+        "genre": 1172045957,
+        "morphology": 1113063557
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:43:Contrabass",
       "name": "Contrabass",
       "bank": 0,
       "program": 43,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 810,
       "library": 133,
       "genre": 0,
-      "morphology": 13369344
+      "morphology": 13369344,
+      "sf2": {
+        "preset_bag_index": 810,
+        "library": 133,
+        "genre": 0,
+        "morphology": 13369344
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:44:Tremolo",
       "name": "Tremolo",
       "bank": 0,
       "program": 44,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 226,
       "library": 720109651,
       "genre": 1179781,
-      "morphology": 61440
+      "morphology": 61440,
+      "sf2": {
+        "preset_bag_index": 226,
+        "library": 720109651,
+        "genre": 1179781,
+        "morphology": 61440
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:45:Pizzicato-Section",
       "name": "Pizzicato Section",
       "bank": 0,
       "program": 45,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 142,
       "library": 2687108,
       "genre": 1779695779,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 142,
+        "library": 2687108,
+        "genre": 1779695779,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:46:Harp",
       "name": "Harp",
       "bank": 0,
       "program": 46,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 1044,
       "library": 151,
       "genre": 0,
-      "morphology": 4168613888
+      "morphology": 4168613888,
+      "sf2": {
+        "preset_bag_index": 1044,
+        "library": 151,
+        "genre": 0,
+        "morphology": 4168613888
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:47:Timpani",
       "name": "Timpani",
       "bank": 0,
       "program": 47,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 725,
       "library": 4066115584,
       "genre": 1826816002,
-      "morphology": 4065787906
+      "morphology": 4065787906,
+      "sf2": {
+        "preset_bag_index": 725,
+        "library": 4066115584,
+        "genre": 1826816002,
+        "morphology": 4065787906
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:48:Strings",
       "name": "Strings",
       "bank": 0,
       "program": 48,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 216,
       "library": 34275460,
       "genre": 1364066304,
-      "morphology": 1159757568
+      "morphology": 1159757568,
+      "sf2": {
+        "preset_bag_index": 216,
+        "library": 34275460,
+        "genre": 1364066304,
+        "morphology": 1159757568
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:49:Slow-Strings",
       "name": "Slow Strings",
       "bank": 0,
       "program": 49,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 206,
       "library": 777519237,
       "genre": 770965636,
-      "morphology": 734003332
+      "morphology": 734003332,
+      "sf2": {
+        "preset_bag_index": 206,
+        "library": 777519237,
+        "genre": 770965636,
+        "morphology": 734003332
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:50:Synth-Strings-1",
       "name": "Synth Strings 1",
       "bank": 0,
       "program": 50,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 822,
       "library": 1122500746,
       "genre": 138,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 822,
+        "library": 1122500746,
+        "genre": 138,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:51:Synth-Strings-2",
       "name": "Synth Strings 2",
       "bank": 0,
       "program": 51,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 821,
       "library": 61440,
       "genre": 0,
-      "morphology": 1161560064
+      "morphology": 1161560064,
+      "sf2": {
+        "preset_bag_index": 821,
+        "library": 61440,
+        "genre": 0,
+        "morphology": 1161560064
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:52:Ahh-Choir",
       "name": "Ahh Choir",
       "bank": 0,
       "program": 52,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 833,
       "library": 1731522560,
       "genre": 2883716,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 833,
+        "library": 1731522560,
+        "genre": 2883716,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:53:Ohh-Voices",
       "name": "Ohh Voices",
       "bank": 0,
       "program": 53,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 550,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 550,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:54:Synth-Voice",
       "name": "Synth Voice",
       "bank": 0,
       "program": 54,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 991,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 991,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:55:Orchestra-Hit",
       "name": "Orchestra Hit",
       "bank": 0,
       "program": 55,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 1032,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1032,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:56:Trumpet",
       "name": "Trumpet",
       "bank": 0,
       "program": 56,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 386,
       "library": 4065128448,
       "genre": 2687109,
-      "morphology": 4061659184
+      "morphology": 4061659184,
+      "sf2": {
+        "preset_bag_index": 386,
+        "library": 4065128448,
+        "genre": 2687109,
+        "morphology": 4061659184
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:57:Trombone",
       "name": "Trombone",
       "bank": 0,
       "program": 57,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 643,
       "library": 2293911,
       "genre": 858980352,
-      "morphology": 192184064
+      "morphology": 192184064,
+      "sf2": {
+        "preset_bag_index": 643,
+        "library": 2293911,
+        "genre": 858980352,
+        "morphology": 192184064
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:58:Tuba",
       "name": "Tuba",
       "bank": 0,
       "program": 58,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 981,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 981,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:59:Muted-Trumpet",
       "name": "Muted Trumpet",
       "bank": 0,
       "program": 59,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 376,
       "library": 198377478,
       "genre": 214892550,
-      "morphology": 2890137606
+      "morphology": 2890137606,
+      "sf2": {
+        "preset_bag_index": 376,
+        "library": 198377478,
+        "genre": 214892550,
+        "morphology": 2890137606
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:60:French-Horns",
       "name": "French Horns",
       "bank": 0,
       "program": 60,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 653,
       "library": 133,
       "genre": 0,
-      "morphology": 2336227328
+      "morphology": 2336227328,
+      "sf2": {
+        "preset_bag_index": 653,
+        "library": 133,
+        "genre": 0,
+        "morphology": 2336227328
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:61:Brass-Section",
       "name": "Brass Section",
       "bank": 0,
       "program": 61,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 182,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 182,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:62:Synth-Brass-1",
       "name": "Synth Brass 1",
       "bank": 0,
       "program": 62,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 239,
       "library": 2490368,
       "genre": 1372125646,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 239,
+        "library": 2490368,
+        "genre": 1372125646,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:63:Synth-Brass-2",
       "name": "Synth Brass 2",
       "bank": 0,
       "program": 63,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 238,
       "library": 61440,
       "genre": 0,
-      "morphology": 1713897472
+      "morphology": 1713897472,
+      "sf2": {
+        "preset_bag_index": 238,
+        "library": 61440,
+        "genre": 0,
+        "morphology": 1713897472
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:64:Soprano-Sax",
       "name": "Soprano Sax",
       "bank": 0,
       "program": 64,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 90,
       "library": 33,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 90,
+        "library": 33,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:65:Alto-Sax",
       "name": "Alto Sax",
       "bank": 0,
       "program": 65,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 1,
       "library": 181460,
       "genre": 200916,
-      "morphology": 193495
+      "morphology": 193495,
+      "sf2": {
+        "preset_bag_index": 1,
+        "library": 181460,
+        "genre": 200916,
+        "morphology": 193495
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:66:Tenor-Sax",
       "name": "Tenor Sax",
       "bank": 0,
       "program": 66,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 80,
       "library": 134,
       "genre": 0,
-      "morphology": 13631488
+      "morphology": 13631488,
+      "sf2": {
+        "preset_bag_index": 80,
+        "library": 134,
+        "genre": 0,
+        "morphology": 13631488
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:67:Baritone-Sax",
       "name": "Baritone Sax",
       "bank": 0,
       "program": 67,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 70,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 70,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:68:Oboe",
       "name": "Oboe",
       "bank": 0,
       "program": 68,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 971,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 971,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:69:English-Horn",
       "name": "English Horn",
       "bank": 0,
       "program": 69,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 961,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 961,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:70:Bassoon",
       "name": "Bassoon",
       "bank": 0,
       "program": 70,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 131,
       "library": 24903813,
       "genre": 875692032,
-      "morphology": 8421120
+      "morphology": 8421120,
+      "sf2": {
+        "preset_bag_index": 131,
+        "library": 24903813,
+        "genre": 875692032,
+        "morphology": 8421120
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:71:Clarinet",
       "name": "Clarinet",
       "bank": 0,
       "program": 71,
+      "category": "Reed",
+      "is_drum": false,
       "preset_bag_index": 875,
       "library": 4285530112,
       "genre": 151,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 875,
+        "library": 4285530112,
+        "genre": 151,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:72:Piccolo",
       "name": "Piccolo",
       "bank": 0,
       "program": 72,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 121,
       "library": 25428119,
       "genre": 4166779014,
-      "morphology": 4197974167
+      "morphology": 4197974167,
+      "sf2": {
+        "preset_bag_index": 121,
+        "library": 25428119,
+        "genre": 4166779014,
+        "morphology": 4197974167
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:73:Flute",
       "name": "Flute",
       "bank": 0,
       "program": 73,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 111,
       "library": 18612357,
       "genre": 4272685198,
-      "morphology": 441712781
+      "morphology": 441712781,
+      "sf2": {
+        "preset_bag_index": 111,
+        "library": 18612357,
+        "genre": 4272685198,
+        "morphology": 441712781
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:74:Recorder",
       "name": "Recorder",
       "bank": 0,
       "program": 74,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 919,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 919,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:75:Pan-Flute",
       "name": "Pan Flute",
       "bank": 0,
       "program": 75,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 101,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 101,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:76:Bottle-Chiff",
       "name": "Bottle Chiff",
       "bank": 0,
       "program": 76,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 1015,
       "library": 4231589888,
       "genre": 3539095,
-      "morphology": 1
+      "morphology": 1,
+      "sf2": {
+        "preset_bag_index": 1015,
+        "library": 4231589888,
+        "genre": 3539095,
+        "morphology": 1
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:77:Shakuhachi",
       "name": "Shakuhachi",
       "bank": 0,
       "program": 77,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 201,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 201,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:78:Whistle",
       "name": "Whistle",
       "bank": 0,
       "program": 78,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 949,
       "library": 2661609472,
       "genre": 3276944,
-      "morphology": 3686793216
+      "morphology": 3686793216,
+      "sf2": {
+        "preset_bag_index": 949,
+        "library": 2661609472,
+        "genre": 3276944,
+        "morphology": 3686793216
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:79:Ocarina",
       "name": "Ocarina",
       "bank": 0,
       "program": 79,
+      "category": "Pipe",
+      "is_drum": false,
       "preset_bag_index": 955,
       "library": 2189991936,
       "genre": 2286944401,
-      "morphology": 925565073
+      "morphology": 925565073,
+      "sf2": {
+        "preset_bag_index": 955,
+        "library": 2189991936,
+        "genre": 2286944401,
+        "morphology": 925565073
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:80:Square-Lead",
       "name": "Square Lead",
       "bank": 0,
       "program": 80,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 1038,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1038,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:81:Saw-Wave",
       "name": "Saw Wave",
       "bank": 0,
       "program": 81,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 1041,
       "library": 1243348993,
       "genre": 1179787,
-      "morphology": 340848640
+      "morphology": 340848640,
+      "sf2": {
+        "preset_bag_index": 1041,
+        "library": 1243348993,
+        "genre": 1179787,
+        "morphology": 340848640
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:82:Calliope-Lead",
       "name": "Calliope Lead",
       "bank": 0,
       "program": 82,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 580,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 580,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:83:Chiffer-Lead",
       "name": "Chiffer Lead",
       "bank": 0,
       "program": 83,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 570,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 570,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:84:Charang",
       "name": "Charang",
       "bank": 0,
       "program": 84,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 1028,
       "library": 455999488,
       "genre": 2890137600,
-      "morphology": 3932160
+      "morphology": 3932160,
+      "sf2": {
+        "preset_bag_index": 1028,
+        "library": 455999488,
+        "genre": 2890137600,
+        "morphology": 3932160
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:85:Solo-Vox",
       "name": "Solo Vox",
       "bank": 0,
       "program": 85,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 735,
       "library": 1830289549,
       "genre": 1810628749,
-      "morphology": 141
+      "morphology": 141,
+      "sf2": {
+        "preset_bag_index": 735,
+        "library": 1830289549,
+        "genre": 1810628749,
+        "morphology": 141
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:86:Fifth-Sawtooth-Wave",
       "name": "Fifth Sawtooth Wave",
       "bank": 0,
       "program": 86,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 1034,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1034,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:87:Bass-&-Lead",
       "name": "Bass & Lead",
       "bank": 0,
       "program": 87,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 1035,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1035,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:88:Fantasia",
       "name": "Fantasia",
       "bank": 0,
       "program": 88,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 1023,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1023,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
       "name": "Warm Pad",
       "bank": 0,
       "program": 89,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 820,
       "library": 0,
       "genre": 0,
-      "morphology": 3440181248
+      "morphology": 3440181248,
+      "sf2": {
+        "preset_bag_index": 820,
+        "library": 0,
+        "genre": 0,
+        "morphology": 3440181248
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:90:Polysynth",
       "name": "Polysynth",
       "bank": 0,
       "program": 90,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 365,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 365,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:91:Space-Voice",
       "name": "Space Voice",
       "bank": 0,
       "program": 91,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 1002,
       "library": 131204,
       "genre": 382730240,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 1002,
+        "library": 131204,
+        "genre": 382730240,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:92:Bowed-Glass",
       "name": "Bowed Glass",
       "bank": 0,
       "program": 92,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 1027,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1027,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:93:Metal-Pad",
       "name": "Metal Pad",
       "bank": 0,
       "program": 93,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 240,
       "library": 16908288,
       "genre": 8,
-      "morphology": 3330
+      "morphology": 3330,
+      "sf2": {
+        "preset_bag_index": 240,
+        "library": 16908288,
+        "genre": 8,
+        "morphology": 3330
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:94:Halo-Pad",
       "name": "Halo Pad",
       "bank": 0,
       "program": 94,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 1022,
       "library": 2130706432,
       "genre": 817135360,
-      "morphology": 139
+      "morphology": 139,
+      "sf2": {
+        "preset_bag_index": 1022,
+        "library": 2130706432,
+        "genre": 817135360,
+        "morphology": 139
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:95:Sweep-Pad",
       "name": "Sweep Pad",
       "bank": 0,
       "program": 95,
+      "category": "Synth Pad",
+      "is_drum": false,
       "preset_bag_index": 1016,
       "library": 60616704,
       "genre": 2687110,
-      "morphology": 57147410
+      "morphology": 57147410,
+      "sf2": {
+        "preset_bag_index": 1016,
+        "library": 60616704,
+        "genre": 2687110,
+        "morphology": 57147410
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:96:Ice-Rain",
       "name": "Ice Rain",
       "bank": 0,
       "program": 96,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 1014,
       "library": 1966212,
       "genre": 61440,
-      "morphology": 16908288
+      "morphology": 16908288,
+      "sf2": {
+        "preset_bag_index": 1014,
+        "library": 1966212,
+        "genre": 61440,
+        "morphology": 16908288
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:97:Soundtrack",
       "name": "Soundtrack",
       "bank": 0,
       "program": 97,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 1018,
       "library": 789094400,
       "genre": 237240453,
-      "morphology": 2037579908
+      "morphology": 2037579908,
+      "sf2": {
+        "preset_bag_index": 1018,
+        "library": 789094400,
+        "genre": 237240453,
+        "morphology": 2037579908
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:98:Crystal",
       "name": "Crystal",
       "bank": 0,
       "program": 98,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 898,
       "library": 3539077,
       "genre": 1538785281,
-      "morphology": 1179781
+      "morphology": 1179781,
+      "sf2": {
+        "preset_bag_index": 898,
+        "library": 3539077,
+        "genre": 1538785281,
+        "morphology": 1179781
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:99:Atmosphere",
       "name": "Atmosphere",
       "bank": 0,
       "program": 99,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 602,
       "library": 2987393159,
       "genre": 2977955975,
-      "morphology": 2904555655
+      "morphology": 2904555655,
+      "sf2": {
+        "preset_bag_index": 602,
+        "library": 2987393159,
+        "genre": 2977955975,
+        "morphology": 2904555655
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:100:Brightness",
       "name": "Brightness",
       "bank": 0,
       "program": 100,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 1001,
       "library": 504358,
       "genre": 479029,
-      "morphology": 504342
+      "morphology": 504342,
+      "sf2": {
+        "preset_bag_index": 1001,
+        "library": 504358,
+        "genre": 479029,
+        "morphology": 504342
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:101:Goblin",
       "name": "Goblin",
       "bank": 0,
       "program": 101,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 957,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 957,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:102:Echo-Drops",
       "name": "Echo Drops",
       "bank": 0,
       "program": 102,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 897,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 897,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:103:Star-Theme",
       "name": "Star Theme",
       "bank": 0,
       "program": 103,
+      "category": "Synth Effects",
+      "is_drum": false,
       "preset_bag_index": 746,
       "library": 134,
       "genre": 0,
-      "morphology": 55050240
+      "morphology": 55050240,
+      "sf2": {
+        "preset_bag_index": 746,
+        "library": 134,
+        "genre": 0,
+        "morphology": 55050240
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:104:Sitar",
       "name": "Sitar",
       "bank": 0,
       "program": 104,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 15,
       "library": 881913856,
       "genre": 2687108,
-      "morphology": 878444706
+      "morphology": 878444706,
+      "sf2": {
+        "preset_bag_index": 15,
+        "library": 881913856,
+        "genre": 2687108,
+        "morphology": 878444706
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:105:Banjo",
       "name": "Banjo",
       "bank": 0,
       "program": 105,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 1013,
       "library": 1868955780,
       "genre": 1551070318,
-      "morphology": 1785618786
+      "morphology": 1785618786,
+      "sf2": {
+        "preset_bag_index": 1013,
+        "library": 1868955780,
+        "genre": 1551070318,
+        "morphology": 1785618786
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:106:Shamisen",
       "name": "Shamisen",
       "bank": 0,
       "program": 106,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 236,
       "library": 3895783424,
       "genre": 2687111,
-      "morphology": 3892314191
+      "morphology": 3892314191,
+      "sf2": {
+        "preset_bag_index": 236,
+        "library": 3895783424,
+        "genre": 2687111,
+        "morphology": 3892314191
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:107:Koto",
       "name": "Koto",
       "bank": 0,
       "program": 107,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 237,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 237,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:108:Kalimba",
       "name": "Kalimba",
       "bank": 0,
       "program": 108,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 1024,
       "library": 3151757318,
       "genre": 1179786,
-      "morphology": 3162566656
+      "morphology": 3162566656,
+      "sf2": {
+        "preset_bag_index": 1024,
+        "library": 3151757318,
+        "genre": 1179786,
+        "morphology": 3162566656
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:109:BagPipe",
       "name": "BagPipe",
       "bank": 0,
       "program": 109,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 203,
       "library": 4187549696,
       "genre": 2687108,
-      "morphology": 4184080464
+      "morphology": 4184080464,
+      "sf2": {
+        "preset_bag_index": 203,
+        "library": 4187549696,
+        "genre": 2687108,
+        "morphology": 4184080464
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:110:Fiddle",
       "name": "Fiddle",
       "bank": 0,
       "program": 110,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 823,
       "library": 202637445,
       "genre": 458227845,
-      "morphology": 408158341
+      "morphology": 408158341,
+      "sf2": {
+        "preset_bag_index": 823,
+        "library": 202637445,
+        "genre": 458227845,
+        "morphology": 408158341
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:111:Shenai",
       "name": "Shenai",
       "bank": 0,
       "program": 111,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 100,
       "library": 843469614,
       "genre": 4282646528,
-      "morphology": 1179799
+      "morphology": 1179799,
+      "sf2": {
+        "preset_bag_index": 100,
+        "library": 843469614,
+        "genre": 4282646528,
+        "morphology": 1179799
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:112:Tinker-Bell",
       "name": "Tinker Bell",
       "bank": 0,
       "program": 112,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 16,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 16,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:113:Agogo",
       "name": "Agogo",
       "bank": 0,
       "program": 113,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 786,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 786,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:114:Steel-Drums",
       "name": "Steel Drums",
       "bank": 0,
       "program": 114,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 956,
       "library": 140,
       "genre": 0,
-      "morphology": 74973184
+      "morphology": 74973184,
+      "sf2": {
+        "preset_bag_index": 956,
+        "library": 140,
+        "genre": 0,
+        "morphology": 74973184
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:115:Woodblock",
       "name": "Woodblock",
       "bank": 0,
       "program": 115,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 787,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 787,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:116:Taiko-Drum",
       "name": "Taiko Drum",
       "bank": 0,
       "program": 116,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 896,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 896,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:117:Melodic-Tom",
       "name": "Melodic Tom",
       "bank": 0,
       "program": 117,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 959,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 959,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:118:Synth-Drum",
       "name": "Synth Drum",
       "bank": 0,
       "program": 118,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 960,
       "library": 1179781,
       "genre": 1631121408,
-      "morphology": 524421
+      "morphology": 524421,
+      "sf2": {
+        "preset_bag_index": 960,
+        "library": 1179781,
+        "genre": 1631121408,
+        "morphology": 524421
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:119:Reverse-Cymbal",
       "name": "Reverse Cymbal",
       "bank": 0,
       "program": 119,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 799,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 799,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:120:Fret-Noise",
       "name": "Fret Noise",
       "bank": 0,
       "program": 120,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 954,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 954,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:121:Breath-Noise",
       "name": "Breath Noise",
       "bank": 0,
       "program": 121,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 1025,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 1025,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:122:Sea-Shore",
       "name": "Sea Shore",
       "bank": 0,
       "program": 122,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 843,
       "library": 0,
       "genre": 4158390272,
-      "morphology": 1179780
+      "morphology": 1179780,
+      "sf2": {
+        "preset_bag_index": 843,
+        "library": 0,
+        "genre": 4158390272,
+        "morphology": 1179780
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:123:Bird-Tweet",
       "name": "Bird Tweet",
       "bank": 0,
       "program": 123,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 885,
       "library": 4325514,
       "genre": 61440,
-      "morphology": 1765933056
+      "morphology": 1765933056,
+      "sf2": {
+        "preset_bag_index": 885,
+        "library": 4325514,
+        "genre": 61440,
+        "morphology": 1765933056
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:124:Telephone",
       "name": "Telephone",
       "bank": 0,
       "program": 124,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 1026,
       "library": 3145862,
       "genre": 4076601444,
-      "morphology": 1179782
+      "morphology": 1179782,
+      "sf2": {
+        "preset_bag_index": 1026,
+        "library": 3145862,
+        "genre": 4076601444,
+        "morphology": 1179782
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:125:Helicopter",
       "name": "Helicopter",
       "bank": 0,
       "program": 125,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 17,
       "library": 2875256832,
       "genre": 2818183,
-      "morphology": 2877046587
+      "morphology": 2877046587,
+      "sf2": {
+        "preset_bag_index": 17,
+        "library": 2875256832,
+        "genre": 2818183,
+        "morphology": 2877046587
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:126:Applause",
       "name": "Applause",
       "bank": 0,
       "program": 126,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 788,
       "library": 1704074,
       "genre": 61440,
-      "morphology": 197132288
+      "morphology": 197132288,
+      "sf2": {
+        "preset_bag_index": 788,
+        "library": 1704074,
+        "genre": 61440,
+        "morphology": 197132288
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:0:127:Gun-Shot",
       "name": "Gun Shot",
       "bank": 0,
       "program": 127,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 0,
       "library": 2949259,
       "genre": 1040449536,
-      "morphology": 1179787
+      "morphology": 1179787,
+      "sf2": {
+        "preset_bag_index": 0,
+        "library": 2949259,
+        "genre": 1040449536,
+        "morphology": 1179787
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:4:Detuned-EP-1",
       "name": "Detuned EP 1",
       "bank": 8,
       "program": 4,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 69,
       "library": 28261,
       "genre": 0,
-      "morphology": 4099670016
+      "morphology": 4099670016,
+      "sf2": {
+        "preset_bag_index": 69,
+        "library": 28261,
+        "genre": 0,
+        "morphology": 4099670016
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:5:Detuned-EP-2",
       "name": "Detuned EP 2",
       "bank": 8,
       "program": 5,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 68,
       "library": 632029318,
       "genre": 638582925,
-      "morphology": 618922125
+      "morphology": 618922125,
+      "sf2": {
+        "preset_bag_index": 68,
+        "library": 632029318,
+        "genre": 638582925,
+        "morphology": 618922125
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:6:Coupled-Harpsichord",
       "name": "Coupled Harpsichord",
       "bank": 8,
       "program": 6,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 65,
       "library": 3284987904,
       "genre": 3291480208,
-      "morphology": 3271819408
+      "morphology": 3271819408,
+      "sf2": {
+        "preset_bag_index": 65,
+        "library": 3284987904,
+        "genre": 3291480208,
+        "morphology": 3271819408
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:14:Church-Bell",
       "name": "Church Bell",
       "bank": 8,
       "program": 14,
+      "category": "Chromatic Percussion",
+      "is_drum": false,
       "preset_bag_index": 61,
       "library": 1179786,
       "genre": 3907317760,
-      "morphology": 1835146
+      "morphology": 1835146,
+      "sf2": {
+        "preset_bag_index": 61,
+        "library": 1179786,
+        "genre": 3907317760,
+        "morphology": 1835146
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:16:Detuned-Organ-1",
       "name": "Detuned Organ 1",
       "bank": 8,
       "program": 16,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 60,
       "library": 1179786,
       "genre": 3917803520,
-      "morphology": 3539082
+      "morphology": 3539082,
+      "sf2": {
+        "preset_bag_index": 60,
+        "library": 1179786,
+        "genre": 3917803520,
+        "morphology": 3539082
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:17:Detuned-Organ-2",
       "name": "Detuned Organ 2",
       "bank": 8,
       "program": 17,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 58,
       "library": 4166778880,
       "genre": 1179782,
-      "morphology": 4218482688
+      "morphology": 4218482688,
+      "sf2": {
+        "preset_bag_index": 58,
+        "library": 4166778880,
+        "genre": 1179782,
+        "morphology": 4218482688
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:19:Church-Organ-2",
       "name": "Church Organ 2",
       "bank": 8,
       "program": 19,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 56,
       "library": 3539078,
       "genre": 836763649,
-      "morphology": 1179782
+      "morphology": 1179782,
+      "sf2": {
+        "preset_bag_index": 56,
+        "library": 3539078,
+        "genre": 836763649,
+        "morphology": 1179782
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:21:Italian-Accordion",
       "name": "Italian Accordion",
       "bank": 8,
       "program": 21,
+      "category": "Organ",
+      "is_drum": false,
       "preset_bag_index": 54,
       "library": 44040327,
       "genre": 2185232519,
-      "morphology": 2178678918
+      "morphology": 2178678918,
+      "sf2": {
+        "preset_bag_index": 54,
+        "library": 44040327,
+        "genre": 2185232519,
+        "morphology": 2178678918
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:24:Ukulele",
       "name": "Ukulele",
       "bank": 8,
       "program": 24,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 53,
       "library": 288096390,
       "genre": 294649997,
-      "morphology": 274989197
+      "morphology": 274989197,
+      "sf2": {
+        "preset_bag_index": 53,
+        "library": 288096390,
+        "genre": 294649997,
+        "morphology": 274989197
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:25:12-String-Guitar",
       "name": "12 String Guitar",
       "bank": 8,
       "program": 25,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 51,
       "library": 439676928,
       "genre": 131211,
-      "morphology": 381681664
+      "morphology": 381681664,
+      "sf2": {
+        "preset_bag_index": 51,
+        "library": 439676928,
+        "genre": 131211,
+        "morphology": 381681664
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:26:Hawaiian-Guitar",
       "name": "Hawaiian Guitar",
       "bank": 8,
       "program": 26,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 50,
       "library": 138,
       "genre": 0,
-      "morphology": 3592945664
+      "morphology": 3592945664,
+      "sf2": {
+        "preset_bag_index": 50,
+        "library": 138,
+        "genre": 0,
+        "morphology": 3592945664
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:28:Funk-Guitar",
       "name": "Funk Guitar",
       "bank": 8,
       "program": 28,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 11,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 11,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:30:Feedback-Guitar",
       "name": "Feedback Guitar",
       "bank": 8,
       "program": 30,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 48,
       "library": 0,
       "genre": 3599761408,
-      "morphology": 3546284170
+      "morphology": 3546284170,
+      "sf2": {
+        "preset_bag_index": 48,
+        "library": 0,
+        "genre": 3599761408,
+        "morphology": 3546284170
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:31:Guitar-Feedback",
       "name": "Guitar Feedback",
       "bank": 8,
       "program": 31,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 47,
       "library": 4208197783,
       "genre": 4201644183,
-      "morphology": 151
+      "morphology": 151,
+      "sf2": {
+        "preset_bag_index": 47,
+        "library": 4208197783,
+        "genre": 4201644183,
+        "morphology": 151
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:38:Synth-Bass-3",
       "name": "Synth Bass 3",
       "bank": 8,
       "program": 38,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 45,
       "library": 445120512,
       "genre": 446955661,
-      "morphology": 141
+      "morphology": 141,
+      "sf2": {
+        "preset_bag_index": 45,
+        "library": 445120512,
+        "genre": 446955661,
+        "morphology": 141
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:39:Synth-Bass-4",
       "name": "Synth Bass 4",
       "bank": 8,
       "program": 39,
+      "category": "Bass",
+      "is_drum": false,
       "preset_bag_index": 44,
       "library": 2432,
       "genre": 0,
-      "morphology": 174850048
+      "morphology": 174850048,
+      "sf2": {
+        "preset_bag_index": 44,
+        "library": 2432,
+        "genre": 0,
+        "morphology": 174850048
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:40:Slow-Violin",
       "name": "Slow Violin",
       "bank": 8,
       "program": 40,
+      "category": "Strings",
+      "is_drum": false,
       "preset_bag_index": 43,
       "library": 298622976,
       "genre": 1835149,
-      "morphology": 243007620
+      "morphology": 243007620,
+      "sf2": {
+        "preset_bag_index": 43,
+        "library": 298622976,
+        "genre": 1835149,
+        "morphology": 243007620
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:48:Orchestral-Pad",
       "name": "Orchestral Pad",
       "bank": 8,
       "program": 48,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 40,
       "library": 760742025,
       "genre": 741081225,
-      "morphology": 747634825
+      "morphology": 747634825,
+      "sf2": {
+        "preset_bag_index": 40,
+        "library": 760742025,
+        "genre": 741081225,
+        "morphology": 747634825
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:50:Synth-Strings-3",
       "name": "Synth Strings 3",
       "bank": 8,
       "program": 50,
+      "category": "Ensemble",
+      "is_drum": false,
       "preset_bag_index": 38,
       "library": 3539078,
       "genre": 2950754304,
-      "morphology": 2944139408
+      "morphology": 2944139408,
+      "sf2": {
+        "preset_bag_index": 38,
+        "library": 3539078,
+        "genre": 2950754304,
+        "morphology": 2944139408
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:61:Brass-2",
       "name": "Brass 2",
       "bank": 8,
       "program": 61,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 36,
       "library": 134,
       "genre": 0,
-      "morphology": 4077125632
+      "morphology": 4077125632,
+      "sf2": {
+        "preset_bag_index": 36,
+        "library": 134,
+        "genre": 0,
+        "morphology": 4077125632
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:62:Synth-Brass-3",
       "name": "Synth Brass 3",
       "bank": 8,
       "program": 62,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 33,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 33,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:63:Synth-Brass-4",
       "name": "Synth Brass 4",
       "bank": 8,
       "program": 63,
+      "category": "Brass",
+      "is_drum": false,
       "preset_bag_index": 30,
       "library": 3584094208,
       "genre": 3577479313,
-      "morphology": 3570925713
+      "morphology": 3570925713,
+      "sf2": {
+        "preset_bag_index": 30,
+        "library": 3584094208,
+        "genre": 3577479313,
+        "morphology": 3570925713
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:80:Sine-Wave",
       "name": "Sine Wave",
       "bank": 8,
       "program": 80,
+      "category": "Synth Lead",
+      "is_drum": false,
       "preset_bag_index": 29,
       "library": 2490506,
       "genre": 2550984704,
-      "morphology": 2557477008
+      "morphology": 2557477008,
+      "sf2": {
+        "preset_bag_index": 29,
+        "library": 2490506,
+        "genre": 2550984704,
+        "morphology": 2557477008
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:107:Taisho-Koto",
       "name": "Taisho Koto",
       "bank": 8,
       "program": 107,
+      "category": "Ethnic",
+      "is_drum": false,
       "preset_bag_index": 27,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 27,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:115:Castanets",
       "name": "Castanets",
       "bank": 8,
       "program": 115,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 26,
       "library": 138,
       "genre": 0,
-      "morphology": 1277427712
+      "morphology": 1277427712,
+      "sf2": {
+        "preset_bag_index": 26,
+        "library": 138,
+        "genre": 0,
+        "morphology": 1277427712
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:116:Concert-Bass-Drum",
       "name": "Concert Bass Drum",
       "bank": 8,
       "program": 116,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 25,
       "library": 61440,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 25,
+        "library": 61440,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:117:Melo-Tom-2",
       "name": "Melo Tom 2",
       "bank": 8,
       "program": 117,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 23,
       "library": 0,
       "genre": 1082982399,
-      "morphology": 6684806
+      "morphology": 6684806,
+      "sf2": {
+        "preset_bag_index": 23,
+        "library": 0,
+        "genre": 1082982399,
+        "morphology": 6684806
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:8:118:808-Tom",
       "name": "808 Tom",
       "bank": 8,
       "program": 118,
+      "category": "Percussive",
+      "is_drum": false,
       "preset_bag_index": 22,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 22,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:9:125:Burst-Noise",
       "name": "Burst Noise",
       "bank": 9,
       "program": 125,
+      "category": "Sound Effects",
+      "is_drum": false,
       "preset_bag_index": 20,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 20,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:16:25:Mandolin",
       "name": "Mandolin",
       "bank": 16,
       "program": 25,
+      "category": "Guitar",
+      "is_drum": false,
       "preset_bag_index": 19,
       "library": 2394423434,
       "genre": 2387869834,
-      "morphology": 4167041162
+      "morphology": 4167041162,
+      "sf2": {
+        "preset_bag_index": 19,
+        "library": 2394423434,
+        "genre": 2387869834,
+        "morphology": 4167041162
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:0:Standard",
       "name": "Standard",
       "bank": 128,
       "program": 0,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 716,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 716,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:1:Standard-1",
       "name": "Standard 1",
       "bank": 128,
       "program": 1,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 531,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 531,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:2:Standard-2",
       "name": "Standard 2",
       "bank": 128,
       "program": 2,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 522,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 522,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:3:Standard-3",
       "name": "Standard 3",
       "bank": 128,
       "program": 3,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 513,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 513,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:4:Standard-4",
       "name": "Standard 4",
       "bank": 128,
       "program": 4,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 504,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 504,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:5:Standard-5",
       "name": "Standard 5",
       "bank": 128,
       "program": 5,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 495,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 495,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:6:Standard-6",
       "name": "Standard 6",
       "bank": 128,
       "program": 6,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 486,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 486,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:7:Standard-7",
       "name": "Standard 7",
       "bank": 128,
       "program": 7,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 477,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 477,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:8:Room",
       "name": "Room",
       "bank": 128,
       "program": 8,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 423,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 423,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:9:Room-1",
       "name": "Room 1",
       "bank": 128,
       "program": 9,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 459,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 459,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:10:Room-2",
       "name": "Room 2",
       "bank": 128,
       "program": 10,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 450,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 450,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:11:Room-3",
       "name": "Room 3",
       "bank": 128,
       "program": 11,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 441,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 441,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:12:Room-4",
       "name": "Room 4",
       "bank": 128,
       "program": 12,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 432,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 432,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:13:Room-5",
       "name": "Room 5",
       "bank": 128,
       "program": 13,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 468,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 468,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:14:Room-6",
       "name": "Room 6",
       "bank": 128,
       "program": 14,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 414,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 414,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:15:Room-7",
       "name": "Room 7",
       "bank": 128,
       "program": 15,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 405,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 405,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:16:Power",
       "name": "Power",
       "bank": 128,
       "program": 16,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 707,
       "library": 4195414016,
       "genre": 3801224,
-      "morphology": 4191944771
+      "morphology": 4191944771,
+      "sf2": {
+        "preset_bag_index": 707,
+        "library": 4195414016,
+        "genre": 3801224,
+        "morphology": 4191944771
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:17:Power-1",
       "name": "Power 1",
       "bank": 128,
       "program": 17,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 259,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 259,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:18:Power-2",
       "name": "Power 2",
       "bank": 128,
       "program": 18,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 250,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 250,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:19:Power-3",
       "name": "Power 3",
       "bank": 128,
       "program": 19,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 241,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 241,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:24:Electronic",
       "name": "Electronic",
       "bank": 128,
       "program": 24,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 699,
       "library": 3539077,
       "genre": 1538785281,
-      "morphology": 1179781
+      "morphology": 1179781,
+      "sf2": {
+        "preset_bag_index": 699,
+        "library": 3539077,
+        "genre": 1538785281,
+        "morphology": 1179781
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:25:TR-808",
       "name": "TR-808",
       "bank": 128,
       "program": 25,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 690,
       "library": 0,
       "genre": 0,
-      "morphology": 905969664
+      "morphology": 905969664,
+      "sf2": {
+        "preset_bag_index": 690,
+        "library": 0,
+        "genre": 0,
+        "morphology": 905969664
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:32:Jazz",
       "name": "Jazz",
       "bank": 128,
       "program": 32,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 396,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 396,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:33:Jazz-1",
       "name": "Jazz 1",
       "bank": 128,
       "program": 33,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 315,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 315,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:34:Jazz-2",
       "name": "Jazz 2",
       "bank": 128,
       "program": 34,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 306,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 306,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:35:Jazz-3",
       "name": "Jazz 3",
       "bank": 128,
       "program": 35,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 297,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 297,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:36:Jazz-4",
       "name": "Jazz 4",
       "bank": 128,
       "program": 36,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 288,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 288,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:40:Brush",
       "name": "Brush",
       "bank": 128,
       "program": 40,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 680,
       "library": 1297350789,
       "genre": 1303904389,
-      "morphology": 1310457989
+      "morphology": 1310457989,
+      "sf2": {
+        "preset_bag_index": 680,
+        "library": 1297350789,
+        "genre": 1303904389,
+        "morphology": 1310457989
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:41:Brush-1",
       "name": "Brush 1",
       "bank": 128,
       "program": 41,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 278,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 278,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:42:Brush-2",
       "name": "Brush 2",
       "bank": 128,
       "program": 42,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 268,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 268,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     },
     {
+      "id": "sf2:FluidR3_GM.sf2:128:48:Orchestra-Kit",
       "name": "Orchestra Kit",
       "bank": 128,
       "program": 48,
+      "category": "Drums",
+      "is_drum": true,
       "preset_bag_index": 673,
       "library": 496500886,
       "genre": 503054486,
-      "morphology": 483393686
+      "morphology": 483393686,
+      "sf2": {
+        "preset_bag_index": 673,
+        "library": 496500886,
+        "genre": 503054486,
+        "morphology": 483393686
+      }
     }
   ]
 }

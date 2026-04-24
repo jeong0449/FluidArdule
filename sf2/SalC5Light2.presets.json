@@ -1,20 +1,31 @@
 {
+  "engine": "fluidsynth",
+  "source_type": "sf2",
+  "format": "instrument-list",
+  "version": 2,
   "source_file": "SalC5Light2.sf2",
   "source_path": "/home/pi/sf2/SalC5Light2.sf2",
-  "format": "sf2-preset-list",
-  "version": 1,
   "preset_count": 1,
   "melodic_preset_count": 1,
   "drum_preset_count": 0,
   "presets": [
     {
+      "id": "sf2:SalC5Light2.sf2:0:0:Salamander-Light",
       "name": "Salamander Light",
       "bank": 0,
       "program": 0,
+      "category": "Piano",
+      "is_drum": false,
       "preset_bag_index": 0,
       "library": 0,
       "genre": 0,
-      "morphology": 0
+      "morphology": 0,
+      "sf2": {
+        "preset_bag_index": 0,
+        "library": 0,
+        "genre": 0,
+        "morphology": 0
+      }
     }
   ]
 }
