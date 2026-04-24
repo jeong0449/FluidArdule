@@ -38,11 +38,12 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260423"
+SCRIPT_VERSION = "v2.9-stage8-260424a"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 0.1
+SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC = 1.5
 
 SOUNDFONTS = [
     ("/home/pi/sf2/SalC5Light2.sf2", "SalC5"),
@@ -107,7 +108,11 @@ SELECT_BG = (45, 70, 110)
 BOX_BG = (20, 24, 32)
 STATUS_GOOD = (90, 220, 120)
 STATUS_BAD = (255, 110, 110)
-RENDER_MIN_INTERVAL = 0.05
+# Minimum interval between TFT renders (in seconds).
+# Frequent screen updates can interfere with real-time audio on Raspberry Pi,
+# causing jitter or glitches during MIDI playback.
+# Increasing this value improves audio stability at the cost of UI responsiveness.
+RENDER_MIN_INTERVAL = 0.15
 ROTATE_180 = True
 
 FONT_CANDIDATES = [
@@ -258,6 +263,9 @@ class RuntimeState:
     player_origin_dir: str | None = None
 
     pending_resume_after_sf_apply: bool = False
+
+    # Ignore short burst of stale/noisy UI events after UNO-1 serial reconnect/reset.
+    serial_input_ignore_until: float = 0.0
 
 
 state = RuntimeState(sf_index=0, sf_name=SOUNDFONTS[0][1])
@@ -2299,7 +2307,17 @@ def play_adjacent(delta: int) -> None:
         current_index = playable[0 if delta >= 0 else -1]
 
     pos = playable.index(current_index)
-    next_idx = playable[(pos + delta) % len(playable)]
+    next_pos = pos + delta
+
+    # Do not wrap around at the beginning/end of the folder.
+    if next_pos < 0:
+        mark_dirty("First file")
+        return
+    if next_pos >= len(playable):
+        mark_dirty("Last file")
+        return
+
+    next_idx = playable[next_pos]
     state.browser_index = next_idx
     next_path = state.browser_entries[next_idx]["path"]
     state.player_stop_requested = False
@@ -2332,9 +2350,11 @@ def try_auto_advance_media() -> bool:
     current_abs = normalize_path(state.player_path)
     for pos, entry_idx in enumerate(playable):
         if normalize_path(state.browser_entries[entry_idx]["path"]) == current_abs:
-            next_idx = playable[(pos + 1) % len(playable)]
-            if next_idx == entry_idx and len(playable) == 1:
+            # Stop at the end of the current folder instead of wrapping to the first file.
+            if pos >= len(playable) - 1:
+                log("PLAYER auto-next: end of folder")
                 return False
+            next_idx = playable[pos + 1]
             state.browser_index = next_idx
             next_path = state.browser_entries[next_idx]["path"]
             log(f"PLAYER auto-next -> {next_path}")
@@ -2906,13 +2926,35 @@ def handle_button_event(btn_value: str) -> None:
     if btn.endswith("_LP"):
         mark_dirty(btn.replace("_LP", " long"))
 
+    # USB eject confirmation is global so it works regardless of where the
+    # confirmation overlay was opened from.
+    if state.usb_eject_confirm and state.ui_mode != "power_menu":
+        if btn == "LEFT":
+            state.usb_eject_confirm = False
+            invalidate_full_display()
+            mark_dirty("Eject canceled")
+            return
+        if btn == "SEL":
+            pulse_button_activity()
+            confirm_usb_eject()
+            return
+        mark_dirty("Confirm USB eject")
+        return
+
     if btn == "SEL_LP":
         pulse_button_activity()
         enter_power_menu()
         return
 
-    # Global hidden panic button: keep SEL_LP reserved for power menu,
-    # and reserve RIGHT_LP for USB eject inside file-related UI.
+    # Global LEFT long-press USB eject. It is allowed from any normal UI level,
+    # but request_usb_eject() refuses while playback is actually running.
+    if btn == "LEFT_LP" and state.ui_mode != "power_menu":
+        pulse_button_activity()
+        request_usb_eject()
+        return
+
+    # Global hidden panic button: keep SEL_LP reserved for power menu.
+    # LEFT_LP is reserved for USB eject/unmount when playback is not running.
     if btn == "DOWN_LP" and state.ui_mode != "power_menu":
         pulse_button_activity()
         midi_panic()
@@ -3026,12 +3068,20 @@ def handle_button_event(btn_value: str) -> None:
                 return
         if btn == "UP":
             pulse_button_activity()
-            state.browser_index = (state.browser_index - 1) % max(1, len(entries))
-            mark_dirty(None); return
+            if state.browser_index > 0:
+                state.browser_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
+            return
         if btn == "DOWN":
             pulse_button_activity()
-            state.browser_index = (state.browser_index + 1) % max(1, len(entries))
-            mark_dirty(None); return
+            if state.browser_index < len(entries) - 1:
+                state.browser_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
+            return
         if btn == "SEL":
             pulse_button_activity()
             file_source_select(); return
@@ -3057,12 +3107,20 @@ def handle_button_event(btn_value: str) -> None:
                 confirm_usb_eject(); return
         if btn == "UP":
             pulse_button_activity()
-            state.browser_index = (state.browser_index - 1) % max(1, len(state.browser_entries))
-            mark_dirty(None); return
+            if state.browser_entries and state.browser_index > 0:
+                state.browser_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
+            return
         if btn == "DOWN":
             pulse_button_activity()
-            state.browser_index = (state.browser_index + 1) % max(1, len(state.browser_entries))
-            mark_dirty(None); return
+            if state.browser_entries and state.browser_index < len(state.browser_entries) - 1:
+                state.browser_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
+            return
         if btn == "SEL":
             pulse_button_activity()
             browser_select(); return
@@ -3263,6 +3321,7 @@ def serial_reader() -> None:
                 time.sleep(0.02)
                 send_serial_line("PLAY:OFF")
                 last_serial_hb_time = time.time()
+                state.serial_input_ignore_until = time.time() + SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC
                 mark_dirty("Serial connected")
 
             raw = ser.readline()
@@ -3437,6 +3496,10 @@ def request_usb_eject() -> None:
     if state.player_status == "Playing":
         mark_dirty("Stop or pause first")
         return
+    if not state.usb_mounted:
+        state.usb_eject_confirm = False
+        mark_dirty("USB not mounted")
+        return
     state.usb_eject_confirm = True
     invalidate_full_display()
     mark_dirty("USB eject confirm")
@@ -3508,6 +3571,13 @@ def handle_serial_line(line: str) -> None:
     msg_type, value = line.split(":", 1)
     msg_type = msg_type.strip().upper()
     value = value.strip()
+
+    # UNO-1 can emit transient analog-keypad/encoder states while resetting or
+    # immediately after USB serial reconnect. Treat that short window as a
+    # boot-settling period so playback is not accidentally changed.
+    if time.time() < state.serial_input_ignore_until and msg_type in {"BTN", "ENC", "POT", "A2", "A0", "ACCEL"}:
+        return
+
     if msg_type == "BTN":
         handle_button_event(value)
         return
@@ -3541,6 +3611,13 @@ def handle_encoder_value(value: str) -> None:
         return
     if step == 0:
         return
+
+    # Encoder rotation is mapped to UP/DOWN navigation. While a file is playing,
+    # ignore it explicitly so a reconnect glitch or accidental turn cannot jump tracks.
+    if state.ui_mode == "player" and state.player_status == "Playing":
+        mark_dirty("Encoder ignored while playing")
+        return
+
     event_name = "DOWN" if step > 0 else "UP"
     for _ in range(abs(step)):
         handle_button_event(event_name)
@@ -3549,7 +3626,10 @@ def handle_encoder_value(value: str) -> None:
 def maybe_render(force: bool = False) -> None:
     if not state.dirty:
         return
-    if (not force) and (time.time() - state.last_render_time < RENDER_MIN_INTERVAL):
+    if force:
+        display.render()
+        return
+    if time.time() - state.last_render_time < RENDER_MIN_INTERVAL:
         return
     display.render()
 
