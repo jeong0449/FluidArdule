@@ -333,7 +333,7 @@ aplay /usr/share/sounds/alsa/Front_Center.wav
 Fluid Ardule uses two Arduino Uno boards:
 
 - **UNO-1** — UI controller (buttons, encoder, LCD)
-- **UNO-2** — MIDI router / bridge
+- **(optional) UNO-2** — MIDI router
 
 Before proceeding, make sure both boards are flashed with the correct firmware.
 
@@ -352,7 +352,7 @@ Refer to the firmware provided in this repository (or the appropriate UI firmwar
 
 ---
 
-#### UNO-2 (MIDI engine)
+#### UNO-2
 
 UNO-2 firmware is maintained in the NanoArdule repository:
 
