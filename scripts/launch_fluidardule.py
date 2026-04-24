@@ -38,7 +38,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260424a"
+SCRIPT_VERSION = "v2.9-stage8-260424c"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -49,7 +49,15 @@ SOUNDFONTS = [
     ("/home/pi/sf2/SalC5Light2.sf2", "SalC5"),
     ("/home/pi/sf2/FluidR3_GM.sf2", "FluidR3"),
     ("/home/pi/sf2/GeneralUser_GS.sf2", "GUserGS"),
+    # Yoshimi is exposed through the same SoundFont menu as a synth-engine source.
+    # The JSON file should follow Fluid Ardule instrument-list v2 and contain
+    # Yoshimi .xiz entries grouped by bank_name.
+    ("/home/pi/sf2/yoshimi.patches.json", "Yoshimi"),
 ]
+
+YOSHIMI_EXECUTABLE = "yoshimi"
+YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
+YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.35
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -77,6 +85,7 @@ FIXED_MIDI_SRC = None
 LOG_DIR = "/home/pi/log/fluidardule"
 FLUID_LOG_PATH = f"{LOG_DIR}/fluidsynth.log"
 PLAYER_LOG_PATH = f"{LOG_DIR}/player.log"
+YOSHIMI_LOG_PATH = f"{LOG_DIR}/yoshimi.log"
 AMIXER_CONTROL = "PCM"
 FIX_VOLUME_AT_100 = True
 POT_VOLUME_ENABLED = True
@@ -174,6 +183,8 @@ class RuntimeState:
     current_preset_bank: int = 0
     current_preset_program: int = 0
     current_preset_name: str = "Piano"
+    current_engine: str = "fluidsynth"
+    current_instrument_path: str | None = None
 
     dac_index: int = 0
     dac_name: str = DEFAULT_DAC[1]
@@ -224,6 +235,10 @@ class RuntimeState:
     preview_restore_preset_bank: int = 0
     preview_restore_preset_program: int = 0
     preview_restore_preset_name: str = ""
+    preview_restore_engine: str = "fluidsynth"
+    preview_restore_instrument_path: str | None = None
+    pending_yoshimi_preview_index: int | None = None
+    pending_yoshimi_preview_due: float = 0.0
 
     browser_root: str = FILE_MEDIA_ROOT
     browser_path: str = FILE_MEDIA_ROOT
@@ -272,6 +287,7 @@ state = RuntimeState(sf_index=0, sf_name=SOUNDFONTS[0][1])
 event_q: queue.Queue[str] = queue.Queue()
 fluid_proc = None
 fluid_log_handle = None
+yoshimi_log_handle = None
 player_proc = None
 player_log_handle = None
 serial_handle = None
@@ -1213,7 +1229,9 @@ class TFTDisplay:
             if total:
                 value = str(total)
                 if total > 1:
-                    value += " >"
+                    # Show the navigation hint only on the highlighted row.
+                    # Single-instrument sources do not need a "go deeper" hint.
+                    value += " > Press Right" if idx == state.submenu_index else " >"
                 value_fill = ACCENT if idx != state.submenu_index else FG
                 draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
 
@@ -1623,8 +1641,13 @@ def parse_aconnect_clients() -> list[tuple[str, str]]:
 def find_fluidsynth_port() -> str | None:
     for item in parse_aconnect_ports():
         name = item['client_name']
-        if "FLUID Synth" in name or "FluidSynth" in name or "fluidsynth" in name:
-            return item['port']
+        low = name.lower()
+        if state.current_engine == "yoshimi":
+            if "yoshimi" in low:
+                return item['port']
+        else:
+            if "FLUID Synth" in name or "FluidSynth" in name or "fluidsynth" in low:
+                return item['port']
     return None
 
 
@@ -1644,7 +1667,7 @@ def list_alsa_seq_input_ports() -> list[tuple[str, str]]:
         client_name_l = client_name.lower()
         if client_name in {'System', 'Midi Through'}:
             continue
-        if 'fluid synth' in client_name_l or 'fluidsynth' in client_name_l:
+        if 'fluid synth' in client_name_l or 'fluidsynth' in client_name_l or 'yoshimi' in client_name_l:
             continue
         if BRIDGE_PORT_HINT.lower() in client_name_l or 'uno-midi-bridge' in client_name_l:
             continue
@@ -1898,7 +1921,42 @@ def resolve_client_name_from_port(port: str) -> str:
 
 
 def reconnect_midi_to_fluidsynth(force_draw: bool = True) -> None:
+    """Reconnect the selected MIDI source to the currently running engine.
+
+    FluidSynth in RAW mode binds directly to the raw MIDI device at engine start.
+    Yoshimi, however, exposes an ALSA sequencer port even when launched headless,
+    so it must be connected with aconnect. For Yoshimi, prefer a real ALSA SEQ
+    input regardless of the current Fluid Ardule MIDI mode label.
+    """
     state.fluid_dst_port = "-"
+
+    if state.current_engine == "yoshimi":
+        dst = find_fluidsynth_port()  # engine-aware: returns Yoshimi port here
+        src, src_name = choose_alsa_seq_input()
+        if not src or not dst:
+            state.midi_connected = False
+            state.midi_src_port = src or "-"
+            state.midi_src_name = src_name or "No ALSA seq input"
+            state.fluid_dst_port = dst or "-"
+            refresh_midi_display_text()
+            if force_draw:
+                mark_dirty("Yoshimi MIDI waiting")
+            clear_midi_reconnect_pending()
+            return
+        code, out = run_cmd(["aconnect", src, dst])
+        already = "already" in out.lower()
+        state.midi_src_port = src
+        state.midi_src_name = src_name or src
+        state.selected_alsa_input = src
+        state.selected_alsa_input_name = src_name or src
+        state.fluid_dst_port = dst
+        state.midi_connected = (code == 0 or already)
+        refresh_midi_display_text()
+        clear_midi_reconnect_pending()
+        if force_draw:
+            mark_dirty("Yoshimi connected" if state.midi_connected else f"Yoshimi aconnect failed: {out[:28]}")
+        return
+
     if state.midi_mode == "usb_direct_raw":
         selected_port, selected_name = choose_raw_midi_input()
         state.midi_src_port = selected_port or '-'
@@ -1925,11 +1983,58 @@ def reconnect_midi_to_fluidsynth(force_draw: bool = True) -> None:
 
 
 # =========================================================
-# File browser helpers
+# Instrument source helpers (SF2 / Yoshimi v2 JSON)
 # =========================================================
 
+def source_path_for_index(sf_index: int) -> str:
+    return SOUNDFONTS[sf_index][0]
+
+
+def source_name_for_index(sf_index: int) -> str:
+    return SOUNDFONTS[sf_index][1]
+
+
+def read_instrument_payload_for_index(sf_index: int) -> dict:
+    src = Path(source_path_for_index(sf_index))
+    if not src.exists() or src.suffix.lower() != ".json":
+        return {}
+    try:
+        return json.loads(src.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(f"instrument json load failed: {src}: {exc}")
+        return {}
+
+
+def source_engine_for_index(sf_index: int) -> str:
+    src = Path(source_path_for_index(sf_index))
+    name = source_name_for_index(sf_index).lower()
+    if src.suffix.lower() == ".json":
+        payload = read_instrument_payload_for_index(sf_index)
+        engine = str(payload.get("engine", "")).lower().strip()
+        if engine:
+            return engine
+    if "yoshimi" in name:
+        return "yoshimi"
+    return "fluidsynth"
+
+
+def is_yoshimi_source(sf_index: int) -> bool:
+    return source_engine_for_index(sf_index) == "yoshimi"
+
+
+def first_fluidsynth_sf2_path() -> str:
+    for path, _name in SOUNDFONTS:
+        if Path(path).suffix.lower() == ".sf2":
+            return path
+    return "/home/pi/sf2/FluidR3_GM.sf2"
+
+
 def current_soundfont_path() -> str:
-    return SOUNDFONTS[state.sf_index][0]
+    # MIDI file playback still needs an SF2 file. If the live engine is Yoshimi,
+    # fall back to the first configured SF2 for MIDI-file rendering.
+    if is_yoshimi_source(state.sf_index):
+        return first_fluidsynth_sf2_path()
+    return source_path_for_index(state.sf_index)
 
 
 
@@ -1950,48 +2055,239 @@ def categorize_preset(bank: int, program: int, name: str = "") -> str:
         return "Other"
 
 
-def preset_json_path_for_sf2(sf2_path: str) -> Path:
-    return Path(sf2_path).with_suffix(".presets.json")
+def preset_json_path_for_source(source_path: str) -> Path:
+    src = Path(source_path)
+    if src.suffix.lower() == ".json":
+        return src
+    return src.with_suffix(".presets.json")
 
+
+
+def first_nonempty_value(item: dict, keys: list[str]) -> str:
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: Path | None = None) -> str:
+    """Return an absolute .xiz path from a Yoshimi v2 patch/instrument item.
+
+    Prefer canonical nested v2 fields such as:
+      item["yoshimi"]["patch_path"]
+      item["yoshimi"]["bank_path"] + item["yoshimi"]["patch_file"]
+    Flat legacy keys remain supported as fallback.
+    """
+    y = item.get("yoshimi") or {}
+    if not isinstance(y, dict):
+        y = {}
+
+    for key in (
+        "patch_path", "path", "source_path", "file_path", "xiz_path",
+        "instrument_path", "full_path",
+    ):
+        value = y.get(key)
+        if value:
+            text = str(value).strip()
+            if text:
+                return text
+
+    bank_path = str(y.get("bank_path") or "").strip()
+    patch_file = str(y.get("patch_file") or y.get("file") or y.get("filename") or "").strip()
+    if bank_path and patch_file:
+        return str(Path(bank_path) / patch_file)
+
+    raw = first_nonempty_value(item, [
+        "patch_path", "path", "source_path", "file_path", "xiz_path", "file",
+        "filepath", "filename", "file_name", "instrument_path",
+        "instrument_file", "full_path", "patch_file", "basename",
+    ])
+
+    candidates: list[Path] = []
+    bank_name = bank_name or str(y.get("bank_name") or item.get("bank_name") or item.get("category") or "").strip()
+    bank_dir = Path(bank_path) if bank_path else (Path(YOSHIMI_DEFAULT_ROOT) / bank_name if bank_name else Path(YOSHIMI_DEFAULT_ROOT))
+
+    def add_candidate(path_like) -> None:
+        text = str(path_like).strip()
+        if not text:
+            return
+        candidate = Path(text)
+        if candidate.is_absolute():
+            candidates.append(candidate)
+        else:
+            if bank_path:
+                candidates.append(Path(bank_path) / candidate)
+            if json_path is not None:
+                candidates.append(json_path.parent / candidate)
+            if bank_name:
+                candidates.append(bank_dir / candidate)
+            candidates.append(Path(YOSHIMI_DEFAULT_ROOT) / candidate)
+
+    if raw:
+        add_candidate(raw)
+
+    name = str(item.get("name", "")).strip()
+    slot_raw = item.get("slot", item.get("program", item.get("number", "")))
+    slot_values: list[int] = []
+    try:
+        slot_values.append(int(slot_raw))
+    except Exception:
+        pass
+
+    if bank_name and name:
+        inferred_names = [
+            f"{name}.xiz",
+            f"{name.replace(' ', '_')}.xiz",
+            f"{name.replace('_', ' ')}.xiz",
+        ]
+        for slot in slot_values:
+            for n in {slot, slot - 1, slot + 1}:
+                if n >= 0:
+                    inferred_names.extend([
+                        f"{n:04d}-{name}.xiz",
+                        f"{n:04d}_{name}.xiz",
+                        f"{n:04d}-{name.replace(' ', '_')}.xiz",
+                        f"{n:04d}_{name.replace(' ', '_')}.xiz",
+                    ])
+        for filename in inferred_names:
+            candidates.append(bank_dir / filename)
+
+        for pat in [
+            f"*{name}*.xiz",
+            f"*{name.replace(' ', '_')}*.xiz",
+            f"*{name.replace('_', ' ')}*.xiz",
+        ]:
+            try:
+                candidates.extend(bank_dir.glob(pat))
+            except Exception:
+                pass
+
+        def norm(text: str) -> str:
+            text = text.lower().replace("_", " ").replace("-", " ")
+            text = re.sub(r"\.xiz$", "", text)
+            text = re.sub(r"^\s*\d{1,4}\s+", "", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text
+
+        wanted = norm(name)
+        try:
+            for child in bank_dir.glob("*.xiz"):
+                child_norm = norm(child.name)
+                if child_norm == wanted or wanted in child_norm:
+                    candidates.append(child)
+        except Exception:
+            pass
+
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            key = str(c)
+            if key in seen:
+                continue
+            seen.add(key)
+            if c.exists() and c.is_file():
+                return str(c.resolve())
+        except Exception:
+            continue
+
+    if candidates:
+        return str(candidates[0])
+    return ""
+
+def find_current_yoshimi_preset() -> dict | None:
+    presets = load_presets_for_sf2(state.sf_index)
+    if not presets:
+        return None
+    current_path = str(state.current_instrument_path or "").strip()
+    if current_path:
+        for p in presets:
+            if str(p.get("path", "")).strip() == current_path:
+                return p
+    for p in presets:
+        if (
+            int(p.get("bank", p.get("bank_id", -999))) == int(state.current_preset_bank)
+            and int(p.get("program", p.get("slot", -999))) == int(state.current_preset_program)
+            and (not state.current_preset_name or str(p.get("name", "")) == str(state.current_preset_name))
+        ):
+            return p
+    return choose_default_preset(presets)
 
 def load_presets_for_sf2(sf_index: int) -> list[dict]:
-    sf2_path, _sf_name = SOUNDFONTS[sf_index]
-    json_path = preset_json_path_for_sf2(sf2_path)
+    source_path, _source_name = SOUNDFONTS[sf_index]
+    json_path = preset_json_path_for_source(source_path)
     if not json_path.exists():
         return []
     try:
         payload = json.loads(json_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log(f"preset json load failed: {exc}")
+        log(f"instrument json load failed: {json_path}: {exc}")
         return []
 
-    presets = payload.get("presets", [])
+    source_engine = str(payload.get("engine", source_engine_for_index(sf_index))).lower().strip() or "fluidsynth"
+    items = payload.get("instruments") or payload.get("patches") or payload.get("presets") or []
     cleaned: list[dict] = []
-    for item in presets:
+
+    for item in items:
         try:
-            bank = int(item.get("bank", 0))
-            program = int(item.get("program", 0))
+            engine = str(item.get("engine", source_engine)).lower().strip() or source_engine
             name = str(item.get("name", "")).strip() or "Unnamed"
-            cleaned.append({
-                "name": name,
-                "bank": bank,
-                "program": program,
-                "category": categorize_preset(bank, program, name),
-            })
+
+            if engine == "yoshimi":
+                y = item.get("yoshimi") or {}
+                if not isinstance(y, dict):
+                    y = {}
+                bank_id = int(y.get("bank_number", item.get("bank_id", item.get("bank", 0))))
+                slot = int(item.get("slot", item.get("program", item.get("number", 0))))
+                bank_name = str(y.get("bank_name", item.get("bank_name", item.get("category", "Yoshimi")))).strip() or "Yoshimi"
+                xiz_path = resolve_yoshimi_instrument_path(item, bank_name, json_path)
+                cleaned.append({
+                    "name": name,
+                    "bank": bank_id,
+                    "program": slot,
+                    "category": bank_name,
+                    "engine": "yoshimi",
+                    "bank_id": bank_id,
+                    "bank_name": bank_name,
+                    "slot": slot,
+                    "path": xiz_path,
+                    "is_drum": False,
+                })
+            else:
+                bank = int(item.get("bank", 0))
+                program = int(item.get("program", 0))
+                category = str(item.get("category", "")).strip() or categorize_preset(bank, program, name)
+                cleaned.append({
+                    "name": name,
+                    "bank": bank,
+                    "program": program,
+                    "category": category,
+                    "engine": "fluidsynth",
+                    "is_drum": bool(item.get("is_drum", bank == 128)),
+                })
         except Exception:
             continue
-    cleaned.sort(key=lambda x: (x["bank"], x["program"], x["name"].lower()))
+
+    if source_engine == "yoshimi":
+        cleaned.sort(key=lambda x: (str(x.get("bank_name", x.get("category", ""))).lower(), int(x.get("slot", x.get("program", 0))), x["name"].lower()))
+    else:
+        cleaned.sort(key=lambda x: (x["bank"], x["program"], x["name"].lower()))
     return cleaned
 
 
 def soundfont_preset_counts(sf_index: int) -> tuple[int, int]:
-    sf2_path, _sf_name = SOUNDFONTS[sf_index]
-    json_path = preset_json_path_for_sf2(sf2_path)
+    source_path, _source_name = SOUNDFONTS[sf_index]
+    json_path = preset_json_path_for_source(source_path)
     if not json_path.exists():
         return 0, 0
     try:
         payload = json.loads(json_path.read_text(encoding="utf-8"))
-        return int(payload.get("preset_count", 0)), int(payload.get("drum_preset_count", 0))
+        total = int(payload.get("instrument_count", payload.get("preset_count", 0)))
+        drums = int(payload.get("drum_count", payload.get("drum_preset_count", 0)))
+        return total, drums
     except Exception:
         return 0, 0
 
@@ -2023,7 +2319,7 @@ def enter_preset_submenu(sf_index: int) -> None:
             cats.append(cat)
     state.category_entries = cats
     state.category_source_sf_index = sf_index
-    state.category_source_name = SOUNDFONTS[sf_index][1]
+    state.category_source_name = source_name_for_index(sf_index)
     state.ui_mode = "submenu"
     state.submenu_key = "preset_category"
     state.category_index = 0
@@ -2053,7 +2349,7 @@ def enter_preset_list_from_category(category_index: int) -> None:
         return
     state.preset_entries = filtered
     state.preset_sf_index = sf_index
-    state.preset_source_name = SOUNDFONTS[sf_index][1]
+    state.preset_source_name = source_name_for_index(sf_index)
     state.category_index = category_index
     state.ui_mode = "submenu"
     state.submenu_key = "preset"
@@ -2061,8 +2357,8 @@ def enter_preset_list_from_category(category_index: int) -> None:
     for i, p in enumerate(filtered):
         if (
             sf_index == state.sf_index
-            and p.get("bank") == state.current_preset_bank
-            and p.get("program") == state.current_preset_program
+            and p.get("bank", p.get("bank_id", 0)) == state.current_preset_bank
+            and p.get("program", p.get("slot", 0)) == state.current_preset_program
         ):
             state.submenu_index = i
             break
@@ -2097,6 +2393,8 @@ def begin_preset_preview_session() -> None:
     state.preview_restore_preset_bank = state.current_preset_bank
     state.preview_restore_preset_program = state.current_preset_program
     state.preview_restore_preset_name = state.current_preset_name
+    state.preview_restore_engine = state.current_engine
+    state.preview_restore_instrument_path = state.current_instrument_path
 
 
 def preview_preset_at_index(index: int) -> None:
@@ -2105,6 +2403,25 @@ def preview_preset_at_index(index: int) -> None:
     idx = clamp_index(index, len(state.preset_entries))
     p = state.preset_entries[idx]
     target_sf_index = state.preset_sf_index if state.preset_sf_index is not None else state.sf_index
+
+    # Yoshimi preview is intentionally debounced. Moving through the list only
+    # updates the highlight immediately; the actual .xiz load is delayed until
+    # the user stops pressing UP/DOWN for a short moment. This prevents repeated
+    # Yoshimi restarts while scrolling.
+    if p.get("engine") == "yoshimi":
+        state.sf_index = target_sf_index
+        state.sf_name = source_name_for_index(target_sf_index)
+        state.current_preset_bank = int(p.get("bank", p.get("bank_id", 0)))
+        state.current_preset_program = int(p.get("program", p.get("slot", 0)))
+        state.current_preset_name = str(p.get("name", "Yoshimi"))
+        state.preview_active = True
+        state.preset_index = idx
+        state.submenu_index = idx
+        state.pending_yoshimi_preview_index = idx
+        state.pending_yoshimi_preview_due = time.time() + YOSHIMI_PREVIEW_DEBOUNCE_SEC
+        mark_dirty(f'Preview queued: {p["name"]}')
+        return
+
     if target_sf_index != state.sf_index:
         restart_engine(target_sf_index, state.dac_index)
     apply_preset(p["bank"], p["program"], p["name"])
@@ -2115,7 +2432,38 @@ def preview_preset_at_index(index: int) -> None:
     mark_dirty(f'Preview: {p["name"]} ({p["bank"]},{p["program"]}){drum_tag}')
 
 
+def process_pending_yoshimi_preview() -> None:
+    if state.pending_yoshimi_preview_index is None:
+        return
+    if state.ui_mode != "submenu" or state.submenu_key != "preset":
+        state.pending_yoshimi_preview_index = None
+        state.pending_yoshimi_preview_due = 0.0
+        return
+    if time.time() < state.pending_yoshimi_preview_due:
+        return
+    idx = state.pending_yoshimi_preview_index
+    state.pending_yoshimi_preview_index = None
+    state.pending_yoshimi_preview_due = 0.0
+    if not state.preset_entries:
+        return
+    idx = clamp_index(idx, len(state.preset_entries))
+    if idx != state.submenu_index:
+        return
+    p = state.preset_entries[idx]
+    if p.get("engine") != "yoshimi":
+        return
+    path = str(p.get("path", "")).strip()
+    state.current_instrument_path = path
+    if not path:
+        mark_dirty(f'Yoshimi path missing: {p.get("name", "Yoshimi")}')
+        log(f"Yoshimi preview rejected: empty path for {p}")
+        return
+    mark_dirty(f'Preview Yoshimi: {p.get("name", "Yoshimi")}')
+    start_yoshimi_instrument(path, state.audio_device)
+
 def cancel_preset_preview_and_restore() -> None:
+    state.pending_yoshimi_preview_index = None
+    state.pending_yoshimi_preview_due = 0.0
     if state.preview_restore_sf_index is None:
         state.preview_active = False
         return
@@ -2123,18 +2471,37 @@ def cancel_preset_preview_and_restore() -> None:
     restore_bank = state.preview_restore_preset_bank
     restore_program = state.preview_restore_preset_program
     restore_name = state.preview_restore_preset_name
-    if restore_sf != state.sf_index:
-        restart_engine(restore_sf, state.dac_index)
-    apply_preset(restore_bank, restore_program, restore_name)
+    restore_engine = state.preview_restore_engine or "fluidsynth"
+    restore_path = str(state.preview_restore_instrument_path or "").strip()
+
+    state.sf_index = restore_sf
+    state.sf_name = source_name_for_index(restore_sf)
+
+    if restore_engine == "yoshimi" or is_yoshimi_source(restore_sf):
+        if restore_path:
+            apply_preset(restore_bank, restore_program, restore_name, engine="yoshimi", path=restore_path)
+        else:
+            mark_dirty("Yoshimi restore path missing")
+    else:
+        if state.current_engine == "yoshimi":
+            restart_engine(restore_sf, state.dac_index)
+        apply_preset(restore_bank, restore_program, restore_name, engine="fluidsynth")
     state.preview_active = False
 
 
 def commit_current_preview() -> None:
+    # If a Yoshimi preview is pending, load it before committing so SEL confirms
+    # the item currently highlighted on the screen.
+    if state.pending_yoshimi_preview_index is not None:
+        state.pending_yoshimi_preview_due = 0.0
+        process_pending_yoshimi_preview()
     state.preview_active = False
     state.preview_restore_sf_index = None
     state.preview_restore_preset_bank = state.current_preset_bank
     state.preview_restore_preset_program = state.current_preset_program
     state.preview_restore_preset_name = state.current_preset_name
+    state.preview_restore_engine = state.current_engine
+    state.preview_restore_instrument_path = state.current_instrument_path
 
 
 
@@ -2397,6 +2764,95 @@ def stop_fluidsynth() -> None:
     state.midi_connected = False
 
 
+def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
+    """Start Yoshimi headlessly and load one .xiz instrument at launch.
+
+    Important:
+    - Do not drive Yoshimi through the interactive CLI.
+    - Use the command form verified on the target system:
+      yoshimi -i -A -a -L /path/to/instrument.xiz
+    - Keep stdin closed with DEVNULL so the prompt cannot fill the log.
+    """
+    global fluid_proc, yoshimi_log_handle
+
+    xiz_path = str(xiz_path or "").strip()
+    if not xiz_path:
+        mark_dirty("Yoshimi path missing")
+        log("Yoshimi start rejected: empty instrument path")
+        return False
+
+    xiz = Path(xiz_path)
+    if not xiz.exists():
+        mark_dirty(f"Yoshimi file missing: {shorten_text(xiz.name, 18)}")
+        log(f"Yoshimi instrument file missing: {xiz_path}")
+        return False
+
+    # Stop the currently managed engine first. This is intentionally the same
+    # process slot used by FluidSynth, because Fluid Ardule runs only one live
+    # synth engine at a time.
+    stop_fluidsynth()
+
+    # Clean up any stale Yoshimi instance left by an earlier failed test run.
+    # This keeps ALSA ports unambiguous for aconnect.
+    run_cmd(["pkill", "-TERM", "-x", "yoshimi"])
+    time.sleep(0.2)
+
+    os.makedirs(LOG_DIR, exist_ok=True)
+    if yoshimi_log_handle:
+        try:
+            yoshimi_log_handle.close()
+        except Exception:
+            pass
+    yoshimi_log_handle = open(YOSHIMI_LOG_PATH, "w", buffering=1)
+
+    cmd = [
+        YOSHIMI_EXECUTABLE,
+        "-i",
+        "-A",
+        "-a",
+        "-L",
+        xiz_path,
+    ]
+
+    log(f"Starting Yoshimi with {xiz.name} / {audio_device}")
+    try:
+        yoshimi_log_handle.write("CMD: " + " ".join(cmd) + "\n")
+        yoshimi_log_handle.flush()
+    except Exception:
+        pass
+
+    try:
+        fluid_proc = subprocess.Popen(
+            cmd,
+            stdout=yoshimi_log_handle,
+            stderr=yoshimi_log_handle,
+            stdin=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+            text=True,
+        )
+    except FileNotFoundError:
+        mark_dirty("Yoshimi missing")
+        return False
+    except Exception as exc:
+        mark_dirty(f"Yoshimi start failed: {exc}")
+        log(f"Yoshimi start exception: {exc}")
+        return False
+
+    time.sleep(1.2)
+    if fluid_proc.poll() is None:
+        state.fluid_pid = fluid_proc.pid
+        state.current_engine = "yoshimi"
+        reconnect_midi_to_fluidsynth(force_draw=True)
+        return True
+
+    rc = fluid_proc.returncode
+    fluid_proc = None
+    state.fluid_pid = None
+    mark_dirty(f"Yoshimi failed rc={rc}")
+    log(f"Yoshimi failed to start; returncode={rc}. See {YOSHIMI_LOG_PATH}")
+    return False
+
+
 def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
     global fluid_proc
     stop_fluidsynth()
@@ -2435,6 +2891,7 @@ def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
     time.sleep(1.2)
     if fluid_proc.poll() is None:
         state.fluid_pid = fluid_proc.pid
+        state.current_engine = "fluidsynth"
         state.player_proc_kind = None
         reconnect_midi_to_fluidsynth(force_draw=False)
         return True
@@ -2456,11 +2913,24 @@ def send_fluidsynth_command(command: str) -> bool:
         return False
 
 
-def apply_preset(bank: int, program: int, name: str | None = None) -> None:
+def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
     state.current_preset_bank = int(bank)
     state.current_preset_program = int(program)
     if name:
         state.current_preset_name = name
+
+    if engine == "yoshimi":
+        path = str(path or state.current_instrument_path or "").strip()
+        if not path:
+            mark_dirty("Yoshimi path missing")
+            log(f"Yoshimi apply rejected: empty path for {state.current_preset_name}")
+            return
+        state.current_engine = "yoshimi"
+        state.current_instrument_path = path
+        ok = start_yoshimi_instrument(path, state.audio_device)
+        if ok:
+            mark_dirty(f"Yoshimi -> {state.current_preset_name}")
+        return
 
     is_drum = (state.current_preset_bank == 128)
     ok = False
@@ -2482,11 +2952,27 @@ def apply_preset(bank: int, program: int, name: str | None = None) -> None:
         mark_dirty(f"Preset queued: {state.current_preset_name}")
 
 def apply_soundfont_with_default_preset(sf_index: int) -> None:
-    restart_engine(sf_index, state.dac_index)
     presets = load_presets_for_sf2(sf_index)
     default_preset = choose_default_preset(presets)
+
+    if is_yoshimi_source(sf_index):
+        state.sf_index = sf_index % len(SOUNDFONTS)
+        state.sf_name = source_name_for_index(state.sf_index)
+        if default_preset:
+            apply_preset(
+                default_preset.get("bank", default_preset.get("bank_id", 0)),
+                default_preset.get("program", default_preset.get("slot", 0)),
+                default_preset.get("name", "Yoshimi"),
+                engine="yoshimi",
+                path=default_preset.get("path"),
+            )
+        else:
+            mark_dirty("No Yoshimi JSON")
+        return
+
+    restart_engine(sf_index, state.dac_index)
     if default_preset:
-        apply_preset(default_preset["bank"], default_preset["program"], default_preset["name"])
+        apply_preset(default_preset["bank"], default_preset["program"], default_preset["name"], engine="fluidsynth")
     else:
         state.current_preset_bank = 0
         state.current_preset_program = 0
@@ -2495,10 +2981,33 @@ def apply_soundfont_with_default_preset(sf_index: int) -> None:
 
 
 def restore_current_preset_after_engine_restart() -> None:
+    if is_yoshimi_source(state.sf_index) or state.current_engine == "yoshimi":
+        preset = find_current_yoshimi_preset()
+        path = str(state.current_instrument_path or "").strip()
+        if preset and not path:
+            path = str(preset.get("path", "")).strip()
+        if not path:
+            mark_dirty("Yoshimi path lost")
+            log("Yoshimi restore failed: current instrument path is empty")
+            return
+        if preset:
+            state.current_preset_bank = int(preset.get("bank", preset.get("bank_id", state.current_preset_bank)))
+            state.current_preset_program = int(preset.get("program", preset.get("slot", state.current_preset_program)))
+            state.current_preset_name = str(preset.get("name", state.current_preset_name))
+        state.current_instrument_path = path
+        apply_preset(
+            state.current_preset_bank,
+            state.current_preset_program,
+            state.current_preset_name,
+            engine="yoshimi",
+            path=path,
+        )
+        return
     apply_preset(
         state.current_preset_bank,
         state.current_preset_program,
         state.current_preset_name,
+        engine="fluidsynth",
     )
 
 
@@ -2509,16 +3018,56 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
     audio_device, dac_name = state.dac_options[dac_index]
     if state.midi_mode != "uno2_bridge_seq":
         stop_bridge()
-    mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
-    ok = start_fluidsynth(sf_path, audio_device)
-    if not ok:
-        return
+
     state.sf_index = sf_index
     state.sf_name = sf_name
     state.dac_index = dac_index
     state.dac_name = dac_name
     state.audio_device = audio_device
     state.dac_preview_index = state.dac_index
+
+    if is_yoshimi_source(sf_index):
+        presets = load_presets_for_sf2(sf_index)
+        target = None
+        current_path = str(state.current_instrument_path or "").strip()
+        if current_path:
+            for p in presets:
+                if str(p.get("path", "")).strip() == current_path:
+                    target = p
+                    break
+        if target is None:
+            for p in presets:
+                if (
+                    int(p.get("bank", p.get("bank_id", -999))) == int(state.current_preset_bank)
+                    and int(p.get("program", p.get("slot", -999))) == int(state.current_preset_program)
+                    and str(p.get("name", state.current_preset_name)) == str(state.current_preset_name)
+                ):
+                    target = p
+                    break
+        target = target or choose_default_preset(presets)
+        if not target:
+            mark_dirty("No Yoshimi JSON")
+            return
+        path = str(target.get("path", current_path)).strip()
+        if not path:
+            mark_dirty("Yoshimi path missing")
+            log(f"Yoshimi restart rejected: empty path for target={target}")
+            return
+        mark_dirty(f"Restarting -> Yoshimi:{target.get('name','Instrument')} / DAC:{dac_name}")
+        state.current_preset_bank = int(target.get("bank", target.get("bank_id", 0)))
+        state.current_preset_program = int(target.get("program", target.get("slot", 0)))
+        state.current_preset_name = str(target.get("name", "Yoshimi"))
+        state.current_instrument_path = path
+        ok = start_yoshimi_instrument(path, audio_device)
+        if not ok:
+            return
+        mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
+        return
+
+    mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
+    ok = start_fluidsynth(sf_path, audio_device)
+    if not ok:
+        return
     reconnect_midi_to_fluidsynth(force_draw=False)
     mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
 
@@ -2694,7 +3243,6 @@ def poll_player_state() -> None:
             return
 
     restart_engine(state.sf_index, state.dac_index)
-    restore_current_preset_after_engine_restart()
 
     state.ui_mode = "player"
     invalidate_full_display()
@@ -2734,6 +3282,8 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
 
 
 def leave_submenu(event: str = "Back") -> None:
+    state.pending_yoshimi_preview_index = None
+    state.pending_yoshimi_preview_due = 0.0
     target = state.submenu_return_mode or "main"
     if state.submenu_key == "soundfont":
         state.pending_resume_after_sf_apply = False
@@ -2760,10 +3310,10 @@ def get_submenu_options() -> list[tuple[str, bool]]:
     if key == "preset":
         return [
             (
-                f'{p["name"]} ({p["bank"]},{p["program"]})',
+                (p["name"] if p.get("engine") == "yoshimi" else f'{p["name"]} ({p["bank"]},{p["program"]})'),
                 state.preset_sf_index == state.sf_index
-                and p["bank"] == state.current_preset_bank
-                and p["program"] == state.current_preset_program,
+                and p.get("bank", p.get("bank_id", 0)) == state.current_preset_bank
+                and p.get("program", p.get("slot", 0)) == state.current_preset_program,
             )
             for p in state.preset_entries
         ]
@@ -2792,9 +3342,21 @@ def apply_current_submenu_selection() -> None:
             return
         p = state.preset_entries[clamp_index(state.submenu_index, len(state.preset_entries))]
         target_sf_index = state.preset_sf_index if state.preset_sf_index is not None else state.sf_index
-        if target_sf_index != state.sf_index:
-            apply_soundfont_with_default_preset(target_sf_index)
-        apply_preset(p["bank"], p["program"], p["name"])
+        if p.get("engine") == "yoshimi":
+            state.sf_index = target_sf_index
+            state.sf_name = source_name_for_index(target_sf_index)
+            state.current_instrument_path = str(p.get("path", "")).strip()
+            apply_preset(
+                p.get("bank", p.get("bank_id", 0)),
+                p.get("program", p.get("slot", 0)),
+                p.get("name"),
+                engine="yoshimi",
+                path=state.current_instrument_path,
+            )
+        else:
+            if target_sf_index != state.sf_index:
+                apply_soundfont_with_default_preset(target_sf_index)
+            apply_preset(p["bank"], p["program"], p["name"], engine="fluidsynth")
         leave_submenu(f'Preset: {p["name"]}')
         return
     if key == "dac":
@@ -2963,11 +3525,19 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "power_menu":
         if state.power_confirm_action:
             if btn == "UP":
-                state.power_confirm_index = (state.power_confirm_index - 1) % len(POWER_CONFIRM_ITEMS)
-                mark_dirty(None); return
+                if state.power_confirm_index > 0:
+                    state.power_confirm_index -= 1
+                    mark_dirty(None)
+                else:
+                    mark_dirty("First item")
+                return
             if btn == "DOWN":
-                state.power_confirm_index = (state.power_confirm_index + 1) % len(POWER_CONFIRM_ITEMS)
-                mark_dirty(None); return
+                if state.power_confirm_index < len(POWER_CONFIRM_ITEMS) - 1:
+                    state.power_confirm_index += 1
+                    mark_dirty(None)
+                else:
+                    mark_dirty("Last item")
+                return
             if btn == "LEFT":
                 state.power_confirm_action = None
                 state.power_confirm_index = 0
@@ -2986,12 +3556,20 @@ def handle_button_event(btn_value: str) -> None:
 
         if btn == "UP":
             pulse_button_activity()
-            state.power_menu_index = (state.power_menu_index - 1) % len(POWER_MENU_ITEMS)
-            mark_dirty(None); return
+            if state.power_menu_index > 0:
+                state.power_menu_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
+            return
         if btn == "DOWN":
             pulse_button_activity()
-            state.power_menu_index = (state.power_menu_index + 1) % len(POWER_MENU_ITEMS)
-            mark_dirty(None); return
+            if state.power_menu_index < len(POWER_MENU_ITEMS) - 1:
+                state.power_menu_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
+            return
         if btn == "LEFT":
             pulse_button_activity()
             cancel_power_menu(); return
@@ -3151,17 +3729,23 @@ def handle_button_event(btn_value: str) -> None:
         options = get_submenu_options()
         if btn == "UP":
             pulse_button_activity()
-            state.submenu_index = (state.submenu_index - 1) % max(1, len(options))
-            total, drums = soundfont_preset_counts(state.submenu_index)
-            sf_name = SOUNDFONTS[state.submenu_index][1]
-            mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+            if state.submenu_index > 0:
+                state.submenu_index -= 1
+                total, drums = soundfont_preset_counts(state.submenu_index)
+                sf_name = source_name_for_index(state.submenu_index)
+                mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+            else:
+                mark_dirty("First item")
             return
         if btn == "DOWN":
             pulse_button_activity()
-            state.submenu_index = (state.submenu_index + 1) % max(1, len(options))
-            total, drums = soundfont_preset_counts(state.submenu_index)
-            sf_name = SOUNDFONTS[state.submenu_index][1]
-            mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+            if state.submenu_index < len(options) - 1:
+                state.submenu_index += 1
+                total, drums = soundfont_preset_counts(state.submenu_index)
+                sf_name = source_name_for_index(state.submenu_index)
+                mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+            else:
+                mark_dirty("Last item")
             return
         if btn == "SEL":
             pulse_button_activity()
@@ -3187,15 +3771,21 @@ def handle_button_event(btn_value: str) -> None:
         options = get_submenu_options()
         if btn == "UP":
             pulse_button_activity()
-            state.submenu_index = (state.submenu_index - 1) % max(1, len(options))
-            state.category_index = state.submenu_index
-            mark_dirty(state.category_entries[state.category_index] if state.category_entries else "Category")
+            if state.submenu_index > 0:
+                state.submenu_index -= 1
+                state.category_index = state.submenu_index
+                mark_dirty(state.category_entries[state.category_index] if state.category_entries else "Category")
+            else:
+                mark_dirty("First item")
             return
         if btn == "DOWN":
             pulse_button_activity()
-            state.submenu_index = (state.submenu_index + 1) % max(1, len(options))
-            state.category_index = state.submenu_index
-            mark_dirty(state.category_entries[state.category_index] if state.category_entries else "Category")
+            if state.submenu_index < len(options) - 1:
+                state.submenu_index += 1
+                state.category_index = state.submenu_index
+                mark_dirty(state.category_entries[state.category_index] if state.category_entries else "Category")
+            else:
+                mark_dirty("Last item")
             return
         if btn in {"SEL", "RIGHT"}:
             pulse_button_activity()
@@ -3212,18 +3802,23 @@ def handle_button_event(btn_value: str) -> None:
         options = get_submenu_options()
         if btn == "UP":
             pulse_button_activity()
-            preview_preset_at_index((state.submenu_index - 1) % max(1, len(options)))
+            if state.submenu_index > 0:
+                preview_preset_at_index(state.submenu_index - 1)
+            else:
+                mark_dirty("First item")
             return
         if btn == "DOWN":
             pulse_button_activity()
-            preview_preset_at_index((state.submenu_index + 1) % max(1, len(options)))
+            if state.submenu_index < len(options) - 1:
+                preview_preset_at_index(state.submenu_index + 1)
+            else:
+                mark_dirty("Last item")
             return
         if btn == "SEL":
             pulse_button_activity()
             if state.preset_entries:
                 commit_current_preview()
-                p = state.preset_entries[clamp_index(state.submenu_index, len(state.preset_entries))]
-                leave_submenu(f'Preset: {p["name"]}')
+                apply_current_submenu_selection()
             else:
                 mark_dirty("No preset")
             return
@@ -3238,23 +3833,35 @@ def handle_button_event(btn_value: str) -> None:
     if btn == "UP":
         pulse_button_activity()
         if state.ui_mode == "main":
-            state.menu_index = (state.menu_index - 1) % len(MAIN_MENU)
-            mark_dirty(None)
+            if state.menu_index > 0:
+                state.menu_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
         else:
             options = get_submenu_options()
-            state.submenu_index = (state.submenu_index - 1) % max(1, len(options))
-            mark_dirty(None)
+            if state.submenu_index > 0:
+                state.submenu_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
         return
 
     if btn == "DOWN":
         pulse_button_activity()
         if state.ui_mode == "main":
-            state.menu_index = (state.menu_index + 1) % len(MAIN_MENU)
-            mark_dirty(None)
+            if state.menu_index < len(MAIN_MENU) - 1:
+                state.menu_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
         else:
             options = get_submenu_options()
-            state.submenu_index = (state.submenu_index + 1) % max(1, len(options))
-            mark_dirty(None)
+            if state.submenu_index < len(options) - 1:
+                state.submenu_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
         return
 
     if btn == "SEL":
@@ -3721,16 +4328,22 @@ def main() -> None:
             periodic_system_status_poll()
             periodic_serial_heartbeat()
             poll_player_state()
+            process_pending_yoshimi_preview()
             maybe_render()
     finally:
         stop_player_only()
         stop_midi_activity_monitor()
         stop_fluidsynth()
         stop_bridge()
-        global fluid_log_handle, player_log_handle
+        global fluid_log_handle, yoshimi_log_handle, player_log_handle
         if fluid_log_handle:
             try:
                 fluid_log_handle.close()
+            except Exception:
+                pass
+        if yoshimi_log_handle:
+            try:
+                yoshimi_log_handle.close()
             except Exception:
                 pass
         if player_log_handle:
