@@ -4087,8 +4087,17 @@ def periodic_usb_poll() -> None:
 
     if mounted_now:
         state.browser_root = find_file_root()
-        if state.ui_mode != "player":
-            enter_file_source(default_usb=True)
+        # USB hotplug/mount is a state change only.
+        # Do not force navigation to File Player during boot or runtime.
+        # The user should enter File Player explicitly from the menu.
+        if state.ui_mode == "file_source":
+            state.browser_index = 1 if len(get_file_source_entries()) > 1 else 0
+            invalidate_full_display()
+        elif state.ui_mode == "file_browser":
+            keep = None
+            if state.browser_entries and state.browser_index < len(state.browser_entries):
+                keep = state.browser_entries[state.browser_index]["name"]
+            refresh_browser_entries(keep_name=keep)
         mark_dirty("USB mounted")
     else:
         if normalize_path(state.browser_path).startswith(normalize_path(USB_MOUNT_POINT)):
