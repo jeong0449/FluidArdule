@@ -20,7 +20,7 @@
 // Behavior:
 //   D13 : blink until Pi link established, then steady ON
 //   D12 : PLAY status LED
-//   D11 : activity pulse only on ACT:MIDI from Pi
+//   D11 : activity LED for MIDI pulse and local button/encoder/pot input
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
 
@@ -46,9 +46,13 @@ const unsigned long POT_SEND_MS = 60;
 const unsigned long LINK_TIMEOUT_MS = 3000;
 const unsigned long LINK_BLINK_MS = 300;
 const unsigned long MIDI_LED_PULSE_MS = 70;
+const unsigned long INPUT_LED_HOLD_MS = 180;
+const unsigned long BUTTON_LED_BLINK_ON_MS = 70;
+const unsigned long BUTTON_LED_BLINK_OFF_MS = 70;
 const unsigned long PLAY_LED_BLINK_MS = 500;
 const unsigned long DEBUG_TAG_HOLD_MS = 1200;
-const int           POT_DELTA_MIN = 4;
+const int           POT_DELTA_SEND = 4;    // Serial POT reporting threshold
+const int           POT_DELTA_LED  = 12;   // Larger threshold to avoid LED stuck-on from A2 noise
 
 // ---- A0 thresholds (5.00V reference assumed) ----
 const int TH_LEFT_MAX   = 180;
@@ -86,6 +90,10 @@ unsigned long lastBlinkMs = 0;
 bool linkLedState = false;
 
 unsigned long midiLedUntilMs = 0;
+bool buttonLedBlinkActive = false;
+uint8_t buttonLedBlinkRemainingToggles = 0;
+bool buttonLedBlinkState = false;
+unsigned long buttonLedBlinkNextMs = 0;
 enum PlayLedMode { PLAY_LED_OFF = 0, PLAY_LED_ON = 1, PLAY_LED_BLINK = 2 };
 PlayLedMode playLedMode = PLAY_LED_OFF;
 bool playLedState = false;
@@ -117,6 +125,7 @@ unsigned long lastEncStepMs = 0;
 
 // ---- Pot state ----
 int lastPotSent = -1000;
+int lastPotLedRaw = -1;
 unsigned long lastPotSentMs = 0;
 
 // ---- Accel config ----
@@ -278,8 +287,28 @@ void notePiSeen() {
 }
 
 void pulseMidiLed() {
+  buttonLedBlinkActive = false;
   digitalWrite(PIN_LED_MIDI, HIGH);
   midiLedUntilMs = millis() + MIDI_LED_PULSE_MS;
+}
+
+void startButtonLedBlink(uint8_t blinkCount) {
+  if (blinkCount == 0) return;
+  buttonLedBlinkActive = true;
+  buttonLedBlinkRemainingToggles = blinkCount * 2;
+  buttonLedBlinkState = true;
+  digitalWrite(PIN_LED_MIDI, HIGH);
+  midiLedUntilMs = 0;
+  buttonLedBlinkNextMs = millis() + BUTTON_LED_BLINK_ON_MS;
+}
+
+void holdInputLed() {
+  // Keep D11 on while local analog/encoder input is actively changing.
+  // Repeated encoder/pot events extend this timeout, so the LED appears
+  // continuously ON during adjustment and turns off shortly afterward.
+  buttonLedBlinkActive = false;
+  digitalWrite(PIN_LED_MIDI, HIGH);
+  midiLedUntilMs = millis() + INPUT_LED_HOLD_MS;
 }
 
 void setPlayLedMode(PlayLedMode mode) {
@@ -329,6 +358,28 @@ void updateLinkLed() {
 
 void updateMidiLed() {
   unsigned long now = millis();
+
+  if (buttonLedBlinkActive) {
+    if (now >= buttonLedBlinkNextMs) {
+      buttonLedBlinkState = !buttonLedBlinkState;
+      digitalWrite(PIN_LED_MIDI, buttonLedBlinkState ? HIGH : LOW);
+
+      if (buttonLedBlinkRemainingToggles > 0) {
+        buttonLedBlinkRemainingToggles--;
+      }
+
+      if (buttonLedBlinkRemainingToggles == 0) {
+        buttonLedBlinkActive = false;
+        buttonLedBlinkState = false;
+        digitalWrite(PIN_LED_MIDI, LOW);
+        midiLedUntilMs = 0;
+      } else {
+        buttonLedBlinkNextMs = now + (buttonLedBlinkState ? BUTTON_LED_BLINK_ON_MS : BUTTON_LED_BLINK_OFF_MS);
+      }
+    }
+    return;
+  }
+
   if (midiLedUntilMs != 0 && now >= midiLedUntilMs) {
     digitalWrite(PIN_LED_MIDI, LOW);
     midiLedUntilMs = 0;
@@ -375,6 +426,7 @@ void sendButtonMessage(KeyCode k, bool isLongPress) {
     case KEY_SELECT: sendLine(isLongPress ? "BTN:SEL_LP"   : "BTN:SEL"); break;
     default: break;
   }
+  startButtonLedBlink(isLongPress ? 2 : 1);
   showButtonEvent(String(keyName(k)), isLongPress, k);
 }
 
@@ -438,6 +490,7 @@ void updateEncoder() {
   if (a != lastEncA) {
     if (a == LOW) {
       int direction = (b == HIGH) ? +1 : -1;
+      holdInputLed();
       if (accelSettingMode) {
         setAccelDraftDelta(direction);
       } else {
@@ -467,6 +520,7 @@ void updateEncoder() {
       encSwLongSent = false;
       if (!accelSettingMode) {
         sendLine("BTN:ENC_PUSH");
+        startButtonLedBlink(1);
         setLocalDisplay("BTN:ENCPSH", "SHORT");
         setDebugTag("E-SP  ");
       }
@@ -478,9 +532,11 @@ void updateEncoder() {
 
   if (encSwStable == LOW && !encSwLongSent && encSwPressedMs != 0 && (now - encSwPressedMs) >= LONGPRESS_MS) {
     if (!accelSettingMode) {
+      startButtonLedBlink(2);
       enterAccelSettingMode();
       setDebugTag("E-LP  ");
     } else {
+      startButtonLedBlink(2);
       applyAndExitAccelSettingMode();
       setDebugTag("E-LP  ");
     }
@@ -492,11 +548,24 @@ void updatePot() {
   unsigned long now = millis();
   int raw = analogRead(PIN_POT);
 
-  if (abs(raw - lastPotSent) >= POT_DELTA_MIN && (now - lastPotSentMs) >= POT_SEND_MS) {
+  // Keep POT reporting reasonably sensitive for Pi-side volume/control.
+  bool shouldSend = (abs(raw - lastPotSent) >= POT_DELTA_SEND && (now - lastPotSentMs) >= POT_SEND_MS);
+
+  if (shouldSend) {
     sendPotValue(raw);
     showPotEvent(raw);
     lastPotSent = raw;
     lastPotSentMs = now;
+  }
+
+  // Use a larger, independent threshold for the local activity LED.
+  // This prevents small A2 noise, especially when connected to Pi USB/ground,
+  // from continuously extending the D11 hold timer.
+  if (lastPotLedRaw < 0) {
+    lastPotLedRaw = raw;
+  } else if (abs(raw - lastPotLedRaw) >= POT_DELTA_LED) {
+    holdInputLed();
+    lastPotLedRaw = raw;
   }
 }
 
