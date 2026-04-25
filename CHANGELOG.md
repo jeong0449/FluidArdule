@@ -1,3 +1,52 @@
+# Changelog
+
+All notable changes to the Fluid Ardule project will be documented in this file.
+
+---
+
+## [2026-04-25 (KST)]
+
+### Added
+- Quick Menu (RIGHT long press)
+  - Resume
+  - Now Playing
+  - Home
+  - Sound Source
+  - USB Eject
+  - Power...
+- Now Playing shortcut for instant access to current playback state
+
+### Changed
+- UI header policy updated:
+  - "Fluid Ardule" title is now shown only on the Home screen
+  - Removed from menus, player, and Quick Menu
+- Layout adjusted to reclaim header space:
+  - Menu content shifted upward
+  - Quick Menu now displays all 6 items without scrolling
+- Clear separation of concepts:
+  - Resume → restores navigation context
+  - Now Playing → accesses current playback state
+- Long press behavior refined:
+  - RIGHT long → Quick Menu
+  - DOWN long → Panic (unchanged)
+  - SELECT long → Power Menu (unchanged)
+  - LEFT/UP long → reserved
+
+### Fixed
+- USB boot behavior:
+  - Prevented automatic transition to File Player when USB is already mounted at boot
+
+### Performance
+- No increase in TFT rendering load
+- Existing partial redraw and rate limiting preserved
+
+### Notes
+- No regressions in existing features or input handling
+- RIGHT short behavior unchanged
+- Single-script architecture maintained (modularization planned for future)
+
+---
+
 ## [2026-04-24] Yoshimi Integration Milestone
 
 ### Added
