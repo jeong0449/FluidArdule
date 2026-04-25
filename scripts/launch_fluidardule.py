@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260425d"
+SCRIPT_VERSION = "v2.9-stage8-260425f"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -115,6 +115,13 @@ STATUS_BAD = (255, 110, 110)
 # causing jitter or glitches during MIDI playback.
 # Increasing this value improves audio stability at the cost of UI responsiveness.
 RENDER_MIN_INTERVAL = 0.15
+# During early boot, the framebuffer can be overwritten by late-starting
+# splash/console components after the Python UI has already drawn Home.
+# Force occasional full redraws only during this short boot window so the
+# screen recovers from any external overwrite without increasing steady-state
+# TFT update load.
+BOOT_FULL_REDRAW_SEC = 8.0
+BOOT_FULL_REDRAW_INTERVAL_SEC = 0.75
 ROTATE_180 = True
 
 FONT_CANDIDATES = [
@@ -224,6 +231,8 @@ class RuntimeState:
     last_device_poll_time: float = 0.0
     last_render_time: float = 0.0
     dirty: bool = True
+    force_full_redraw_until: float = 0.0
+    last_forced_full_redraw_time: float = 0.0
 
     ui_mode: str = "main"      # main / submenu / file_source / file_browser / player
     menu_index: int = 0
@@ -3955,8 +3964,11 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "SEL":
             pulse_button_activity()
-            apply_soundfont_with_default_preset(state.submenu_index)
-            mark_dirty(f"Active -> {state.sf_name}/{state.current_preset_name}")
+            # Leaf selection: apply the highlighted Sound Source, then return
+            # immediately to the previous menu context. This uses the common
+            # submenu apply path so MIDI-file return/resume behavior stays
+            # consistent with other submenus.
+            apply_current_submenu_selection()
             return
         if btn == "RIGHT":
             pulse_button_activity()
@@ -4446,12 +4458,25 @@ def handle_encoder_value(value: str) -> None:
 
 
 def maybe_render(force: bool = False) -> None:
+    now = time.time()
+
+    # Early-boot recovery: if another boot-time component overwrites /dev/fb1
+    # after the Home screen has been drawn, partial redraw alone can leave a
+    # mixed screen. For a short window after startup, request a full redraw at
+    # a slow fixed interval. Outside this window, normal partial redraw behavior
+    # and render-rate limiting are unchanged.
+    if now < state.force_full_redraw_until:
+        if now - state.last_forced_full_redraw_time >= BOOT_FULL_REDRAW_INTERVAL_SEC:
+            state.last_forced_full_redraw_time = now
+            invalidate_full_display()
+            state.dirty = True
+
     if not state.dirty:
         return
     if force:
         display.render()
         return
-    if time.time() - state.last_render_time < RENDER_MIN_INTERVAL:
+    if now - state.last_render_time < RENDER_MIN_INTERVAL:
         return
     display.render()
 
@@ -4471,6 +4496,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, request_exit)
 
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    # Keep full-screen redraw recovery active only during the vulnerable
+    # boot-settling window. This expires quickly and does not change normal
+    # runtime render behavior.
+    state.force_full_redraw_until = time.time() + BOOT_FULL_REDRAW_SEC
+    state.last_forced_full_redraw_time = 0.0
 
     state.browser_root = find_file_root()
     state.browser_path = state.browser_root
