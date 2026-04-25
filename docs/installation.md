@@ -594,11 +594,17 @@ cd ~/scripts
 ./uno_midi_bridge_sp
 ```
 
-This creates a virtual MIDI port that can be connected to FluidSynth using `aconnect`.  
+This creates a virtual MIDI port that can be connected to FluidSynth using `aconnect`.
 When UNO-2 is selected as the MIDI input device, the bridge binary is started automatically by `launch_fluidardule.py`.
 
 > [!NOTE]
+> The UNO MIDI bridge identifies the correct device using a stable USB device ID (`/dev/serial/by-id/`) and is **only activated when explicitly selected in the UI**.
+> It is not auto-selected, ensuring that optional devices do not override the current MIDI input mode.
+> See [`uno-bridge-README.md`](./uno-bridge-README.md) for details.
+
+> [!NOTE]
 > The exact build process may vary depending on your implementation of the MIDI bridge.
+
 
 ---
 
