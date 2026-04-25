@@ -2,16 +2,9 @@
 # -*- coding: utf-8 -*-
 
 # =========================================================
-# Final (260419o)
-# - Stable RAW/SEQ/UNO-2 MIDI input modes
-# - ALSA SEQ auto-connect and quiet already-subscribed handling
-# - UNO-2 bridge integrated (uno_midi_bridge)
-# - Player -> engine recovery
-# - Power menu via SEL_LP
-# - Faster TFT-LCD partial redraw
-# - Scroll-aware common list rendering rule
-# - Main/submenu/file browser optimized
-# - 180-degree rotation handled
+# Fluid Ardule main UI/runtime script
+# Version is defined by SCRIPT_VERSION below.
+# Detailed change history is tracked in Git.
 # =========================================================
 
 import os
@@ -38,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260424c"
+SCRIPT_VERSION = "v2.9-stage8-260425d"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -133,11 +126,21 @@ FONT_CANDIDATES = [
 ]
 
 MAIN_MENU = [
-    "SoundFont",
-    "DAC",
-    "MIDI Mode",
+    "Sound Source",
     "File Player",
+    "Controls",
+    "MIDI Mode",
+    "DAC",
     "Extension",
+]
+
+QUICK_MENU_ITEMS = [
+    "Resume",
+    "Now Playing",
+    "Home",
+    "Sound Source",
+    "USB Eject",
+    "Power...",
 ]
 
 FILE_ROOT_CANDIDATES = [
@@ -255,6 +258,9 @@ class RuntimeState:
     power_menu_index: int = 0
     power_confirm_action: str | None = None
     power_confirm_index: int = 0
+
+    quick_menu_index: int = 0
+    quick_resume_snapshot: dict | None = None
 
     volume_percent: int = 100
     last_pot_raw: int = -1
@@ -883,6 +889,7 @@ class TFTDisplay:
             "main_value_2": self._main_menu_value(2),
             "main_value_3": self._main_menu_value(3),
             "main_value_4": self._main_menu_value(4),
+            "main_value_5": self._main_menu_value(5),
         }
 
     def _footer_changed(self, prev: dict | None) -> bool:
@@ -1011,13 +1018,13 @@ class TFTDisplay:
             prev_index=prev_index,
             curr_index=state.submenu_index,
             items_len=len(options),
-            top_y=104,
+            top_y=56,
             row_h=38,
             bottom_y=self.height - 50,
-            list_bbox=(12, 98, self.width - 12, self.height - 48),
-            row_bbox_func=lambda vis: (20, 104 + vis * 38, self.width - 20, 104 + vis * 38 + 38),
+            list_bbox=(12, 50, self.width - 12, self.height - 48),
+            row_bbox_func=lambda vis: (20, 56 + vis * 38, self.width - 20, 104 + vis * 38 + 38),
             redraw_current_view=lambda draw: (
-                draw.rounded_rectangle((12, 98, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
+                draw.rounded_rectangle((12, 50, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
                 self._draw_submenu(draw)
             ),
         )
@@ -1037,13 +1044,13 @@ class TFTDisplay:
             prev_index=prev_index,
             curr_index=state.browser_index,
             items_len=entries_len,
-            top_y=118,
+            top_y=70,
             row_h=36,
             bottom_y=self.height - 50,
-            list_bbox=(12, 112, self.width - 12, self.height - 48),
-            row_bbox_func=lambda vis: (20, 118 + vis * 36, self.width - 20, 118 + vis * 36 + 36),
+            list_bbox=(12, 64, self.width - 12, self.height - 48),
+            row_bbox_func=lambda vis: (20, 70 + vis * 36, self.width - 20, 118 + vis * 36 + 36),
             redraw_current_view=lambda draw: (
-                draw.rounded_rectangle((12, 112, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
+                draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
                 self._draw_file_browser(draw)
             ),
         )
@@ -1066,8 +1073,10 @@ class TFTDisplay:
 
         image = Image.new("RGB", (self.width, self.height), BACKGROUND)
         draw = ImageDraw.Draw(image)
-        self._draw_header(draw)
+        # Show the Fluid Ardule identity header only on the Home/Main screen.
+        # Other screens use their own contextual title to reduce visual noise.
         if state.ui_mode == "main":
+            self._draw_header(draw)
             self._draw_main(draw)
         elif state.ui_mode == "submenu":
             self._draw_submenu(draw)
@@ -1079,6 +1088,8 @@ class TFTDisplay:
             self._draw_player(draw)
         elif state.ui_mode == "power_menu":
             self._draw_power_menu(draw)
+        elif state.ui_mode == "quick_menu":
+            self._draw_quick_menu(draw)
         if state.usb_eject_confirm:
             self._draw_usb_eject_confirm(draw)
         self._draw_footer(draw)
@@ -1092,15 +1103,18 @@ class TFTDisplay:
         draw.text((12, 8), f"Fluid Ardule  {SCRIPT_VERSION}", font=self.font_title, fill=FG)
 
     def _main_menu_value(self, idx: int) -> str:
-        if idx == 0:
+        label = MAIN_MENU[idx] if 0 <= idx < len(MAIN_MENU) else ""
+        if label == "Sound Source":
             return f"{state.sf_name}/{state.current_preset_name}"
-        if idx == 1:
-            return state.dac_name
-        if idx == 2:
-            return state.midi_display_text
-        if idx == 3:
+        if label == "File Player":
             return Path(state.player_path).name if state.player_path else "Browse"
-        if idx == 4:
+        if label == "Controls":
+            return "Coming soon"
+        if label == "MIDI Mode":
+            return state.midi_display_text
+        if label == "DAC":
+            return state.dac_name
+        if label == "Extension":
             return "Reserved"
         return ""
 
@@ -1177,11 +1191,11 @@ class TFTDisplay:
                 draw_left_vcentered_text(draw, value_x, top, row_h, value_text, self.font_value, value_fill)
 
     def _draw_submenu_title(self, draw, title: str, info: str = ""):
-        draw.text((16, 58), title, font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
         if info:
             bbox = draw.textbbox((0, 0), info, font=self.font_small)
             draw.text(
-                (self.width - 16 - (bbox[2] - bbox[0]), 66),
+                (self.width - 16 - (bbox[2] - bbox[0]), 18),
                 info,
                 font=self.font_small,
                 fill=ACCENT,
@@ -1189,7 +1203,7 @@ class TFTDisplay:
 
     def _draw_submenu_box(self, draw):
         draw.rounded_rectangle(
-            (12, 98, self.width - 12, self.height - 48),
+            (12, 50, self.width - 12, self.height - 48),
             radius=12,
             fill=BOX_BG,
         )
@@ -1199,18 +1213,18 @@ class TFTDisplay:
             draw,
             options,
             state.submenu_index,
-            104,
+            56,
             38,
             self.height - 50,
             show_current_marks=True,
         )
 
     def _draw_submenu_soundfont_rows(self, draw, options):
-        visible_rows = max(1, (self.height - 50 - 104) // 38)
+        visible_rows = max(1, (self.height - 50 - 56) // 38)
         start_idx = max(0, state.submenu_index - visible_rows + 1) if state.submenu_index >= visible_rows else 0
 
         for visible_row, idx in enumerate(range(start_idx, min(len(options), start_idx + visible_rows))):
-            top = 104 + visible_row * 38
+            top = 56 + visible_row * 38
             text, is_current = options[idx]
 
             if idx == state.submenu_index:
@@ -1237,11 +1251,12 @@ class TFTDisplay:
 
     def _draw_submenu(self, draw):
         title_map = {
-            "soundfont": "Select SoundFont",
+            "soundfont": "Sound Source",
             "preset_category": "Preset Categories",
             "preset": "Select Preset",
             "dac": "Select DAC",
             "midi": "MIDI Mode",
+            "controls": "Controls",
             "placeholder": "Coming Soon",
         }
 
@@ -1265,48 +1280,48 @@ class TFTDisplay:
             self._draw_submenu_generic_rows(draw, options)
 
     def _draw_file_source(self, draw):
-        draw.text((16, 58), "File Player", font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), "File Player", font=self.font_title, fill=ACCENT)
         sf_text = state.sf_name
         usb_text = usb_status_text()
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
         sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 66), right_text, font=self.font_small, fill=ACCENT)
-        draw.text((18, 90), "Select source", font=self.font_small, fill=DIM)
-        draw.rounded_rectangle((12, 112, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        draw.text((18, 42), "Select source", font=self.font_small, fill=DIM)
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in get_file_source_entries()] or ["(empty)"]
-        self._draw_scrolled_rows(draw, labels, state.browser_index, 118, 40, self.height - 50)
+        self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 40, self.height - 50)
 
     def _draw_file_browser(self, draw):
-        draw.text((16, 58), "File Player", font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), "File Player", font=self.font_title, fill=ACCENT)
         sf_text = state.sf_name
         usb_text = usb_status_text()
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
         sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 66), right_text, font=self.font_small, fill=ACCENT)
+        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
         path_text = state.browser_path
         if len(path_text) > 42:
             path_text = "..." + path_text[-39:]
-        draw.text((18, 90), path_text, font=self.font_small, fill=DIM)
-        draw.rounded_rectangle((12, 112, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        draw.text((18, 42), path_text, font=self.font_small, fill=DIM)
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in state.browser_entries] or ["(empty)"]
-        self._draw_scrolled_rows(draw, labels, state.browser_index, 118, 36, self.height - 50)
+        self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 36, self.height - 50)
 
     def _draw_player(self, draw):
-        draw.text((16, 58), "Now Playing", font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), "Now Playing", font=self.font_title, fill=ACCENT)
         sf_text = state.sf_name
         usb_text = usb_status_text()
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
         sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 66), right_text, font=self.font_small, fill=ACCENT)
+        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
         name = Path(state.player_path).name if state.player_path else "No file"
         kind = state.player_proc_kind.upper() if state.player_proc_kind else "-"
-        draw.text((18, 92), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
+        draw.text((18, 44), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
 
-        draw.rounded_rectangle((12, 116, self.width - 12, 168), radius=12, fill=BOX_BG)
+        draw.rounded_rectangle((12, 70, self.width - 12, 122), radius=12, fill=BOX_BG)
         one_line_name = ellipsize_text(name, self.font_menu, self.width - 48)
-        draw.text((24, 129), one_line_name, font=self.font_menu, fill=FG)
+        draw.text((24, 83), one_line_name, font=self.font_menu, fill=FG)
 
-        draw.rounded_rectangle((12, 178, self.width - 12, 286), radius=12, fill=BOX_BG)
+        draw.rounded_rectangle((12, 132, self.width - 12, 286), radius=12, fill=BOX_BG)
 
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
         up_label = "PREV"
@@ -1323,11 +1338,11 @@ class TFTDisplay:
         base_fill = (58, 95, 168)
 
         buttons = [
-            {"name": "LEFT",  "label": left_label, "x": 18,  "y": 210, "w": 74,  "h": 46},
-            {"name": "UP",    "label": up_label,   "x": 122, "y": 184, "w": 96,  "h": 42},
-            {"name": "DOWN",  "label": down_label, "x": 122, "y": 236, "w": 96,  "h": 42},
-            {"name": "RIGHT", "label": right_label,"x": 248, "y": 210, "w": 74,  "h": 46},
-            {"name": "SEL",   "label": sel_label,  "x": 350, "y": 202, "w": 108, "h": 62},
+            {"name": "LEFT",  "label": left_label, "x": 18,  "y": 164, "w": 74,  "h": 46},
+            {"name": "UP",    "label": up_label,   "x": 122, "y": 138, "w": 96,  "h": 42},
+            {"name": "DOWN",  "label": down_label, "x": 122, "y": 190, "w": 96,  "h": 42},
+            {"name": "RIGHT", "label": right_label,"x": 248, "y": 164, "w": 74,  "h": 46},
+            {"name": "SEL",   "label": sel_label,  "x": 350, "y": 156, "w": 108, "h": 62},
         ]
 
         for btn in buttons:
@@ -1363,20 +1378,20 @@ class TFTDisplay:
         draw.text((20, self.height - 40), "SELECT to confirm", font=self.font_small, fill=DIM)
 
     def _draw_power_menu(self, draw):
-        draw.text((16, 58), "Power Menu", font=self.font_title, fill=ACCENT)
-        draw.rounded_rectangle((32, 100, self.width - 32, self.height - 60), radius=14, fill=BOX_BG)
+        draw.text((16, 10), "Power Menu", font=self.font_title, fill=ACCENT)
+        draw.rounded_rectangle((32, 52, self.width - 32, self.height - 50), radius=14, fill=BOX_BG)
         if state.power_confirm_action:
-            draw.text((52, 118), f"{state.power_confirm_action}?", font=self.font_title, fill=FG)
-            draw.text((52, 156), "Are you sure?", font=self.font_body, fill=DIM)
+            draw.text((52, 70), f"{state.power_confirm_action}?", font=self.font_title, fill=FG)
+            draw.text((52, 108), "Are you sure?", font=self.font_body, fill=DIM)
             labels = POWER_CONFIRM_ITEMS
             current_idx = state.power_confirm_index
-            start_y = 202
+            start_y = 154
             row_h = 40
         else:
-            draw.text((52, 118), "Select action", font=self.font_body, fill=DIM)
+            draw.text((52, 70), "Select action", font=self.font_body, fill=DIM)
             labels = POWER_MENU_ITEMS
             current_idx = state.power_menu_index
-            start_y = 156
+            start_y = 108
             row_h = 40
         for i, label in enumerate(labels):
             top = start_y + i * row_h
@@ -1388,6 +1403,21 @@ class TFTDisplay:
                 fill = DIM
                 prefix = "  "
             draw.text((64, top + 3), f"{prefix}{label}", font=self.font_body, fill=fill)
+    def _draw_quick_menu(self, draw):
+        # Quick Menu is a shortcut overlay, not a normal page.
+        # Do not draw the global Fluid Ardule header here; use the full height
+        # so all six quick actions are visible without scrolling.
+        draw.text((16, 10), "Quick Menu", font=self.font_title, fill=ACCENT)
+        ctx = quick_resume_label()
+        labels = []
+        for item in QUICK_MENU_ITEMS:
+            if item == "Resume" and ctx:
+                labels.append((f"Resume  [{ctx}]", False))
+            else:
+                labels.append((item, False))
+        draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        self._draw_scrolled_rows(draw, labels, state.quick_menu_index, 52, 34, self.height - 50)
+
     def _draw_usb_eject_confirm(self, draw):
         draw.rounded_rectangle((70, 92, self.width - 70, self.height - 78), radius=14, fill=(28, 34, 48), outline=ACCENT, width=2)
         title = "Eject USB?"
@@ -3321,8 +3351,10 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         return [(name, i == state.dac_index) for i, (_dev, name) in enumerate(state.dac_options)]
     if key == "midi":
         return [(name, mode == state.midi_mode) for mode, name in state.midi_options]
+    if key == "controls":
+        return [("Coming soon", False)]
     if key == "placeholder":
-        return [("Not implemented yet", False)]
+        return [("Reserved", False)]
     return []
 
 
@@ -3384,18 +3416,161 @@ def apply_current_submenu_selection() -> None:
 
 
 def handle_main_select() -> None:
-    if state.menu_index == 0:
+    label = MAIN_MENU[clamp_index(state.menu_index, len(MAIN_MENU))]
+    if label == "Sound Source":
         enter_submenu("soundfont")
-    elif state.menu_index == 1:
-        enter_submenu("dac")
-    elif state.menu_index == 2:
-        enter_submenu("midi")
-    elif state.menu_index == 3:
+    elif label == "File Player":
         enter_file_browser()
+    elif label == "Controls":
+        enter_submenu("controls")
+    elif label == "MIDI Mode":
+        enter_submenu("midi")
+    elif label == "DAC":
+        enter_submenu("dac")
     else:
         enter_submenu("placeholder")
 
 
+
+# =========================================================
+# Quick menu
+# =========================================================
+
+def make_quick_snapshot() -> dict:
+    return {
+        "ui_mode": state.ui_mode,
+        "menu_index": state.menu_index,
+        "submenu_index": state.submenu_index,
+        "submenu_key": state.submenu_key,
+        "submenu_return_mode": state.submenu_return_mode,
+        "preset_index": state.preset_index,
+        "preset_sf_index": state.preset_sf_index,
+        "preset_source_name": state.preset_source_name,
+        "category_entries": list(getattr(state, "category_entries", [])),
+        "category_index": getattr(state, "category_index", 0),
+        "category_source_sf_index": getattr(state, "category_source_sf_index", None),
+        "category_source_name": getattr(state, "category_source_name", ""),
+        "browser_root": state.browser_root,
+        "browser_path": state.browser_path,
+        "browser_index": state.browser_index,
+        "player_path": state.player_path,
+    }
+
+
+def quick_resume_label() -> str:
+    snap = state.quick_resume_snapshot
+    if not snap:
+        return ""
+    mode = snap.get("ui_mode", "main")
+    if mode == "main":
+        return "Home"
+    if mode == "file_source":
+        return "File Source"
+    if mode == "file_browser":
+        path = str(snap.get("browser_path") or "")
+        name = "USB" if normalize_path(path).startswith(normalize_path(USB_MOUNT_POINT)) else Path(path).name or "Files"
+        return f"Files/{shorten_text(name, 10)}"
+    if mode == "player":
+        if snap.get("player_path"):
+            return f"Player/{shorten_text(Path(snap['player_path']).name, 10)}"
+        return "Player"
+    if mode == "submenu":
+        key = snap.get("submenu_key") or "Menu"
+        labels = {
+            "soundfont": "Sound Source",
+            "preset_category": "Category",
+            "preset": "Preset",
+            "dac": "DAC",
+            "midi": "MIDI Mode",
+            "placeholder": "Extension",
+            "controls": "Controls",
+        }
+        return labels.get(key, str(key))
+    return str(mode)
+
+
+def enter_quick_menu() -> None:
+    if state.ui_mode not in {"quick_menu", "power_menu"} and not state.usb_eject_confirm:
+        state.quick_resume_snapshot = make_quick_snapshot()
+    state.ui_mode = "quick_menu"
+    state.quick_menu_index = 0
+    invalidate_full_display()
+    mark_dirty("Quick menu")
+
+
+def restore_quick_snapshot() -> None:
+    snap = state.quick_resume_snapshot
+    if not snap:
+        state.ui_mode = "main"
+        invalidate_full_display()
+        mark_dirty("Home")
+        return
+
+    state.ui_mode = snap.get("ui_mode", "main")
+    state.menu_index = snap.get("menu_index", state.menu_index)
+    state.submenu_index = snap.get("submenu_index", state.submenu_index)
+    state.submenu_key = snap.get("submenu_key", state.submenu_key)
+    state.submenu_return_mode = snap.get("submenu_return_mode", state.submenu_return_mode)
+    state.preset_index = snap.get("preset_index", state.preset_index)
+    state.preset_sf_index = snap.get("preset_sf_index", state.preset_sf_index)
+    state.preset_source_name = snap.get("preset_source_name", state.preset_source_name)
+    state.category_entries = list(snap.get("category_entries", getattr(state, "category_entries", [])))
+    state.category_index = snap.get("category_index", getattr(state, "category_index", 0))
+    state.category_source_sf_index = snap.get("category_source_sf_index", getattr(state, "category_source_sf_index", None))
+    state.category_source_name = snap.get("category_source_name", getattr(state, "category_source_name", ""))
+    state.browser_root = snap.get("browser_root", state.browser_root)
+    state.browser_path = snap.get("browser_path", state.browser_path)
+    state.browser_index = snap.get("browser_index", state.browser_index)
+
+    if state.ui_mode == "file_browser":
+        old_index = snap.get("browser_index", state.browser_index)
+        refresh_browser_entries()
+        state.browser_index = clamp_index(old_index, len(state.browser_entries))
+    elif state.ui_mode == "file_source":
+        state.browser_index = clamp_index(snap.get("browser_index", state.browser_index), len(get_file_source_entries()))
+
+    invalidate_full_display()
+    mark_dirty("Resume")
+
+
+def enter_home() -> None:
+    state.ui_mode = "main"
+    state.menu_index = 0
+    invalidate_full_display()
+    mark_dirty("Home")
+
+
+def enter_now_playing() -> None:
+    if not state.player_path:
+        mark_dirty("No file loaded")
+        return
+    state.ui_mode = "player"
+    invalidate_full_display()
+    mark_dirty("Now Playing")
+
+
+def quick_menu_select() -> None:
+    item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
+    if item == "Resume":
+        restore_quick_snapshot()
+        return
+    if item == "Now Playing":
+        enter_now_playing()
+        return
+    if item == "Home":
+        enter_home()
+        return
+    if item == "Sound Source":
+        enter_submenu("soundfont")
+        mark_dirty("Sound Source")
+        return
+    if item == "USB Eject":
+        request_usb_eject()
+        return
+    if item == "Power...":
+        enter_power_menu()
+        return
+    mark_dirty("Not implemented yet")
 
 # =========================================================
 # Power menu
@@ -3503,23 +3678,54 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty("Confirm USB eject")
         return
 
+    if btn == "RIGHT_LP" and state.ui_mode != "power_menu":
+        pulse_button_activity()
+        enter_quick_menu()
+        return
+
     if btn == "SEL_LP":
         pulse_button_activity()
         enter_power_menu()
         return
 
-    # Global LEFT long-press USB eject. It is allowed from any normal UI level,
-    # but request_usb_eject() refuses while playback is actually running.
-    if btn == "LEFT_LP" and state.ui_mode != "power_menu":
-        pulse_button_activity()
-        request_usb_eject()
-        return
-
-    # Global hidden panic button: keep SEL_LP reserved for power menu.
-    # LEFT_LP is reserved for USB eject/unmount when playback is not running.
+    # Panic remains the only direct emergency long-press action.
     if btn == "DOWN_LP" and state.ui_mode != "power_menu":
         pulse_button_activity()
         midi_panic()
+        return
+
+    if state.ui_mode == "quick_menu":
+        if btn == "UP":
+            pulse_button_activity()
+            if state.quick_menu_index > 0:
+                state.quick_menu_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First item")
+            return
+        if btn == "DOWN":
+            pulse_button_activity()
+            if state.quick_menu_index < len(QUICK_MENU_ITEMS) - 1:
+                state.quick_menu_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last item")
+            return
+        if btn == "LEFT":
+            pulse_button_activity()
+            restore_quick_snapshot()
+            return
+        if btn == "SEL":
+            pulse_button_activity()
+            quick_menu_select()
+            return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    # LEFT_LP and UP_LP are intentionally left unused globally.
+    if btn in {"LEFT_LP", "UP_LP"}:
+        pulse_button_activity()
+        mark_dirty(f"{btn.replace('_LP', '')} long unused")
         return
 
     if state.ui_mode == "power_menu":
