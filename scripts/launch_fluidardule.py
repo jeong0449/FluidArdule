@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260425f"
+SCRIPT_VERSION = "v2.9-stage8-260425g"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -2842,7 +2842,7 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
             yoshimi_log_handle.close()
         except Exception:
             pass
-    yoshimi_log_handle = open(YOSHIMI_LOG_PATH, "w", buffering=1)
+        yoshimi_log_handle = None
 
     cmd = [
         YOSHIMI_EXECUTABLE,
@@ -2854,17 +2854,22 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     ]
 
     log(f"Starting Yoshimi with {xiz.name} / {audio_device}")
+    # Yoshimi can repeatedly emit interactive prompts such as
+    # "yoshimi> @ Top" even when used as a headless engine. Keep a minimal
+    # Fluid Ardule-side launch log, but do not pipe Yoshimi stdout/stderr
+    # into a persistent log file.
     try:
-        yoshimi_log_handle.write("CMD: " + " ".join(cmd) + "\n")
-        yoshimi_log_handle.flush()
+        with open(YOSHIMI_LOG_PATH, "w", buffering=1) as yh:
+            yh.write("CMD: " + " ".join(cmd) + "\n")
+            yh.write("NOTE: Yoshimi stdout/stderr suppressed to avoid CLI prompt spam.\n")
     except Exception:
         pass
 
     try:
         fluid_proc = subprocess.Popen(
             cmd,
-            stdout=yoshimi_log_handle,
-            stderr=yoshimi_log_handle,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             preexec_fn=os.setsid,
             text=True,
