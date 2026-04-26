@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 260420a version
+// 260426a version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -55,11 +55,15 @@ const int           POT_DELTA_SEND = 4;    // Serial POT reporting threshold
 const int           POT_DELTA_LED  = 12;   // Larger threshold to avoid LED stuck-on from A2 noise
 
 // ---- A0 thresholds (5.00V reference assumed) ----
-const int TH_LEFT_MAX   = 180;
-const int TH_UP_MAX     = 280;
-const int TH_DOWN_MAX   = 450;
-const int TH_RIGHT_MAX  = 650;
-const int TH_SELECT_MAX = 900;
+const int TH_LEFT_MAX   = 120;
+const int TH_UP_MAX     = 270;
+const int TH_DOWN_MAX   = 440;
+const int TH_RIGHT_MAX  = 680;
+const int TH_SELECT_MAX = 930;
+
+// Light-weight A0 keypad filtering.
+// Four reads cost well under 1 ms on AVR and greatly reduce single-sample noise.
+const uint8_t KEYPAD_ADC_SAMPLES = 4;
 
 enum KeyCode {
   KEY_NONE = 0,
@@ -135,6 +139,14 @@ uint8_t accelDraft = 2;
 
 // ---- Serial RX ----
 String rxLine;
+
+int readKeypadAdcFiltered() {
+  long sum = 0;
+  for (uint8_t i = 0; i < KEYPAD_ADC_SAMPLES; i++) {
+    sum += analogRead(PIN_KEYPAD);
+  }
+  return (int)((sum + (KEYPAD_ADC_SAMPLES / 2)) / KEYPAD_ADC_SAMPLES);
+}
 
 KeyCode decodeKeyFromA0(int v) {
   if (v <= TH_LEFT_MAX)   return KEY_LEFT;
@@ -431,7 +443,7 @@ void sendButtonMessage(KeyCode k, bool isLongPress) {
 }
 
 void updateKeypad() {
-  int raw = analogRead(PIN_KEYPAD);
+  int raw = readKeypadAdcFiltered();
   KeyCode sampled = decodeKeyFromA0(raw);
   unsigned long now = millis();
 
