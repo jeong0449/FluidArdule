@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 260426a version
+// 260427k version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -23,6 +23,7 @@
 //   D11 : activity LED for MIDI pulse and local button/encoder/pot input
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
+//   Encoder long press : cycle acceleration profile P1 -> P2 -> P3 -> P1
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -203,9 +204,9 @@ String padRight(const String &s, uint8_t width) {
 
 const __FlashStringHelper* accelName(uint8_t p) {
   switch (p) {
-    case 1: return F("MILD");
+    case 1: return F("FINE");
     case 2: return F("NORM");
-    case 3: return F("RELAX");
+    case 3: return F("FAST");
     default: return F("NORM");
   }
 }
@@ -429,6 +430,20 @@ void applyAndExitAccelSettingMode() {
   setLocalDisplay("ACCEL APPL", "P" + String(accelProfile) + " " + String(accelName(accelProfile)));
 }
 
+void cycleAccelProfileByEncoderLongPress() {
+  accelProfile++;
+  if (accelProfile > 3) accelProfile = 1;
+  accelDraft = accelProfile;
+  accelSettingMode = false;
+  sendAccelProfile();
+
+  String line1 = "ENC ACCEL";
+  String line2 = "P" + String(accelProfile) + " ";
+  line2 += String(accelName(accelProfile));
+  setLocalDisplay(line1, line2);
+  setDebugTag("E-LP  ");
+}
+
 void sendButtonMessage(KeyCode k, bool isLongPress) {
   switch (k) {
     case KEY_LEFT:   sendLine(isLongPress ? "BTN:LEFT_LP"  : "BTN:LEFT"); break;
@@ -528,30 +543,33 @@ void updateEncoder() {
     encSwStable = sw;
 
     if (encSwStable == LOW) {
+      // Do not emit ENC_PUSH immediately. Wait until release so a long press
+      // can be used exclusively for acceleration-profile cycling.
       encSwPressedMs = now;
       encSwLongSent = false;
-      if (!accelSettingMode) {
-        sendLine("BTN:ENC_PUSH");
-        startButtonLedBlink(1);
-        setLocalDisplay("BTN:ENCPSH", "SHORT");
-        setDebugTag("E-SP  ");
-      }
     } else {
+      // Released. If no long press was already handled, emit the normal short
+      // encoder-push button event.
+      if (encSwPressedMs != 0 && !encSwLongSent) {
+        if (accelSettingMode) {
+          applyAndExitAccelSettingMode();
+          startButtonLedBlink(1);
+          setDebugTag("E-SP  ");
+        } else {
+          sendLine("BTN:ENC_PUSH");
+          startButtonLedBlink(1);
+          setLocalDisplay("BTN:ENCPSH", "SHORT");
+          setDebugTag("E-SP  ");
+        }
+      }
       encSwPressedMs = 0;
       encSwLongSent = false;
     }
   }
 
   if (encSwStable == LOW && !encSwLongSent && encSwPressedMs != 0 && (now - encSwPressedMs) >= LONGPRESS_MS) {
-    if (!accelSettingMode) {
-      startButtonLedBlink(2);
-      enterAccelSettingMode();
-      setDebugTag("E-LP  ");
-    } else {
-      startButtonLedBlink(2);
-      applyAndExitAccelSettingMode();
-      setDebugTag("E-LP  ");
-    }
+    startButtonLedBlink(2);
+    cycleAccelProfileByEncoderLongPress();
     encSwLongSent = true;
   }
 }
