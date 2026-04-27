@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 260427k version
+// 260427u version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -23,7 +23,8 @@
 //   D11 : activity LED for MIDI pulse and local button/encoder/pot input
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
-//   Encoder long press : cycle acceleration profile P1 -> P2 -> P3 -> P1
+//   Line 2 rightmost 2 chars : current encoder acceleration profile (P1/P2/P3)
+//   Encoder long press : acceleration profile control
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -195,6 +196,16 @@ void printPadded16(const String &s) {
   lcd.print(t);
 }
 
+String makeLine2WithAccel(const String &s) {
+  // Keep the current encoder acceleration profile visible at all times.
+  // The bottom line uses columns 14-15 for P1/P2/P3, so the left status
+  // area is limited to 13 characters plus one separator space.
+  String left = s;
+  if (left.length() > 13) left = left.substring(0, 13);
+  while (left.length() < 13) left += ' ';
+  return left + " P" + String(accelProfile);
+}
+
 String padRight(const String &s, uint8_t width) {
   String t = s;
   if (t.length() > width) t = t.substring(0, width);
@@ -291,7 +302,7 @@ void drawStatus() {
   lcd.print(line1 + right6);
 
   lcd.setCursor(0, 1);
-  printPadded16(l2Text);
+  lcd.print(makeLine2WithAccel(l2Text));
 }
 
 void notePiSeen() {
