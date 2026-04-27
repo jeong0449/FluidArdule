@@ -4,6 +4,33 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-04-27 (KST)]
+
+### Added
+- Implement full Sound Edit workflow for real-time CC parameter editing
+- Add POT mode toggle (VOL ↔ PARAM) via LEFT long press
+- Add soft takeover (pickup) for volume control to prevent value jumps
+- Add encoder long-press acceleration profile switching (P1–P3) in UNO-1 firmware
+- Add temporary footer display (1.2s) for accel and POT mode changes
+
+### Improved
+- Apply encoder acceleration only to parameter editing, not menu navigation
+- Improve Sound Edit usability with direct POT-based parameter control
+- Refine UI consistency: “highlight = control target” principle
+- Reduce log verbosity by disabling continuous CC debug output
+- Simplify interaction by removing redundant visual indicators
+
+### Changed
+- Preset change now re-applies full CC set for consistent sound state
+- USB eject moved away from LEFT long press (accessible via Quick Menu)
+
+### Fixed
+- Enable MIDI panic (DOWN long press) within Sound Edit context
+- Prevent parameter/value jump when switching back to volume control
+- Ensure stable interaction between encoder acceleration and UI navigation
+
+---
+
 ## [2026-04-25 (KST)]
 
 ### Added
