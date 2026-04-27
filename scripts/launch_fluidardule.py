@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260425g"
+SCRIPT_VERSION = "v2.9-stage8-260427t-sound-edit"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -88,6 +88,7 @@ SERIAL_HEARTBEAT_INTERVAL_SEC = 1.0
 SERIAL_LINK_STALE_SEC = 3.0
 LED_PULSE_COOLDOWN_SEC = 0.05
 POT_LED_PULSE_INTERVAL_SEC = 0.07
+POT_VOLUME_PERCENT_THRESHOLD = 3
 POT_LED_PERCENT_THRESHOLD = 3
 SYSTEM_STATUS_POLL_INTERVAL_SEC = 10.0
 BRIDGE_WATCHDOG_INTERVAL_SEC = 2.0
@@ -110,6 +111,7 @@ SELECT_BG = (45, 70, 110)
 BOX_BG = (20, 24, 32)
 STATUS_GOOD = (90, 220, 120)
 STATUS_BAD = (255, 110, 110)
+MODIFIED_VALUE = (255, 220, 90)
 # Minimum interval between TFT renders (in seconds).
 # Frequent screen updates can interfere with real-time audio on Raspberry Pi,
 # causing jitter or glitches during MIDI playback.
@@ -178,6 +180,55 @@ USB_LABEL = "USB"
 POWER_MENU_ITEMS = ["Cancel", "Halt", "Reboot"]
 POWER_CONFIRM_ITEMS = ["No", "Yes"]
 
+# Sound Edit is a volatile, non-saving performance edit page.
+# CC7 Volume is intentionally excluded because the hardware pot controls volume.
+SOUND_EDIT_PARAMS = [
+    {"label": "Expression", "name": "Expression", "cc": 11, "default": 127},
+    {"label": "Modulation", "name": "Modulation", "cc": 1,  "default": 0},
+    {"label": "Reverb",     "name": "Reverb",     "cc": 91, "default": 40},
+    {"label": "Chorus",     "name": "Chorus",     "cc": 93, "default": 0},
+    {"label": "Brightness", "name": "Brightness", "cc": 74, "default": 64},
+    {"label": "Resonance",  "name": "Resonance",  "cc": 71, "default": 64},
+    {"label": "Pan",        "name": "Pan",        "cc": 10, "default": 64},
+    {"label": "Attack",     "name": "Attack",     "cc": 73, "default": 64},
+]
+SOUND_EDIT_COLS = 2
+SOUND_EDIT_MIN = 0
+SOUND_EDIT_MAX = 127
+SOUND_EDIT_STEP = 1
+# UNO-1 firmware owns low-level encoder acceleration and reports its profile via ACCEL.
+# Python interprets encoder input differently depending on context:
+#   - menu navigation: use direction only, always move one item per detent event
+#   - Sound Edit value editing: use the signed ENC magnitude from UNO and scale it
+#     non-linearly according to the current UNO acceleration profile
+SOUND_EDIT_SEND_ALL_CHANNELS = True
+# Keep the debug logging hooks in the code, but leave them disabled for normal use.
+# Set this to True temporarily when verifying CC transmission with journalctl.
+SOUND_EDIT_CC_DEBUG = False
+ENCODER_ACCEL_DEFAULT_PROFILE = 2
+ENCODER_ACCEL_OPTIONS = {
+    1: "P1 Fine",
+    2: "P2 Normal",
+    3: "P3 Fast",
+}
+# Navigation jitter guard for the rotary encoder.
+# UNO-1 can occasionally emit a single opposite-direction ENC event when the
+# knob is turned slowly near a detent. For menu navigation, that one event is
+# very visible as a wrong one-row jump, so Python ignores only a very short
+# opposite-direction pulse. Sound Edit value editing is not filtered here.
+ENC_NAV_REVERSAL_GUARD_SEC = 0.12
+POT_MODE_DEFAULT = "VOL"
+POT_MODE_FOOTER_HOLD_SEC = 1.2
+ACCEL_FOOTER_HOLD_SEC = 1.2
+# Soft takeover threshold for returning the physical pot to volume control.
+# When POT mode switches back from PARAM to VOL, the volume is not updated
+# until the physical pot position comes close to the current logical volume.
+# This prevents abrupt volume jumps caused by the pot angle being reused for CC editing.
+POT_VOLUME_PICKUP_THRESHOLD = 3
+
+
+def default_sound_edit_values() -> dict[int, int]:
+    return {int(item["cc"]): int(item["default"]) for item in SOUND_EDIT_PARAMS}
 
 
 # =========================================================
@@ -271,6 +322,21 @@ class RuntimeState:
     quick_menu_index: int = 0
     quick_resume_snapshot: dict | None = None
 
+    sound_edit_index: int = 0
+    sound_edit_values: dict[int, int] = field(default_factory=default_sound_edit_values)
+    sound_edit_a_values: dict[int, int] = field(default_factory=default_sound_edit_values)
+    sound_edit_active_side: str = "B"
+    sound_edit_modified: set[int] = field(default_factory=set)
+    sound_edit_last_adjust_time: float = 0.0
+    encoder_accel_profile: int = ENCODER_ACCEL_DEFAULT_PROFILE
+    encoder_accel_pending_profile: int = ENCODER_ACCEL_DEFAULT_PROFILE
+    last_nav_enc_dir: int = 0
+    last_nav_enc_time: float = 0.0
+    pot_mode: str = POT_MODE_DEFAULT
+    pot_volume_captured: bool = True
+    transient_footer_text: str = ""
+    transient_footer_until: float = 0.0
+
     volume_percent: int = 100
     last_pot_raw: int = -1
     last_led_pulse_time: float = 0.0
@@ -330,6 +396,18 @@ def mark_dirty(event: str | None = None) -> None:
     if event is not None:
         state.last_event = event
     state.dirty = True
+
+
+def show_footer_message(text: str, hold_sec: float = 1.2) -> None:
+    """Temporarily show a high-priority status message in the footer.
+
+    Used for short-lived hardware mode changes such as encoder acceleration
+    profile and POT mode. After the hold time expires, the normal footer
+    content automatically returns on the next render tick.
+    """
+    state.transient_footer_text = text
+    state.transient_footer_until = time.time() + float(hold_sec)
+    mark_dirty(text)
 
 
 def clamp_index(index: int, length: int) -> int:
@@ -419,8 +497,31 @@ def handle_pot_value(raw_value: str) -> None:
         return
     raw = max(0, min(1023, raw))
     state.last_pot_raw = raw
+
+    # B: POT keeps volume as the default, but LEFT long can temporarily switch
+    # it to PARAM mode. In PARAM mode, the full physical travel maps directly
+    # to the currently highlighted Sound Edit CC value. No extra on-screen hint
+    # is needed because the highlight already defines the target parameter.
+    if state.pot_mode == "PARAM" and state.ui_mode == "sound_edit":
+        value = clamp_cc_value(int(round(raw * SOUND_EDIT_MAX / 1023)))
+        set_sound_edit_current_value_from_pot(value)
+        maybe_pulse_pot_led(int(round(raw * 100 / 1023)))
+        return
+
     percent = int(round(raw * 100 / 1023))
-    if abs(percent - state.volume_percent) < POT_LED_PERCENT_THRESHOLD:
+
+    # Soft takeover for volume mode. If the pot has been used as a parameter
+    # controller, its physical angle may no longer match the current volume.
+    # When returning to VOL mode, wait until the pot is moved near the existing
+    # logical volume before applying it again. This avoids sudden volume jumps.
+    if not state.pot_volume_captured:
+        if abs(percent - state.volume_percent) <= POT_VOLUME_PICKUP_THRESHOLD:
+            state.pot_volume_captured = True
+        else:
+            maybe_pulse_pot_led(percent)
+            return
+
+    if abs(percent - state.volume_percent) < POT_VOLUME_PERCENT_THRESHOLD:
         return
     set_output_volume(percent, announce=True)
     maybe_pulse_pot_led(percent)
@@ -899,12 +1000,14 @@ class TFTDisplay:
             "main_value_3": self._main_menu_value(3),
             "main_value_4": self._main_menu_value(4),
             "main_value_5": self._main_menu_value(5),
+            "transient_footer_text": state.transient_footer_text,
+            "transient_footer_until_active": time.time() < state.transient_footer_until,
         }
 
     def _footer_changed(self, prev: dict | None) -> bool:
         if prev is None:
             return True
-        keys = ("last_event", "cpu_load_text", "cpu_temp_text", "midi_display_text", "midi_connected", "usb_mounted")
+        keys = ("last_event", "cpu_load_text", "cpu_temp_text", "midi_display_text", "midi_connected", "usb_mounted", "transient_footer_text")
         return any(prev.get(k) != getattr(state, k) for k in keys)
 
     def _main_values_changed(self, prev: dict | None) -> bool:
@@ -1099,6 +1202,8 @@ class TFTDisplay:
             self._draw_power_menu(draw)
         elif state.ui_mode == "quick_menu":
             self._draw_quick_menu(draw)
+        elif state.ui_mode == "sound_edit":
+            self._draw_sound_edit(draw)
         if state.usb_eject_confirm:
             self._draw_usb_eject_confirm(draw)
         self._draw_footer(draw)
@@ -1118,7 +1223,7 @@ class TFTDisplay:
         if label == "File Player":
             return Path(state.player_path).name if state.player_path else "Browse"
         if label == "Controls":
-            return "Coming soon"
+            return "Sound Edit"
         if label == "MIDI Mode":
             return state.midi_display_text
         if label == "DAC":
@@ -1265,7 +1370,7 @@ class TFTDisplay:
             "preset": "Select Preset",
             "dac": "Select DAC",
             "midi": "MIDI Mode",
-            "controls": "Controls",
+            "controls": "Sound Edit",
             "placeholder": "Coming Soon",
         }
 
@@ -1367,7 +1472,70 @@ class TFTDisplay:
             ty = y + (h - (bbox[3] - bbox[1])) / 2 - 2
             draw.text((tx, ty), btn["label"], font=font, fill=FG)
 
-    
+    def _draw_sound_edit(self, draw):
+        draw.text((16, 10), "Sound Edit", font=self.font_title, fill=ACCENT)
+        side = state.sound_edit_active_side if state.sound_edit_active_side in {"A", "B"} else "B"
+        right_text = f"{side}  {state.sf_name}/{shorten_text(state.current_preset_name, 10)}"
+        bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
+        draw.text((self.width - 16 - (bbox[2] - bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+
+        selected_idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
+        current = SOUND_EDIT_PARAMS[selected_idx]
+        cc = int(current["cc"])
+        b_val = int(state.sound_edit_values.get(cc, current["default"]))
+        a_val = int(state.sound_edit_a_values.get(cc, current["default"]))
+        live_val = a_val if side == "A" else b_val
+        draw.text((18, 42), f"{current['name']}  CC{cc}  {side}:{live_val}", font=self.font_small, fill=DIM)
+
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+
+        cell_w = (self.width - 48) // SOUND_EDIT_COLS
+        cell_h = 42
+        grid_x = 24
+        grid_y = 72
+        rows = (len(SOUND_EDIT_PARAMS) + SOUND_EDIT_COLS - 1) // SOUND_EDIT_COLS
+
+        for logical_row in range(rows):
+            y1 = grid_y + logical_row * cell_h
+            y2 = y1 + cell_h - 6
+            for col in range(SOUND_EDIT_COLS):
+                i = logical_row * SOUND_EDIT_COLS + col
+                if i >= len(SOUND_EDIT_PARAMS):
+                    continue
+                item = SOUND_EDIT_PARAMS[i]
+                x1 = grid_x + col * cell_w
+                x2 = x1 + cell_w - 10
+                item_cc = int(item["cc"])
+                b = int(state.sound_edit_values.get(item_cc, item["default"]))
+                a = int(state.sound_edit_a_values.get(item_cc, item["default"]))
+                shown = a if side == "A" and i == selected_idx else b
+                selected = (i == selected_idx)
+                modified = item_cc in state.sound_edit_modified
+                fill = SELECT_BG if selected else (30, 36, 48)
+                outline = ACCENT if modified and not selected else None
+                draw.rounded_rectangle((x1, y1, x2, y2), radius=9, fill=fill, outline=outline, width=2 if outline else 1)
+                label = str(item["name"])
+                value_text = f"{shown:3d}"
+                label_fill = FG if selected else DIM
+                # A: when the highlighted parameter has been changed from its
+                # default value, make only the numeric value stand out. The
+                # border already marks modified non-selected cells; this keeps
+                # the selected cell readable without adding another icon.
+                if selected and modified:
+                    value_fill = MODIFIED_VALUE
+                elif selected:
+                    value_fill = FG
+                else:
+                    value_fill = ACCENT
+                draw.text((x1 + 10, y1 + 6), label, font=self.font_body, fill=label_fill)
+                vb = draw.textbbox((0, 0), value_text, font=self.font_body)
+                draw.text((x2 - 10 - (vb[2] - vb[0]), y1 + 6), value_text, font=self.font_body, fill=value_fill)
+
+        hint_y = self.height - 86
+        draw.text((24, hint_y), "Arrows: move   Encoder: value", font=self.font_small, fill=DIM)
+        draw.text((24, hint_y + 22), "SEL: A/B   SEL long: reset   R long: Quick", font=self.font_small, fill=DIM)
+
+
     def _draw_power_title(self, draw):
         draw.text((20, 60), "Power", font=self.font_title, fill=ACCENT)
 
@@ -1472,10 +1640,12 @@ class TFTDisplay:
             except Exception:
                 pass
 
-        left_text = footer_hint or event
-        draw.text((12, self.height - 34), left_text, font=self.font_small, fill=DIM)
+        now = time.time()
+        transient_active = bool(state.transient_footer_text) and now < state.transient_footer_until
+        left_text = state.transient_footer_text if transient_active else (footer_hint or event)
+        draw.text((12, self.height - 34), left_text, font=self.font_small, fill=ACCENT if transient_active else DIM)
 
-        if not footer_hint:
+        if not footer_hint and not transient_active:
             metrics = f"{state.cpu_temp_text} {state.cpu_load_text}"
             metrics_bbox = draw.textbbox((0, 0), metrics, font=self.font_small)
             metrics_x = max(140, (self.width - (metrics_bbox[2] - metrics_bbox[0])) // 2)
@@ -2922,7 +3092,7 @@ def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
         "-o", "synth.reverb.damp=0.22",
         "-o", "synth.reverb.width=0.75",
         "-o", "synth.reverb.level=0.30",
-        "-o", "synth.chorus.active=0",
+        "-o", "synth.chorus.active=1",
         sf_path,
     ]
     raw_suffix = f" / {selected_port} ({selected_name})" if selected_port else ""
@@ -2963,6 +3133,9 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
     if name:
         state.current_preset_name = name
 
+    # Preset/source changes start a fresh volatile Sound Edit baseline.
+    reset_sound_edit_to_defaults()
+
     if engine == "yoshimi":
         path = str(path or state.current_instrument_path or "").strip()
         if not path:
@@ -2989,6 +3162,12 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
         ok = send_fluidsynth_command(f"select 9 0 {state.current_preset_bank} {state.current_preset_program}") or ok
     else:
         ok = send_fluidsynth_command("drums 9 off") or ok
+
+    # Program Change does not necessarily clear MIDI controller state.
+    # Re-apply the Sound Edit default CC set so every preset starts from a
+    # predictable baseline instead of inheriting the previous live edits.
+    defaults_ok = apply_sound_edit_defaults_to_engine(announce=False)
+    ok = ok or defaults_ok
 
     if ok:
         mark_dirty(f"Preset -> {state.current_preset_name}")
@@ -3184,7 +3363,7 @@ def build_player_command(path: str) -> tuple[list[str] | None, str | None]:
             "-o", "synth.reverb.damp=0.22",
             "-o", "synth.reverb.width=0.75",
             "-o", "synth.reverb.level=0.30",
-            "-o", "synth.chorus.active=0",
+            "-o", "synth.chorus.active=1",
             sf_path,
             path,
         ], "midi_file")
@@ -3300,6 +3479,241 @@ def poll_player_state() -> None:
 
 
 # =========================================================
+# Sound Edit helpers
+# =========================================================
+
+def clamp_cc_value(value: int) -> int:
+    return max(SOUND_EDIT_MIN, min(SOUND_EDIT_MAX, int(value)))
+
+def sound_edit_is_accel_selected() -> bool:
+    # Kept for compatibility with older call sites. There is no 9th ACC/SENS row now.
+    return False
+
+def sound_edit_current_param() -> dict:
+    return SOUND_EDIT_PARAMS[clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))]
+
+def set_encoder_accel_profile(profile: int) -> bool:
+    # Read-only mirror of the UNO-1 encoder acceleration profile.
+    profile = max(1, min(3, int(profile)))
+    state.encoder_accel_profile = profile
+    state.encoder_accel_pending_profile = profile
+    if SOUND_EDIT_CC_DEBUG:
+        log(f"SOUND_EDIT UNO accel mirror P{profile}")
+    return True
+
+def reset_sound_edit_to_defaults() -> None:
+    state.sound_edit_values = default_sound_edit_values()
+    state.sound_edit_a_values = default_sound_edit_values()
+    state.sound_edit_active_side = "B"
+    state.sound_edit_modified = set()
+
+def apply_sound_edit_defaults_to_engine(*, announce: bool = False) -> bool:
+    """Reset the volatile Sound Edit set and send its default CC values.
+
+    Preset changes and MIDI Panic should behave as a clean sound-state reset,
+    not as a continuation of the last edited CC values. FluidSynth does not
+    automatically clear controller values on Program Change, so Fluid Ardule
+    explicitly re-sends the eight Sound Edit defaults after applying a preset.
+    """
+    reset_sound_edit_to_defaults()
+
+    if state.current_engine != "fluidsynth":
+        if announce:
+            mark_dirty("Sound Edit reset")
+        return False
+
+    ok = False
+    for item in SOUND_EDIT_PARAMS:
+        ok = send_sound_edit_cc(int(item["cc"]), int(item["default"])) or ok
+
+    if announce:
+        mark_dirty("Sound Edit reset")
+    return ok
+
+def send_sound_edit_cc(cc: int, value: int) -> bool:
+    value = clamp_cc_value(value)
+    cc = int(cc)
+    if state.current_engine != "fluidsynth":
+        mark_dirty("CC edit: FluidSynth only")
+        if SOUND_EDIT_CC_DEBUG:
+            log(f"SOUND_EDIT CC skipped engine={state.current_engine} cc={cc} val={value}")
+        return False
+
+    channels = range(16) if SOUND_EDIT_SEND_ALL_CHANNELS else range(1)
+    ok = False
+    sent = 0
+    for ch in channels:
+        sent_ok = send_fluidsynth_command(f"cc {ch} {cc} {value}")
+        if sent_ok:
+            sent += 1
+        ok = sent_ok or ok
+
+    if SOUND_EDIT_CC_DEBUG:
+        target = "all" if SOUND_EDIT_SEND_ALL_CHANNELS else "0"
+        log(f"SOUND_EDIT CC cc={cc} val={value} ch={target} sent={sent} ok={ok}")
+    if not ok:
+        mark_dirty("CC send failed")
+    return ok
+
+def sound_edit_delta_from_uno(raw_step: int) -> int:
+    """Convert UNO encoder step to a Sound Edit CC delta.
+
+    UNO-1 already detects rotation speed and sends ENC:+1/+2/+3 or ENC:-1/-2/-3.
+    In Sound Edit we intentionally use that magnitude, but scale it gently by
+    the current UNO acceleration profile:
+      P1 Fine   : always +/-1 for precise editing
+      P2 Normal : use UNO step as-is
+      P3 Fast   : stronger non-linear boost, 1->1, 2->4, 3->7, capped at +/-10
+
+    This scaling is used only for CC value editing. Normal menu navigation uses
+    only the direction and therefore always moves one item at a time.
+    """
+    raw = int(raw_step)
+    if raw == 0:
+        return 0
+
+    sign = 1 if raw > 0 else -1
+    mag = abs(raw)
+    profile = max(1, min(3, int(getattr(state, "encoder_accel_profile", ENCODER_ACCEL_DEFAULT_PROFILE))))
+
+    if profile == 1:
+        units = 1
+    elif profile == 2:
+        units = mag
+    else:
+        # Tuned for a faster full-range sweep: approximately 0-127 in
+        # about 3.5 turns instead of about 5 turns on the current encoder.
+        units = 1 + (mag - 1) * 3
+
+    delta = sign * min(10, max(1, units)) * SOUND_EDIT_STEP
+
+    # Debug hook kept for temporary diagnostics. Disabled by default via
+    # SOUND_EDIT_CC_DEBUG to avoid journal noise during normal performance use.
+    if SOUND_EDIT_CC_DEBUG and (abs(raw) > 1 or profile != 2):
+        log(f"SOUND_EDIT step raw={raw} profile=P{profile} delta={delta}")
+    return delta
+
+def enter_sound_edit() -> None:
+    state.ui_mode = "sound_edit"
+    state.sound_edit_index = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
+    state.sound_edit_last_adjust_time = 0.0
+    invalidate_full_display()
+    mark_dirty("Sound Edit")
+
+def leave_sound_edit() -> None:
+    state.ui_mode = "main"
+    invalidate_full_display()
+    mark_dirty("Back to main")
+
+def move_sound_edit_selection(delta_row: int = 0, delta_col: int = 0) -> None:
+    idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
+    row = idx // SOUND_EDIT_COLS
+    col = idx % SOUND_EDIT_COLS
+    rows = (len(SOUND_EDIT_PARAMS) + SOUND_EDIT_COLS - 1) // SOUND_EDIT_COLS
+
+    new_row = max(0, min(rows - 1, row + delta_row))
+    new_col = max(0, min(SOUND_EDIT_COLS - 1, col + delta_col))
+    new_idx = new_row * SOUND_EDIT_COLS + new_col
+    if new_idx >= len(SOUND_EDIT_PARAMS):
+        new_idx = len(SOUND_EDIT_PARAMS) - 1
+    if new_idx == idx:
+        mark_dirty("Edge")
+        return
+    state.sound_edit_index = new_idx
+    state.sound_edit_active_side = "B"
+    state.sound_edit_last_adjust_time = 0.0
+    item = sound_edit_current_param()
+    mark_dirty(f"{item['name']} CC{item['cc']}")
+
+def adjust_sound_edit_value(step: int) -> None:
+    if step == 0:
+        return
+    item = sound_edit_current_param()
+    cc = int(item["cc"])
+    old_b = int(state.sound_edit_values.get(cc, item["default"]))
+    if cc not in state.sound_edit_modified:
+        state.sound_edit_a_values[cc] = old_b
+    delta = sound_edit_delta_from_uno(int(step))
+    new_b = clamp_cc_value(old_b + delta)
+    if new_b == old_b:
+        mark_dirty(f"{item['name']} B:{new_b}")
+        return
+    state.sound_edit_values[cc] = new_b
+    state.sound_edit_active_side = "B"
+    if new_b == int(item["default"]):
+        state.sound_edit_modified.discard(cc)
+    else:
+        state.sound_edit_modified.add(cc)
+    ok = send_sound_edit_cc(cc, new_b)
+    if ok:
+        mark_dirty(f"{item['name']} B:{new_b}")
+    else:
+        mark_dirty(f"{item['name']} send failed")
+
+def toggle_sound_edit_ab() -> None:
+    item = sound_edit_current_param()
+    cc = int(item["cc"])
+    if state.sound_edit_active_side == "B":
+        state.sound_edit_active_side = "A"
+        value = int(state.sound_edit_a_values.get(cc, item["default"]))
+    else:
+        state.sound_edit_active_side = "B"
+        value = int(state.sound_edit_values.get(cc, item["default"]))
+    ok = send_sound_edit_cc(cc, value)
+    mark_dirty(f"{item['name']} {state.sound_edit_active_side}:{value}" if ok else f"{item['name']} send failed")
+
+def reset_current_sound_edit_param() -> None:
+    item = sound_edit_current_param()
+    cc = int(item["cc"])
+    value = int(item["default"])
+    state.sound_edit_values[cc] = value
+    state.sound_edit_a_values[cc] = value
+    state.sound_edit_active_side = "B"
+    state.sound_edit_modified.discard(cc)
+    ok = send_sound_edit_cc(cc, value)
+    mark_dirty(f"{item['name']} reset {value}" if ok else f"{item['name']} send failed")
+
+
+def set_sound_edit_current_value_from_pot(value: int) -> None:
+    item = sound_edit_current_param()
+    cc = int(item["cc"])
+    old_b = int(state.sound_edit_values.get(cc, item["default"]))
+    new_b = clamp_cc_value(value)
+    if new_b == old_b:
+        return
+    if cc not in state.sound_edit_modified:
+        state.sound_edit_a_values[cc] = old_b
+    state.sound_edit_values[cc] = new_b
+    state.sound_edit_active_side = "B"
+    if new_b == int(item["default"]):
+        state.sound_edit_modified.discard(cc)
+    else:
+        state.sound_edit_modified.add(cc)
+    ok = send_sound_edit_cc(cc, new_b)
+    if ok:
+        mark_dirty(f"{item['name']} B:{new_b}")
+    else:
+        mark_dirty(f"{item['name']} send failed")
+
+
+def toggle_pot_mode() -> None:
+    state.pot_mode = "PARAM" if state.pot_mode == "VOL" else "VOL"
+
+    if state.pot_mode == "PARAM":
+        # The pot now controls the highlighted Sound Edit parameter. Mark the
+        # volume side as uncaptured so returning to VOL mode requires pickup.
+        state.pot_volume_captured = False
+        label = "POT: PARAM"
+    else:
+        # Soft takeover: do not immediately apply the physical pot angle to
+        # volume. Volume resumes only after the pot is moved close to the
+        # current logical volume value.
+        state.pot_volume_captured = False
+        label = "POT: VOL"
+
+    show_footer_message(label, POT_MODE_FOOTER_HOLD_SEC)
+
+# =========================================================
 # Menu helpers
 # =========================================================
 
@@ -3366,7 +3780,7 @@ def get_submenu_options() -> list[tuple[str, bool]]:
     if key == "midi":
         return [(name, mode == state.midi_mode) for mode, name in state.midi_options]
     if key == "controls":
-        return [("Coming soon", False)]
+        return [("Sound Edit", False)]
     if key == "placeholder":
         return [("Reserved", False)]
     return []
@@ -3436,7 +3850,7 @@ def handle_main_select() -> None:
     elif label == "File Player":
         enter_file_browser()
     elif label == "Controls":
-        enter_submenu("controls")
+        enter_sound_edit()
     elif label == "MIDI Mode":
         enter_submenu("midi")
     elif label == "DAC":
@@ -3488,6 +3902,8 @@ def quick_resume_label() -> str:
         if snap.get("player_path"):
             return f"Player/{shorten_text(Path(snap['player_path']).name, 10)}"
         return "Player"
+    if mode == "sound_edit":
+        return "Sound Edit"
     if mode == "submenu":
         key = snap.get("submenu_key") or "Menu"
         labels = {
@@ -3497,7 +3913,7 @@ def quick_resume_label() -> str:
             "dac": "DAC",
             "midi": "MIDI Mode",
             "placeholder": "Extension",
-            "controls": "Controls",
+            "controls": "Sound Edit",
         }
         return labels.get(key, str(key))
     return str(mode)
@@ -3692,6 +4108,38 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty("Confirm USB eject")
         return
 
+    if state.ui_mode == "sound_edit":
+        # Sound Edit has its own input handler, so global long-press actions
+        # that must remain available are handled first and explicitly.
+        if btn == "RIGHT_LP":
+            pulse_button_activity(); enter_quick_menu(); return
+        if btn == "DOWN_LP":
+            pulse_button_activity(); midi_panic(); return
+        if btn == "LEFT_LP":
+            pulse_button_activity(); toggle_pot_mode(); return
+        if btn == "SEL_LP":
+            pulse_button_activity(); reset_current_sound_edit_param(); return
+        if btn == "UP_LP":
+            pulse_button_activity(); apply_sound_edit_defaults_to_engine(announce=True); return
+
+        if btn == "UP":
+            pulse_button_activity(); move_sound_edit_selection(delta_row=-1); return
+        if btn == "DOWN":
+            pulse_button_activity(); move_sound_edit_selection(delta_row=+1); return
+        if btn == "RIGHT":
+            pulse_button_activity(); move_sound_edit_selection(delta_col=+1); return
+        if btn == "LEFT":
+            pulse_button_activity()
+            if state.sound_edit_index % SOUND_EDIT_COLS == 0:
+                leave_sound_edit()
+            else:
+                move_sound_edit_selection(delta_col=-1)
+            return
+        if btn == "SEL":
+            pulse_button_activity(); toggle_sound_edit_ab(); return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
     if btn == "RIGHT_LP" and state.ui_mode != "power_menu":
         pulse_button_activity()
         enter_quick_menu()
@@ -3736,10 +4184,17 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty(f"BTN ignored: {btn}")
         return
 
-    # LEFT_LP and UP_LP are intentionally left unused globally.
-    if btn in {"LEFT_LP", "UP_LP"}:
+    # LEFT long is repurposed from USB eject to POT mode toggle.
+    # USB eject remains available from the Quick Menu.
+    if btn == "LEFT_LP":
         pulse_button_activity()
-        mark_dirty(f"{btn.replace('_LP', '')} long unused")
+        toggle_pot_mode()
+        return
+
+    # UP_LP is intentionally left unused globally.
+    if btn == "UP_LP":
+        pulse_button_activity()
+        mark_dirty("UP long unused")
         return
 
     if state.ui_mode == "power_menu":
@@ -4429,7 +4884,14 @@ def handle_serial_line(line: str) -> None:
     if msg_type == "A0":
         return
     if msg_type == "ACCEL":
-        mark_dirty(f"Accel -> P{value}")
+        try:
+            p = max(1, min(3, int(value)))
+            state.encoder_accel_profile = p
+            state.encoder_accel_pending_profile = p
+            names = {1: "Fine", 2: "Normal", 3: "Fast"}
+            show_footer_message(f"Accel: P{p} {names[p]}", ACCEL_FOOTER_HOLD_SEC)
+        except Exception:
+            show_footer_message(f"Accel: P{value}", ACCEL_FOOTER_HOLD_SEC)
         return
     mark_dirty(f"Unknown line: {line}")
 
@@ -4440,10 +4902,6 @@ def handle_encoder_value(value: str) -> None:
     global last_enc_time
 
     now = time.time()
-    if now - last_enc_time < 0.02:   # 20ms debounce
-        return
-    last_enc_time = now
-
     try:
         step = int(value)
     except ValueError:
@@ -4451,15 +4909,43 @@ def handle_encoder_value(value: str) -> None:
     if step == 0:
         return
 
+    # In Sound Edit, do not apply the global 20 ms navigation debounce.
+    # UNO-1 already sends accelerated ENC steps, so use the raw signed value.
+    if state.ui_mode == "sound_edit":
+        adjust_sound_edit_value(step)
+        last_enc_time = now
+        return
+
+    if now - last_enc_time < 0.02:   # 20ms debounce for navigation modes
+        return
+    last_enc_time = now
+
     # Encoder rotation is mapped to UP/DOWN navigation. While a file is playing,
     # ignore it explicitly so a reconnect glitch or accidental turn cannot jump tracks.
     if state.ui_mode == "player" and state.player_status == "Playing":
         mark_dirty("Encoder ignored while playing")
         return
 
-    event_name = "DOWN" if step > 0 else "UP"
-    for _ in range(abs(step)):
-        handle_button_event(event_name)
+    # For menu/navigation contexts, ignore UNO acceleration magnitude and use
+    # only the direction. This prevents fast encoder turns from skipping menu
+    # items unpredictably; repeated detent events still allow quick scrolling.
+    #
+    # Slow mechanical rotary motion can occasionally produce one spurious
+    # opposite-direction event near a detent. Ignore only a short opposite
+    # pulse after a recently accepted navigation step; deliberate direction
+    # changes after that short guard window still work normally.
+    nav_dir = 1 if step > 0 else -1
+    if (
+        state.last_nav_enc_dir != 0
+        and nav_dir != state.last_nav_enc_dir
+        and (now - state.last_nav_enc_time) < ENC_NAV_REVERSAL_GUARD_SEC
+    ):
+        return
+
+    state.last_nav_enc_dir = nav_dir
+    state.last_nav_enc_time = now
+    event_name = "DOWN" if nav_dir > 0 else "UP"
+    handle_button_event(event_name)
 
 
 def maybe_render(force: bool = False) -> None:
@@ -4475,6 +4961,10 @@ def maybe_render(force: bool = False) -> None:
             state.last_forced_full_redraw_time = now
             invalidate_full_display()
             state.dirty = True
+
+    if state.transient_footer_text and now >= state.transient_footer_until:
+        state.transient_footer_text = ""
+        state.dirty = True
 
     if not state.dirty:
         return
