@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 260427u version
+// 20260428f version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -16,6 +16,8 @@
 //   HELLO
 //   HB
 //   ACT:MIDI
+//   PLAY:OFF / PLAY:ON / PLAY:BLINK
+//   PWR:SHUTDOWN / PWR:REBOOT
 //
 // Behavior:
 //   D13 : blink until Pi link established, then steady ON
@@ -46,6 +48,9 @@ const unsigned long READY_REPEAT_MS = 3000;
 const unsigned long LCD_REFRESH_MS = 120;
 const unsigned long POT_SEND_MS = 60;
 const unsigned long LINK_TIMEOUT_MS = 3000;
+const unsigned long POWER_SAFE_DELAY_MS = 10000;  // Wait after Pi heartbeat/link is lost following PWR:SHUTDOWN
+// 60 seconds is intentionally conservative because USB serial can disappear
+// before Raspberry Pi has fully completed filesystem sync and poweroff.
 const unsigned long LINK_BLINK_MS = 300;
 const unsigned long MIDI_LED_PULSE_MS = 70;
 const unsigned long INPUT_LED_HOLD_MS = 180;
@@ -89,11 +94,17 @@ const AccelProfile ACCEL_TABLE[3] = {
 
 // ---- Link / LCD state ----
 bool piLinked = false;
+bool everLinked = false;
 unsigned long lastPiSeenMs = 0;
 unsigned long lastReadySentMs = 0;
 unsigned long lastLcdRefreshMs = 0;
 unsigned long lastBlinkMs = 0;
 bool linkLedState = false;
+
+enum PowerState { POWER_NORMAL = 0, POWER_SHUTDOWN_ARMED = 1, POWER_REBOOT_ARMED = 2, POWER_OFF_OK = 3 };
+PowerState powerState = POWER_NORMAL;
+unsigned long powerCommandMs = 0;
+unsigned long powerLinkLostMs = 0;
 
 unsigned long midiLedUntilMs = 0;
 bool buttonLedBlinkActive = false;
@@ -261,6 +272,7 @@ void updateDebugTagTimeout() {
 }
 
 void showButtonEvent(const String &name, bool isLongPress, KeyCode k) {
+  if (powerState != POWER_NORMAL) return;
   String line1 = "BTN:" + name;
   String line2 = isLongPress ? "LONG" : "SHORT";
   setLocalDisplay(line1, line2);
@@ -268,6 +280,7 @@ void showButtonEvent(const String &name, bool isLongPress, KeyCode k) {
 }
 
 void showEncoderEvent(int step) {
+  if (powerState != POWER_NORMAL) return;
   String line1 = "ENC:";
   if (step > 0) line1 += "+";
   line1 += String(step);
@@ -276,6 +289,7 @@ void showEncoderEvent(int step) {
 }
 
 void showPotEvent(int v) {
+  if (powerState != POWER_NORMAL) return;
   String line1 = "POT:" + String(v);
   String line2 = piLinked ? "LINK OK" : "WAIT PI";
   setLocalDisplay(line1, line2);
@@ -291,6 +305,17 @@ void showAccelSetupScreen() {
 
 void drawStatus() {
   updateDebugTagTimeout();
+
+  // During power transition screens, use the full 16x2 LCD area.
+  // Do not reserve the right side for the button debug tag or P1/P2/P3,
+  // because messages such as "UNPLUG ADAPTER" must be shown completely.
+  if (powerState != POWER_NORMAL) {
+    lcd.setCursor(0, 0);
+    printPadded16(l1Text);
+    lcd.setCursor(0, 1);
+    printPadded16(l2Text);
+    return;
+  }
 
   lcd.setCursor(0, 0);
 
@@ -308,6 +333,57 @@ void drawStatus() {
 void notePiSeen() {
   lastPiSeenMs = millis();
   piLinked = true;
+  everLinked = true;
+
+  // If the link temporarily returns while a power transition is armed,
+  // discard any earlier link-lost timestamp. Safe-to-unplug must be based
+  // on the final heartbeat loss, not on a transient USB/serial gap.
+  if (powerState == POWER_SHUTDOWN_ARMED || powerState == POWER_REBOOT_ARMED) {
+    powerLinkLostMs = 0;
+  }
+}
+
+bool powerMessageAllowed() {
+  // Accept power-state commands only after a live Pi link exists.
+  // This prevents boot-wait, USB replug, or PC firmware-upload situations
+  // from being mistaken for a completed shutdown.
+  return piLinked && everLinked;
+}
+
+void armShutdownDisplay() {
+  if (!powerMessageAllowed()) return;
+  powerState = POWER_SHUTDOWN_ARMED;
+  powerCommandMs = millis();
+  // Start fresh for every shutdown command. The safe timer starts only
+  // after the heartbeat/link is actually lost in updateLinkLed().
+  powerLinkLostMs = 0;
+  setPlayLedMode(PLAY_LED_OFF);
+  setLocalDisplay("SHUTTING DOWN", "PLEASE WAIT");
+}
+
+void armRebootDisplay() {
+  if (!powerMessageAllowed()) return;
+  powerState = POWER_REBOOT_ARMED;
+  powerCommandMs = millis();
+  powerLinkLostMs = 0;
+  setPlayLedMode(PLAY_LED_OFF);
+  setLocalDisplay("REBOOTING", "PLEASE WAIT");
+}
+
+void showPowerOffOk() {
+  powerState = POWER_OFF_OK;
+  setPlayLedMode(PLAY_LED_OFF);
+  digitalWrite(PIN_LED_LINK, LOW);
+  linkLedState = false;
+  setLocalDisplay("POWER OFF OK", "UNPLUG ADAPTER");
+}
+
+void restartShutdownWaitIfPowerOk() {
+  if (powerState == POWER_OFF_OK) {
+    powerState = POWER_SHUTDOWN_ARMED;
+    powerLinkLostMs = 0;
+    setLocalDisplay("FINALIZING", "PLEASE WAIT");
+  }
 }
 
 void pulseMidiLed() {
@@ -365,7 +441,37 @@ void updateLinkLed() {
 
   if (piLinked && (now - lastPiSeenMs > LINK_TIMEOUT_MS)) {
     piLinked = false;
-    setLocalDisplay("LINK LOST", "WAIT HELLO/HB");
+    if (powerState == POWER_SHUTDOWN_ARMED) {
+      powerLinkLostMs = now;
+      setLocalDisplay("FINALIZING", "PLEASE WAIT");
+    } else if (powerState == POWER_REBOOT_ARMED) {
+      powerLinkLostMs = now;
+      setLocalDisplay("REBOOTING", "WAIT PI");
+    } else if (powerState != POWER_OFF_OK) {
+      setLocalDisplay("LINK LOST", "WAIT HELLO/HB");
+    }
+  }
+
+  // Safe-to-unplug is shown only after:
+  //   1) a valid PWR:SHUTDOWN was received while linked,
+  //   2) HB/HELLO has timed out, and
+  //   3) an additional post-link-loss safety delay has elapsed.
+  if (powerState == POWER_SHUTDOWN_ARMED && !piLinked && powerLinkLostMs != 0 &&
+      (now - powerLinkLostMs >= POWER_SAFE_DELAY_MS)) {
+    showPowerOffOk();
+  }
+
+  if (powerState == POWER_REBOOT_ARMED && !piLinked && powerLinkLostMs != 0 &&
+      (now - powerLinkLostMs >= POWER_SAFE_DELAY_MS)) {
+    // Reboot is not a safe-unplug condition. Return to ordinary Pi-wait mode.
+    powerState = POWER_NORMAL;
+    powerLinkLostMs = 0;
+    setLocalDisplay("WAIT PI", "REBOOT");
+  }
+
+  if (powerState == POWER_OFF_OK) {
+    digitalWrite(PIN_LED_LINK, LOW);
+    return;
   }
 
   if (piLinked) {
@@ -617,7 +723,17 @@ void handleIncomingLine(String s) {
   if (s == "HELLO") {
     bool wasLinked = piLinked;
     notePiSeen();
-    if (!wasLinked) {
+    if (powerState == POWER_REBOOT_ARMED) {
+      powerState = POWER_NORMAL;
+      powerLinkLostMs = 0;
+      if (!wasLinked) setLocalDisplay("PI LINKED", "REBOOT OK");
+    } else if (powerState == POWER_OFF_OK) {
+      // If communication resumes after the safe-unplug screen, the Pi was not
+      // really finished. Re-arm shutdown instead of falling back to WAIT PI.
+      powerState = POWER_SHUTDOWN_ARMED;
+      powerLinkLostMs = 0;
+      setLocalDisplay("FINALIZING", "PLEASE WAIT");
+    } else if (!wasLinked) {
       setLocalDisplay("PI LINKED", "HELLO OK");
     }
     sendReady();
@@ -627,30 +743,61 @@ void handleIncomingLine(String s) {
 
   if (s == "HB") {
     notePiSeen();
+    if (powerState == POWER_REBOOT_ARMED) {
+      powerState = POWER_NORMAL;
+      powerLinkLostMs = 0;
+      setLocalDisplay("PI LINKED", "REBOOT OK");
+    } else if (powerState == POWER_OFF_OK) {
+      // If any heartbeat comes back after POWER_OFF_OK, the OK screen was
+      // premature. Go back to shutdown-finalizing mode and restart the safe timer.
+      powerState = POWER_SHUTDOWN_ARMED;
+      powerLinkLostMs = 0;
+      setLocalDisplay("FINALIZING", "PLEASE WAIT");
+    }
     return;
   }
 
   if (s == "ACT:MIDI") {
     notePiSeen();
+    restartShutdownWaitIfPowerOk();
     pulseMidiLed();
     return;
   }
 
   if (s == "PLAY:OFF") {
     notePiSeen();
+    restartShutdownWaitIfPowerOk();
     setPlayLedMode(PLAY_LED_OFF);
     return;
   }
 
   if (s == "PLAY:ON") {
     notePiSeen();
+    restartShutdownWaitIfPowerOk();
     setPlayLedMode(PLAY_LED_ON);
     return;
   }
 
   if (s == "PLAY:BLINK") {
     notePiSeen();
+    restartShutdownWaitIfPowerOk();
     setPlayLedMode(PLAY_LED_BLINK);
+    return;
+  }
+
+  if (s == "PWR:SHUTDOWN" || s == "SHUTDOWN") {
+    if (powerMessageAllowed()) {
+      notePiSeen();
+      armShutdownDisplay();
+    }
+    return;
+  }
+
+  if (s == "PWR:REBOOT" || s == "REBOOT") {
+    if (powerMessageAllowed()) {
+      notePiSeen();
+      armRebootDisplay();
+    }
     return;
   }
 
