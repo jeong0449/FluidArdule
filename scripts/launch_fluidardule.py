@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v2.9-stage8-260427t-sound-edit"
+SCRIPT_VERSION = "v20260428e"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -719,6 +719,21 @@ def set_play_led(mode: str) -> None:
     if mode not in {"OFF", "ON", "BLINK"}:
         return
     send_serial_line(f"PLAY:{mode}")
+
+
+def notify_uno_power_state(action: str) -> None:
+    """Notify UNO-1 before a UI-initiated power action.
+
+    This is intentionally used only from the Fluid Ardule power menu.
+    SSH/systemd/manual poweroff paths are not treated as safe-unplug events
+    on UNO-1 because they may be indistinguishable from cable removal or
+    firmware-upload replug scenarios.
+    """
+    action = action.strip().upper()
+    if action == "HALT":
+        send_serial_line("PWR:SHUTDOWN")
+    elif action == "REBOOT":
+        send_serial_line("PWR:REBOOT")
 
 
 def pulse_button_activity() -> None:
@@ -1557,6 +1572,16 @@ class TFTDisplay:
     def _draw_power_menu(self, draw):
         draw.text((16, 10), "Power Menu", font=self.font_title, fill=ACCENT)
         draw.rounded_rectangle((32, 52, self.width - 32, self.height - 50), radius=14, fill=BOX_BG)
+        if state.power_confirm_action == "EXEC_HALT":
+            # Option B: Halt does not use an Are-you-sure dialog, but it still
+            # gives the user immediate visual feedback before systemd poweroff.
+            draw.text((52, 84), "Shutting down...", font=self.font_title, fill=FG)
+            draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
+            return
+        if state.power_confirm_action == "EXEC_REBOOT":
+            draw.text((52, 84), "Rebooting...", font=self.font_title, fill=FG)
+            draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
+            return
         if state.power_confirm_action:
             draw.text((52, 70), f"{state.power_confirm_action}?", font=self.font_title, fill=FG)
             draw.text((52, 108), "Are you sure?", font=self.font_body, fill=DIM)
@@ -4030,18 +4055,33 @@ def confirm_power_action(action: str) -> None:
     mark_dirty(f"Confirm {action}")
 
 
-def execute_power_action() -> None:
-    action = state.power_confirm_action
+def execute_power_action(action: str | None = None) -> None:
+    action = action or state.power_confirm_action
     if not action:
         cancel_power_menu()
         return
-    mark_dirty(f"{action} requested")
+
     try:
         if action == "Halt":
+            state.power_confirm_action = "EXEC_HALT"
+            state.power_confirm_index = 0
+            invalidate_full_display()
+            mark_dirty("Shutting down...")
+            maybe_render(force=True)
+            notify_uno_power_state(action)
+            time.sleep(1.0)
             subprocess.Popen(["sudo", "systemctl", "poweroff"])
         elif action == "Reboot":
+            state.power_confirm_action = "EXEC_REBOOT"
+            state.power_confirm_index = 0
+            invalidate_full_display()
+            mark_dirty("Rebooting...")
+            maybe_render(force=True)
+            notify_uno_power_state(action)
+            time.sleep(1.0)
             subprocess.Popen(["sudo", "systemctl", "reboot"])
     except Exception as exc:
+        state.power_confirm_action = None
         mark_dirty(f"Power action failed: {exc}")
 
 
@@ -4198,6 +4238,9 @@ def handle_button_event(btn_value: str) -> None:
         return
 
     if state.ui_mode == "power_menu":
+        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT"}:
+            mark_dirty("Power action running")
+            return
         if state.power_confirm_action:
             if btn == "UP":
                 if state.power_confirm_index > 0:
@@ -4253,8 +4296,14 @@ def handle_button_event(btn_value: str) -> None:
             item = POWER_MENU_ITEMS[state.power_menu_index]
             if item == "Cancel":
                 cancel_power_menu()
-            else:
-                confirm_power_action(item)
+            elif item == "Halt":
+                # Halt is entered from a long-press-only power menu, so skip
+                # the extra Are-you-sure dialog and show a short feedback page.
+                execute_power_action("Halt")
+            elif item == "Reboot":
+                # Reboot uses the same single-step UX as Halt: show a short
+                # feedback page, notify UNO-1, then call systemd reboot.
+                execute_power_action("Reboot")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
