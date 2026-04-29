@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260428f version
+// 20260429a version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -15,6 +15,8 @@
 // Pi -> Uno protocol:
 //   HELLO
 //   HB
+//   UI:READY / UI:BUSY
+//   ACK:BTN / ACK:ENC
 //   ACT:MIDI
 //   PLAY:OFF / PLAY:ON / PLAY:BLINK
 //   PWR:SHUTDOWN / PWR:REBOOT
@@ -96,6 +98,10 @@ const AccelProfile ACCEL_TABLE[3] = {
 bool piLinked = false;
 bool everLinked = false;
 unsigned long lastPiSeenMs = 0;
+
+enum UiLinkState { UI_UNKNOWN = 0, UI_READY = 1, UI_BUSY = 2 };
+UiLinkState piUiState = UI_UNKNOWN;
+unsigned long lastUiSeenMs = 0;
 unsigned long lastReadySentMs = 0;
 unsigned long lastLcdRefreshMs = 0;
 unsigned long lastBlinkMs = 0;
@@ -288,11 +294,17 @@ void showEncoderEvent(int step) {
   setLocalDisplay(line1, line2);
 }
 
+String linkUiText() {
+  if (!piLinked) return "WAIT PI";
+  if (piUiState == UI_READY) return "LNK OK UI OK";
+  if (piUiState == UI_BUSY)  return "LNK OK BUSY";
+  return "LINK OK UI ?";
+}
+
 void showPotEvent(int v) {
   if (powerState != POWER_NORMAL) return;
   String line1 = "POT:" + String(v);
-  String line2 = piLinked ? "LINK OK" : "WAIT PI";
-  setLocalDisplay(line1, line2);
+  setLocalDisplay(line1, linkUiText());
 }
 
 void showAccelSetupScreen() {
@@ -441,6 +453,7 @@ void updateLinkLed() {
 
   if (piLinked && (now - lastPiSeenMs > LINK_TIMEOUT_MS)) {
     piLinked = false;
+    piUiState = UI_UNKNOWN;
     if (powerState == POWER_SHUTDOWN_ARMED) {
       powerLinkLostMs = now;
       setLocalDisplay("FINALIZING", "PLEASE WAIT");
@@ -726,7 +739,7 @@ void handleIncomingLine(String s) {
     if (powerState == POWER_REBOOT_ARMED) {
       powerState = POWER_NORMAL;
       powerLinkLostMs = 0;
-      if (!wasLinked) setLocalDisplay("PI LINKED", "REBOOT OK");
+      if (!wasLinked) setLocalDisplay("PI LINKED", linkUiText());
     } else if (powerState == POWER_OFF_OK) {
       // If communication resumes after the safe-unplug screen, the Pi was not
       // really finished. Re-arm shutdown instead of falling back to WAIT PI.
@@ -734,7 +747,7 @@ void handleIncomingLine(String s) {
       powerLinkLostMs = 0;
       setLocalDisplay("FINALIZING", "PLEASE WAIT");
     } else if (!wasLinked) {
-      setLocalDisplay("PI LINKED", "HELLO OK");
+      setLocalDisplay("PI LINKED", linkUiText());
     }
     sendReady();
     sendAccelProfile();
@@ -746,7 +759,7 @@ void handleIncomingLine(String s) {
     if (powerState == POWER_REBOOT_ARMED) {
       powerState = POWER_NORMAL;
       powerLinkLostMs = 0;
-      setLocalDisplay("PI LINKED", "REBOOT OK");
+      setLocalDisplay("PI LINKED", linkUiText());
     } else if (powerState == POWER_OFF_OK) {
       // If any heartbeat comes back after POWER_OFF_OK, the OK screen was
       // premature. Go back to shutdown-finalizing mode and restart the safe timer.
@@ -754,6 +767,42 @@ void handleIncomingLine(String s) {
       powerLinkLostMs = 0;
       setLocalDisplay("FINALIZING", "PLEASE WAIT");
     }
+    return;
+  }
+
+  if (s == "UI:READY") {
+    notePiSeen();
+    restartShutdownWaitIfPowerOk();
+    piUiState = UI_READY;
+    lastUiSeenMs = millis();
+    if (powerState == POWER_NORMAL) {
+      setLocalDisplay("PI LINKED", linkUiText());
+    }
+    return;
+  }
+
+  if (s == "UI:BUSY") {
+    notePiSeen();
+    restartShutdownWaitIfPowerOk();
+    piUiState = UI_BUSY;
+    lastUiSeenMs = millis();
+    if (powerState == POWER_NORMAL) {
+      setLocalDisplay("PI LINKED", linkUiText());
+    }
+    return;
+  }
+
+  if (s == "ACK:BTN") {
+    notePiSeen();
+    restartShutdownWaitIfPowerOk();
+    setDebugTag("ACK-B ");
+    return;
+  }
+
+  if (s == "ACK:ENC") {
+    notePiSeen();
+    restartShutdownWaitIfPowerOk();
+    setDebugTag("ACK-E ");
     return;
   }
 
