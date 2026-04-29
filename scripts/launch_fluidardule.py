@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260428e"
+SCRIPT_VERSION = "v20260429a-uiack"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -85,6 +85,7 @@ POT_VOLUME_ENABLED = True
 DEVICE_POLL_INTERVAL_SEC = 3.0
 MIDI_RECONNECT_STABLE_SEC = 1.5
 SERIAL_HEARTBEAT_INTERVAL_SEC = 1.0
+SERIAL_UI_STATUS_INTERVAL_SEC = 1.0
 SERIAL_LINK_STALE_SEC = 3.0
 LED_PULSE_COOLDOWN_SEC = 0.05
 POT_LED_PULSE_INTERVAL_SEC = 0.07
@@ -375,6 +376,8 @@ serial_handle = None
 last_enc_time = 0.0
 serial_lock = threading.Lock()
 last_serial_hb_time = 0.0
+last_serial_ui_status_time = 0.0
+last_serial_ui_status_sent = ""
 serial_write_error_count = 0
 serial_read_error_count = 0
 midi_activity_proc = None
@@ -687,6 +690,43 @@ def periodic_serial_heartbeat() -> None:
         return
     if send_serial_line("HB"):
         last_serial_hb_time = now
+
+
+def current_ui_link_status() -> str:
+    # LINK/HB means the Pi process is alive. UI status means the main loop is
+    # intentionally able to accept UNO control events. Keep playback itself
+    # READY; reserve BUSY for modal/system operations where input should not be
+    # trusted or may be delayed.
+    if state.ui_mode == "power_menu" and state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT"}:
+        return "BUSY"
+    if state.usb_eject_confirm:
+        return "BUSY"
+    return "READY"
+
+
+def send_ui_status(status: str, *, force: bool = False) -> bool:
+    global last_serial_ui_status_time, last_serial_ui_status_sent
+    status = status.strip().upper()
+    if status not in {"READY", "BUSY"}:
+        status = "READY"
+    now = time.time()
+    if (not force) and status == last_serial_ui_status_sent and (now - last_serial_ui_status_time) < SERIAL_UI_STATUS_INTERVAL_SEC:
+        return False
+    if send_serial_line(f"UI:{status}"):
+        last_serial_ui_status_sent = status
+        last_serial_ui_status_time = now
+        return True
+    return False
+
+
+def periodic_serial_ui_status() -> None:
+    send_ui_status(current_ui_link_status())
+
+
+def ack_uno_event(kind: str) -> None:
+    kind = kind.strip().upper()
+    if kind in {"BTN", "ENC"}:
+        send_serial_line(f"ACK:{kind}")
 
 
 def pulse_midi_led() -> None:
@@ -3260,6 +3300,7 @@ def restore_current_preset_after_engine_restart() -> None:
 
 
 def restart_engine(sf_index: int, dac_index: int) -> None:
+    send_ui_status("BUSY", force=True)
     sf_index %= len(SOUNDFONTS)
     dac_index %= len(state.dac_options)
     sf_path, sf_name = SOUNDFONTS[sf_index]
@@ -3295,11 +3336,13 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
         target = target or choose_default_preset(presets)
         if not target:
             mark_dirty("No Yoshimi JSON")
+            send_ui_status("READY", force=True)
             return
         path = str(target.get("path", current_path)).strip()
         if not path:
             mark_dirty("Yoshimi path missing")
             log(f"Yoshimi restart rejected: empty path for target={target}")
+            send_ui_status("READY", force=True)
             return
         mark_dirty(f"Restarting -> Yoshimi:{target.get('name','Instrument')} / DAC:{dac_name}")
         state.current_preset_bank = int(target.get("bank", target.get("bank_id", 0)))
@@ -3308,19 +3351,24 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
         state.current_instrument_path = path
         ok = start_yoshimi_instrument(path, audio_device)
         if not ok:
+            send_ui_status("READY", force=True)
             return
         mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
+        send_ui_status("READY", force=True)
         return
 
     mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
     ok = start_fluidsynth(sf_path, audio_device)
     if not ok:
+        send_ui_status("READY", force=True)
         return
     reconnect_midi_to_fluidsynth(force_draw=False)
     mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
+    send_ui_status("READY", force=True)
 
 
 def midi_panic() -> None:
+    send_ui_status("BUSY", force=True)
     # If a MIDI file is currently playing, stop that dedicated player first.
     # Otherwise panic can appear ineffective because the file player keeps sounding.
     if state.player_proc_kind == "midi_file":
@@ -3333,6 +3381,7 @@ def midi_panic() -> None:
         state.player_paused = False
         set_play_led("OFF")
     mark_dirty(f"MIDI Panic -> {state.current_preset_name}")
+    send_ui_status("READY", force=True)
 
 
 # =========================================================
@@ -3407,11 +3456,13 @@ def build_player_command(path: str) -> tuple[list[str] | None, str | None]:
 
 
 def start_player(path: str) -> None:
+    send_ui_status("BUSY", force=True)
     global player_proc
     cmd, kind = build_player_command(path)
 
     if not cmd:
         mark_dirty("Unsupported file")
+        send_ui_status("READY", force=True)
         return
 
     stop_player_only()
@@ -3427,11 +3478,13 @@ def start_player(path: str) -> None:
         mark_dirty(f"Player missing: {cmd[0]}")
         if kind == "media":
             restart_engine(state.sf_index, state.dac_index)
+        send_ui_status("READY", force=True)
         return
     except Exception as exc:
         mark_dirty(f"Player start failed: {exc}")
         if kind == "media":
             restart_engine(state.sf_index, state.dac_index)
+        send_ui_status("READY", force=True)
         return
 
     state.player_path = path
@@ -3444,6 +3497,7 @@ def start_player(path: str) -> None:
     invalidate_full_display()
     set_play_led("ON")
     mark_dirty(f"Play {Path(path).name}")
+    send_ui_status("READY", force=True)
 
 
 def toggle_pause_player() -> None:
@@ -4654,6 +4708,7 @@ def serial_reader() -> None:
                 send_serial_line("HB")
                 time.sleep(0.02)
                 send_serial_line("PLAY:OFF")
+                send_ui_status("READY", force=True)
                 last_serial_hb_time = time.time()
                 state.serial_input_ignore_until = time.time() + SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC
                 mark_dirty("Serial connected")
@@ -4849,6 +4904,7 @@ def request_usb_eject() -> None:
 
 
 def confirm_usb_eject() -> None:
+    send_ui_status("BUSY", force=True)
     if not state.usb_mounted:
         state.usb_eject_confirm = False
         invalidate_full_display()
@@ -4891,6 +4947,7 @@ def confirm_usb_eject() -> None:
 
         invalidate_full_display()
         mark_dirty("USB ejected")
+        send_ui_status("READY", force=True)
         return
 
     invalidate_full_display()
@@ -4898,6 +4955,7 @@ def confirm_usb_eject() -> None:
         mark_dirty("USB busy / unmount failed")
     else:
         mark_dirty(f"USB eject failed: {shorten_text(out, 20)}")
+    send_ui_status("READY", force=True)
 
 
 # =========================================================
@@ -4923,12 +4981,14 @@ def handle_serial_line(line: str) -> None:
 
     if msg_type == "BTN":
         handle_button_event(value)
+        ack_uno_event("BTN")
         return
     if msg_type in ("POT", "A2"):
         handle_pot_value(value)
         return
     if msg_type == "ENC":
         handle_encoder_value(value)
+        ack_uno_event("ENC")
         return
     if msg_type == "A0":
         return
@@ -5109,6 +5169,7 @@ def main() -> None:
                     except queue.Empty:
                         break
                 periodic_serial_heartbeat()
+                periodic_serial_ui_status()
                 maybe_render(force=True)
                 continue
 
@@ -5117,6 +5178,7 @@ def main() -> None:
             periodic_bridge_watchdog()
             periodic_system_status_poll()
             periodic_serial_heartbeat()
+            periodic_serial_ui_status()
             poll_player_state()
             process_pending_yoshimi_preview()
             maybe_render()
