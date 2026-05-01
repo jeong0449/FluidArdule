@@ -2837,13 +2837,17 @@ def browser_go_parent() -> None:
         mark_dirty("Back to source")
         return
 
+    # Remember the folder we are leaving so the parent list can highlight it.
+    # This preserves browser context when returning from a child directory
+    # instead of jumping back to the first item.
+    previous_folder_name = os.path.basename(current)
+
     parent = normalize_path(os.path.dirname(current))
     if not is_under_root(parent, root):
         parent = root
 
     state.browser_path = parent
-    state.browser_entries = list_browser_entries(state.browser_path)
-    state.browser_index = 0
+    refresh_browser_entries(keep_name=previous_folder_name)
     mark_dirty("Parent folder")
 
 
