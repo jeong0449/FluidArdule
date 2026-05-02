@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260429a version
+// 20260502a version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -60,6 +60,7 @@ const unsigned long BUTTON_LED_BLINK_ON_MS = 70;
 const unsigned long BUTTON_LED_BLINK_OFF_MS = 70;
 const unsigned long PLAY_LED_BLINK_MS = 500;
 const unsigned long DEBUG_TAG_HOLD_MS = 1200;
+const unsigned long ACK_DEBUG_DELAY_MS = 300;
 const int           POT_DELTA_SEND = 4;    // Serial POT reporting threshold
 const int           POT_DELTA_LED  = 12;   // Larger threshold to avoid LED stuck-on from A2 noise
 
@@ -128,6 +129,9 @@ String l2Text = "Booting...";
 // Right-side 6-char debug tag on LCD line 1
 String debugTag = "";
 unsigned long debugTagUntilMs = 0;
+unsigned long debugTagSetMs = 0;
+String pendingAckDebugTag = "";
+unsigned long pendingAckDebugDueMs = 0;
 
 // ---- Keypad state ----
 KeyCode stableKey = KEY_NONE;
@@ -266,7 +270,30 @@ String makeButtonDebugTag(KeyCode k, bool isLongPress) {
 
 void setDebugTag(const String &tag) {
   debugTag = padRight(tag, 6);
-  debugTagUntilMs = millis() + DEBUG_TAG_HOLD_MS;
+  debugTagSetMs = millis();
+  debugTagUntilMs = debugTagSetMs + DEBUG_TAG_HOLD_MS;
+  pendingAckDebugTag = "";
+  pendingAckDebugDueMs = 0;
+}
+
+void scheduleAckDebugTag(const String &tag) {
+  unsigned long now = millis();
+  if (debugTag.length() > 0 && (now - debugTagSetMs) < ACK_DEBUG_DELAY_MS) {
+    pendingAckDebugTag = padRight(tag, 6);
+    pendingAckDebugDueMs = debugTagSetMs + ACK_DEBUG_DELAY_MS;
+  } else {
+    setDebugTag(tag);
+  }
+}
+
+void updatePendingAckDebugTag() {
+  if (pendingAckDebugTag.length() == 0) return;
+  if (millis() >= pendingAckDebugDueMs) {
+    String tag = pendingAckDebugTag;
+    pendingAckDebugTag = "";
+    pendingAckDebugDueMs = 0;
+    setDebugTag(tag);
+  }
 }
 
 void updateDebugTagTimeout() {
@@ -795,14 +822,14 @@ void handleIncomingLine(String s) {
   if (s == "ACK:BTN") {
     notePiSeen();
     restartShutdownWaitIfPowerOk();
-    setDebugTag("ACK-B ");
+    scheduleAckDebugTag("ACK-B ");
     return;
   }
 
   if (s == "ACK:ENC") {
     notePiSeen();
     restartShutdownWaitIfPowerOk();
-    setDebugTag("ACK-E ");
+    scheduleAckDebugTag("ACK-E ");
     return;
   }
 
@@ -907,6 +934,8 @@ void loop() {
   if ((now - lastReadySentMs) >= READY_REPEAT_MS) {
     sendReady();
   }
+
+  updatePendingAckDebugTag();
 
   if ((now - lastLcdRefreshMs) >= LCD_REFRESH_MS) {
     drawStatus();
