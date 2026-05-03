@@ -14,6 +14,9 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - Play MIDI files using FluidSynth
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
 - Output audio via I2S DAC or USB DAC
+- Mirror internal MIDI performance (live input and MIDI file playback) to external MIDI devices via USB MIDI interfaces
+- Support external MIDI modules such as Roland SC-D70 over USB, including port-aware selection (e.g., Part A / Part B / MIDI) *(currently under testing)*
+- Dynamically display only connected MIDI devices (device-driven UI)
 
 > 🚧 Advanced performance features such as preset editing, user preset management, layering, combination patches, and keyboard split are not yet implemented and are planned for future development.
 
@@ -27,6 +30,8 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - **TFT-LCD**: dedicated UI display driven by the Python application (not a general-purpose system display)
 - **UNO-1**: UI controller (buttons, encoder, potentiometer, LEDs)
 - (Optional) **UNO-2**: MIDI bridge for devices with 5-pin DIN only (keyboard controllers or external sound modules)
+
+External MIDI output can also be handled directly via USB MIDI interfaces without UNO-2, which is often simpler and more stable.
 
 [UNO-2](https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host) (`Ardule` MIDI Bridge or USB MIDI Host) is maintained as a separate project due to its strong independence, and is therefore omitted from the diagram above.
 
@@ -65,6 +70,8 @@ flowchart LR
 
 The system is designed as a modular architecture separating UI control, MIDI routing, and synthesis engine for flexibility and scalability.
 
+External MIDI modules can also be connected directly to the Raspberry Pi via USB MIDI interfaces, bypassing UNO-2.
+
 → See [architecture.md](architecture.md) for details.
 
 ---
@@ -77,6 +84,22 @@ The system is designed as a modular architecture separating UI control, MIDI rou
 
 Click the diagram to enlarge.  
 See [components.md](docs/components.md) for the parts list.
+
+---
+
+## External MIDI Integration
+
+Fluid Ardule supports direct integration with external MIDI sound modules via USB MIDI interfaces.
+
+Key features:
+
+- Mirror mode: replicate live MIDI input and MIDI file playback to external devices
+- Program Change (PC) transmission for external module control
+- Port-aware selection for multi-port devices (e.g., SC-D70 Part A / B / MIDI)
+- Automatic device detection — only connected devices are shown in the UI
+
+This allows Fluid Ardule to function not only as a sound module,
+but also as a flexible MIDI routing and control station for external hardware.
 
 ---
 
@@ -115,9 +138,9 @@ Hardware assembly can be inferred from the system overview and components docume
 
 ## Related Projects
 
-- [Nano Ardule](https://github.com/jeong0449/NanoArdule)
-- [Ardule USB MIDI Host (UNO-2)](https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host)
-- [uno-midi-bridge](https://github.com/jeong0449/uno-midi-bridge)
+- https://github.com/jeong0449/NanoArdule
+- https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host
+- https://github.com/jeong0449/uno-midi-bridge
 
 ---
 
