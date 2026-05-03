@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260429a-uiack"
+SCRIPT_VERSION = "v20260503f-inline-seq"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -70,6 +70,17 @@ RAW_MIDI_PREFERRED_HINTS = [
     "MPK Mini",
     "AKAI",
     "Keyboard",
+]
+
+# External USB MIDI interface selection.
+# Match by device/client name instead of ALSA client number because client IDs
+# can change across reboots or USB hotplug order changes.
+EXTERNAL_MIDI_NAME_HINTS = [
+    "USB Midi Cable",
+]
+EXTERNAL_MIDI_OUT_MODES = [
+    ("off", "Off"),
+    ("mirror", "Mirror"),
 ]
 BRIDGE_EXECUTABLE = "/home/pi/bin/uno_midi_bridge_sp"
 BRIDGE_PORT_HINT = "UNO-bridge"
@@ -258,7 +269,6 @@ class RuntimeState:
     midi_mode_options: list[tuple[str, str]] = field(default_factory=lambda: [
         ("usb_direct_raw", "USB direct RAW"),
         ("uno2_bridge_seq", "UNO-2 bridge (SEQ)"),
-        ("alsa_midi", "ALSA MIDI (SEQ)"),
     ])
     bridge_proc: subprocess.Popen | None = None
     bridge_running: bool = False
@@ -268,6 +278,12 @@ class RuntimeState:
     selected_alsa_input_name: str | None = None
     preferred_seq_port: str | None = None
     preferred_seq_name: str | None = None
+
+    external_midi_out_mode: str = "off"
+    external_midi_present: bool = False
+    external_midi_port: str | None = None
+    external_midi_name: str | None = None
+    external_midi_connected: bool = False
 
     midi_selected_name: str | None = None
     midi_options: list[tuple[str, str]] = field(default_factory=list)
@@ -371,6 +387,7 @@ fluid_proc = None
 fluid_log_handle = None
 yoshimi_log_handle = None
 player_proc = None
+player_ext_midi_proc = None
 player_log_handle = None
 serial_handle = None
 last_enc_time = 0.0
@@ -790,7 +807,7 @@ def get_midi_activity_monitor_spec() -> tuple[list[str] | None, str]:
     if not MIDI_ACTIVITY_MONITOR_ENABLED:
         return None, ""
     # Keep MIDI activity LED only for SEQ-style sources.
-    if state.midi_mode in {"alsa_midi", "uno2_bridge_seq"}:
+    if state.midi_mode in {"alsa_midi", "uno2_bridge_seq", "external_midi_seq"}:
         port = state.midi_src_port
         if port and port not in {"-", "", "seq"}:
             return ["aseqdump", "-p", port], f"seq:{port}"
@@ -1284,6 +1301,8 @@ class TFTDisplay:
         if label == "DAC":
             return state.dac_name
         if label == "Extension":
+            if external_midi_out_available():
+                return f"ExtMIDI:{state.external_midi_out_mode.upper()}"
             return "Reserved"
         return ""
 
@@ -1426,6 +1445,7 @@ class TFTDisplay:
             "dac": "Select DAC",
             "midi": "MIDI Mode",
             "controls": "Sound Edit",
+            "external_midi_out": "External MIDI OUT",
             "placeholder": "Coming Soon",
         }
 
@@ -1934,20 +1954,106 @@ def find_bridge_port() -> str | None:
     return None
 
 
+def is_external_midi_item(item: dict) -> bool:
+    text = f"{item.get('client_name', '')} {item.get('port_name', '')}".lower()
+    return any(hint.lower() in text for hint in EXTERNAL_MIDI_NAME_HINTS)
+
+
+def external_midi_label(item: dict) -> str:
+    return f"{item['client_name']} / {item['port_name']}"
+
+
+def find_external_midi_seq_port() -> tuple[str | None, str | None]:
+    for item in parse_aconnect_ports():
+        if is_external_midi_item(item):
+            return item['port'], external_midi_label(item)
+    return None, None
+
+
+def refresh_external_midi_state(quiet: bool = False) -> bool:
+    old_present = state.external_midi_present
+    old_mode = state.external_midi_out_mode
+    port, label = find_external_midi_seq_port()
+    state.external_midi_present = bool(port)
+    state.external_midi_port = port
+    state.external_midi_name = label
+    if not port:
+        state.external_midi_connected = False
+        if state.external_midi_out_mode != "off":
+            state.external_midi_out_mode = "off"
+    changed = (old_present != state.external_midi_present) or (old_mode != state.external_midi_out_mode)
+    if changed and not quiet:
+        mark_dirty("External MIDI detected" if state.external_midi_present else "External MIDI removed")
+    return changed
+
+
+def external_midi_out_available() -> bool:
+    # External MIDI OUT mirror is meaningful only for SEQ-style input modes.
+    # In USB Direct RAW mode FluidSynth owns the raw MIDI input directly, so
+    # this Python UI/runtime process cannot mirror live input events. Hide and
+    # disable the feature there to avoid a misleading control.
+    return state.midi_mode != "usb_direct_raw" and state.external_midi_present
+
+
+def enforce_external_midi_out_policy() -> None:
+    if state.midi_mode == "usb_direct_raw" and state.external_midi_out_mode != "off":
+        state.external_midi_out_mode = "off"
+        state.external_midi_connected = False
+
+
+def connect_external_midi_mirror(src_port: str | None = None) -> bool:
+    refresh_external_midi_state(quiet=True)
+    enforce_external_midi_out_policy()
+    if state.external_midi_out_mode != "mirror" or not state.external_midi_port:
+        state.external_midi_connected = False
+        return False
+    src = src_port or state.midi_src_port
+    dst = state.external_midi_port
+    if not src or src in {"-", "", "seq"}:
+        state.external_midi_connected = False
+        return False
+    # Allow src == dst for a bidirectional USB MIDI cable.
+    # Physically this is often the intended soft-thru use case:
+    #   DIN keyboard -> USB MIDI Cable IN -> Pi/FluidSynth
+    #   Pi mirror    -> USB MIDI Cable OUT -> external module
+    # A real loop is possible only if the cable OUT is physically routed back
+    # into its own IN, so do not block same-port soft-thru in software.
+    code, out = run_cmd(["aconnect", src, dst])
+    already = "already" in out.lower()
+    state.external_midi_connected = (code == 0 or already)
+    if not state.external_midi_connected:
+        mark_dirty(f"Ext MIDI OUT failed: {out[:32]}")
+    return state.external_midi_connected
+
+
 def list_alsa_seq_input_ports() -> list[tuple[str, str]]:
     options = []
     for item in parse_aconnect_ports():
         client_name = item['client_name']
+        port_name = item['port_name']
         client_name_l = client_name.lower()
+        port_name_l = port_name.lower()
+
+        # Hide ALSA/system/debug ports from the user-facing MIDI input menu.
+        # They may appear while Fluid Ardule is monitoring MIDI activity, but
+        # they are not real performance input devices.
         if client_name in {'System', 'Midi Through'}:
+            continue
+        if (
+            'aseqdump' in client_name_l
+            or 'aseqdump' in port_name_l
+            or 'aconnect' in client_name_l
+            or 'aconnect' in port_name_l
+            or 'client-' in client_name_l
+        ):
             continue
         if 'fluid synth' in client_name_l or 'fluidsynth' in client_name_l or 'yoshimi' in client_name_l:
             continue
         if BRIDGE_PORT_HINT.lower() in client_name_l or 'uno-midi-bridge' in client_name_l:
             continue
-        if 'announce' in item['port_name'].lower() or 'timer' in item['port_name'].lower():
+        if 'announce' in port_name_l or 'timer' in port_name_l:
             continue
-        label = f"{client_name} / {item['port_name']}"
+        label = f"{client_name} / {port_name}"
         options.append((item['port'], label))
     return options
 
@@ -1984,7 +2090,15 @@ def choose_alsa_seq_input() -> tuple[str | None, str | None]:
                 state.selected_alsa_input_name = label
                 return port, label
 
-    # 4) Otherwise use first available.
+    # 4) If the user explicitly chose an ALSA input and it disappeared,
+    # stay in waiting mode instead of silently falling back to another device
+    # such as the External MIDI cable.
+    if state.preferred_seq_port or state.preferred_seq_name:
+        state.selected_alsa_input = None
+        state.selected_alsa_input_name = None
+        return None, None
+
+    # 5) Otherwise use first available.
     state.selected_alsa_input, state.selected_alsa_input_name = options[0]
     return options[0]
 
@@ -1997,6 +2111,13 @@ def choose_alsa_seq_input() -> tuple[str | None, str | None]:
 
     state.selected_alsa_input, state.selected_alsa_input_name = options[0]
     return options[0]
+
+
+def choose_external_midi_seq_input() -> tuple[str | None, str | None]:
+    port, label = find_external_midi_seq_port()
+    state.selected_alsa_input = port
+    state.selected_alsa_input_name = label
+    return port, label
 
 
 def connect_bridge_to_fluidsynth() -> bool:
@@ -2014,6 +2135,8 @@ def connect_bridge_to_fluidsynth() -> bool:
         state.midi_src_name = state.bridge_port_name
         state.midi_connected = True
         refresh_midi_display_text()
+        if state.external_midi_out_mode == "mirror":
+            connect_external_midi_mirror(src)
         if code == 0:
             mark_dirty(f"Bridge connected {src}->{dst}")
         return True
@@ -2051,6 +2174,8 @@ def connect_selected_alsa_to_fluidsynth() -> bool:
         state.fluid_dst_port = dst
         state.midi_connected = True
         refresh_midi_display_text()
+        if state.external_midi_out_mode == "mirror":
+            connect_external_midi_mirror(src)
         if code == 0:
             mark_dirty(f'ALSA seq connected {src}->{dst}')
         return True
@@ -2060,6 +2185,42 @@ def connect_selected_alsa_to_fluidsynth() -> bool:
     refresh_midi_display_text()
     mark_dirty(f'ALSA seq aconnect failed: {out[:40]}')
     return False
+
+def connect_external_midi_to_fluidsynth() -> bool:
+    src, src_name = choose_external_midi_seq_input()
+    dst = find_fluidsynth_port()
+    if not src:
+        state.midi_connected = False
+        state.midi_src_port = '-'
+        state.midi_src_name = 'No External MIDI'
+        refresh_midi_display_text()
+        mark_dirty('External MIDI missing')
+        return False
+    if not dst:
+        state.midi_connected = False
+        state.midi_src_port = src
+        state.midi_src_name = src_name or src
+        refresh_midi_display_text()
+        mark_dirty('FluidSynth port missing')
+        return False
+    code, out = run_cmd(["aconnect", src, dst])
+    already = "already" in out.lower()
+    state.midi_src_port = src
+    state.midi_src_name = src_name or src
+    state.selected_alsa_input = src
+    state.selected_alsa_input_name = src_name or src
+    state.fluid_dst_port = dst
+    state.midi_connected = (code == 0 or already)
+    refresh_midi_display_text()
+    if state.midi_connected and state.external_midi_out_mode == "mirror":
+        connect_external_midi_mirror(src)
+    if state.midi_connected:
+        if code == 0:
+            mark_dirty(f'External MIDI connected {src}->{dst}')
+        return True
+    mark_dirty(f'External MIDI aconnect failed: {out[:40]}')
+    return False
+
 
 def build_available_dac_options() -> list[tuple[str, str]]:
     options = [DEFAULT_DAC]
@@ -2101,6 +2262,7 @@ def midi_mode_to_label(mode: str) -> str:
         "usb_direct_raw": "USB direct RAW",
         "uno2_bridge_seq": "UNO-2 bridge (SEQ)",
         "alsa_midi": "ALSA MIDI (SEQ)",
+        "external_midi_seq": "External MIDI (SEQ)",
     }
     return labels.get(mode, mode)
 
@@ -2115,6 +2277,12 @@ def refresh_midi_display_text() -> None:
         state.midi_display_text = f"RAW:{raw_label}" if raw_label and raw_label != "RAW" else "RAW"
     elif state.midi_mode == "uno2_bridge_seq":
         state.midi_display_text = "UNO2/SEQ" if state.bridge_running else "UNO2/OFF"
+    elif state.midi_mode == "external_midi_seq":
+        if not state.external_midi_present:
+            state.midi_display_text = "EXT:waiting"
+        else:
+            ext_label = shorten_text((state.external_midi_name or "External MIDI").replace(" MIDI 1", ""), 10)
+            state.midi_display_text = f"EXT:{ext_label}"
     else:
         if not state.selected_alsa_input and not state.selected_alsa_input_name:
             state.midi_display_text = "SEQ:waiting"
@@ -2123,8 +2291,29 @@ def refresh_midi_display_text() -> None:
             state.midi_display_text = f"SEQ:{alsa_label}" if alsa_label else "SEQ:waiting"
 
 
+def seq_menu_label(label: str) -> str:
+    # Keep MIDI Mode flat and readable on the TFT: show the actual currently
+    # plugged ALSA sequencer input as a direct selectable row.
+    # Example: "iCON ... / iCON ... MIDI 1" -> "SEQ:iCON ...".
+    text = (label or "ALSA MIDI").replace(" MIDI 1", "").strip()
+    if " / " in text:
+        left, right = text.split(" / ", 1)
+        # Prefer the more specific side, but avoid needless duplication.
+        if right and right.lower() not in left.lower():
+            text = right
+        else:
+            text = left
+    text = re.sub(r"\s+", " ", text).strip()
+    return "SEQ:" + shorten_text(text, 24)
+
+
 def build_midi_input_options() -> list[tuple[str, str]]:
-    return list(state.midi_mode_options)
+    # Base modes are always shown. ALSA SEQ inputs are added at menu-entry time
+    # as direct selectable items, so there is no second-level selector.
+    options = list(state.midi_mode_options)
+    for port, label in list_alsa_seq_input_ports():
+        options.append((f"alsa_seq:{port}", seq_menu_label(label)))
+    return options
 
 
 def refresh_midi_options(quiet: bool = False) -> bool:
@@ -2151,6 +2340,12 @@ def refresh_midi_options(quiet: bool = False) -> bool:
     elif state.midi_mode == "uno2_bridge_seq":
         state.midi_src_name = state.bridge_port_name
         state.midi_src_port = "seq"
+    elif state.midi_mode == "external_midi_seq":
+        refresh_external_midi_state(quiet=True)
+        selected_port, selected_name = choose_external_midi_seq_input()
+        state.midi_src_name = selected_name or 'No External MIDI'
+        state.midi_src_port = selected_port or '-'
+        state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
     else:
         selected_port, selected_name = choose_alsa_seq_input()
         state.selected_alsa_input = selected_port
@@ -2243,6 +2438,9 @@ def reconnect_midi_to_fluidsynth(force_draw: bool = True) -> None:
             connect_bridge_to_fluidsynth()
         else:
             state.midi_connected = False
+    elif state.midi_mode == "external_midi_seq":
+        refresh_external_midi_state(quiet=True)
+        connect_external_midi_to_fluidsynth()
     else:
         selected_port, selected_name = choose_alsa_seq_input()
         state.midi_src_port = selected_port or "-"
@@ -3404,8 +3602,58 @@ def open_player_log():
     return player_log_handle
 
 
+def start_external_midi_file_mirror(path: str) -> None:
+    """Play a MIDI file to the external USB MIDI OUT in parallel with audio playback.
+
+    This is used only when Extension > External MIDI OUT is set to Mirror.
+    Live SEQ input mirroring is handled separately with aconnect.
+    """
+    global player_ext_midi_proc
+    if state.external_midi_out_mode != "mirror":
+        return
+    refresh_external_midi_state(quiet=True)
+    if not state.external_midi_port:
+        state.external_midi_connected = False
+        return
+    if Path(path).suffix.lower() not in (".mid", ".midi"):
+        return
+    try:
+        player_ext_midi_proc = subprocess.Popen(
+            ["aplaymidi", "-p", state.external_midi_port, path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+            text=True,
+        )
+        state.external_midi_connected = True
+        log(f"External MIDI file mirror -> {state.external_midi_port}: {Path(path).name}")
+    except FileNotFoundError:
+        state.external_midi_connected = False
+        mark_dirty("aplaymidi missing")
+    except Exception as exc:
+        state.external_midi_connected = False
+        mark_dirty(f"Ext MIDI file failed: {exc}")
+
+
+def stop_external_midi_file_mirror() -> None:
+    global player_ext_midi_proc
+    proc = player_ext_midi_proc
+    player_ext_midi_proc = None
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            time.sleep(0.2)
+            if proc.poll() is None:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        pass
+
+
 def stop_player_only() -> None:
     global player_proc
+    stop_external_midi_file_mirror()
     if player_proc is None:
         return
     try:
@@ -3493,6 +3741,8 @@ def start_player(path: str) -> None:
 
     state.player_path = path
     state.player_proc_kind = kind
+    if kind == "midi_file":
+        start_external_midi_file_mirror(path)
     state.player_paused = False
     state.player_status = "Playing"
     state.player_stop_requested = False
@@ -3543,6 +3793,7 @@ def poll_player_state() -> None:
     auto_advanced = False
 
     player_proc = None
+    stop_external_midi_file_mirror()
     if finished_kind == "media":
         auto_advanced = try_auto_advance_media()
         if auto_advanced:
@@ -3815,9 +4066,30 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
         state.submenu_index = state.dac_index
     elif key == "midi":
         refresh_midi_options(quiet=True)
-        current_modes = [mode for mode, _name in state.midi_options]
+        state.submenu_index = 0
+        current_port = state.preferred_seq_port or state.selected_alsa_input
+        for i, (mode, _name) in enumerate(state.midi_options):
+            if mode == state.midi_mode:
+                state.submenu_index = i
+                break
+            if state.midi_mode == "alsa_midi" and mode.startswith("alsa_seq:"):
+                if mode.split(":", 1)[1] == current_port:
+                    state.submenu_index = i
+                    break
+    elif key == "alsa_midi_input":
+        options = list_alsa_seq_input_ports()
+        state.submenu_index = 0
+        current_port = state.preferred_seq_port or state.selected_alsa_input
+        current_name = (state.preferred_seq_name or state.selected_alsa_input_name or "").lower()
+        for i, (port, label) in enumerate(options):
+            if port == current_port or (current_name and label.lower() == current_name):
+                state.submenu_index = i
+                break
+    elif key == "external_midi_out":
+        refresh_external_midi_state(quiet=True)
+        current_modes = [mode for mode, _name in EXTERNAL_MIDI_OUT_MODES]
         try:
-            state.submenu_index = current_modes.index(state.midi_mode)
+            state.submenu_index = current_modes.index(state.external_midi_out_mode)
         except ValueError:
             state.submenu_index = 0
 
@@ -3861,9 +4133,29 @@ def get_submenu_options() -> list[tuple[str, bool]]:
     if key == "dac":
         return [(name, i == state.dac_index) for i, (_dev, name) in enumerate(state.dac_options)]
     if key == "midi":
-        return [(name, mode == state.midi_mode) for mode, name in state.midi_options]
+        current_port = state.preferred_seq_port or state.selected_alsa_input
+        rows = []
+        for mode, name in state.midi_options:
+            is_current = (mode == state.midi_mode)
+            if state.midi_mode == "alsa_midi" and mode.startswith("alsa_seq:"):
+                is_current = (mode.split(":", 1)[1] == current_port)
+            rows.append((name, is_current))
+        return rows
+    if key == "alsa_midi_input":
+        options = list_alsa_seq_input_ports()
+        if not options:
+            return [("No ALSA MIDI input", False)]
+        current_port = state.preferred_seq_port or state.selected_alsa_input
+        current_name = (state.preferred_seq_name or state.selected_alsa_input_name or "").lower()
+        return [(label, port == current_port or (current_name and label.lower() == current_name)) for port, label in options]
     if key == "controls":
         return [("Sound Edit", False)]
+    if key == "external_midi_out":
+        refresh_external_midi_state(quiet=True)
+        enforce_external_midi_out_policy()
+        if not external_midi_out_available():
+            return [("External MIDI OUT unavailable", False)]
+        return [(label, mode == state.external_midi_out_mode) for mode, label in EXTERNAL_MIDI_OUT_MODES]
     if key == "placeholder":
         return [("Reserved", False)]
     return []
@@ -3911,17 +4203,71 @@ def apply_current_submenu_selection() -> None:
         if state.midi_options:
             selected_mode, selected_name = state.midi_options[state.submenu_index]
             previous_mode = state.midi_mode
-            state.midi_mode = selected_mode
-            state.midi_selected_name = selected_name
-            if previous_mode == "uno2_bridge_seq" and selected_mode != "uno2_bridge_seq":
+
+            if selected_mode.startswith("alsa_seq:"):
+                # Direct ALSA SEQ input item selected from the MIDI Mode list.
+                # No extra submenu: remember this concrete port/name and use
+                # the normal ALSA SEQ engine path.
+                selected_port = selected_mode.split(":", 1)[1]
+                label = selected_name
+                for port, full_label in list_alsa_seq_input_ports():
+                    if port == selected_port:
+                        label = full_label
+                        break
+                state.midi_mode = "alsa_midi"
+                state.midi_selected_name = label
+                state.preferred_seq_port = selected_port
+                state.preferred_seq_name = label
+                state.selected_alsa_input = selected_port
+                state.selected_alsa_input_name = label
+            else:
+                state.midi_mode = selected_mode
+                state.midi_selected_name = selected_name
+
+            if previous_mode == "uno2_bridge_seq" and state.midi_mode != "uno2_bridge_seq":
                 stop_bridge()
-            if selected_mode == "alsa_midi":
-                # Keep remembering the user's chosen SEQ source for later reconnects.
-                state.preferred_seq_port = state.selected_alsa_input
-                state.preferred_seq_name = state.selected_alsa_input_name
             refresh_midi_options(quiet=True)
             restart_engine(state.sf_index, state.dac_index)
         leave_submenu(f"MIDI mode: {state.midi_display_text}")
+        return
+    if key == "alsa_midi_input":
+        options = list_alsa_seq_input_ports()
+        if not options:
+            state.preferred_seq_port = None
+            state.preferred_seq_name = None
+            state.selected_alsa_input = None
+            state.selected_alsa_input_name = None
+            leave_submenu("No ALSA MIDI input")
+            return
+        port, label = options[clamp_index(state.submenu_index, len(options))]
+        previous_mode = state.midi_mode
+        state.midi_mode = "alsa_midi"
+        state.midi_selected_name = midi_mode_to_label("alsa_midi")
+        state.preferred_seq_port = port
+        state.preferred_seq_name = label
+        state.selected_alsa_input = port
+        state.selected_alsa_input_name = label
+        if previous_mode == "uno2_bridge_seq":
+            stop_bridge()
+        refresh_midi_options(quiet=True)
+        restart_engine(state.sf_index, state.dac_index)
+        leave_submenu(f"ALSA MIDI: {shorten_text(label.replace(' MIDI 1', ''), 18)}")
+        return
+    if key == "external_midi_out":
+        refresh_external_midi_state(quiet=True)
+        enforce_external_midi_out_policy()
+        if not external_midi_out_available():
+            state.external_midi_out_mode = "off"
+            leave_submenu("External MIDI OUT unavailable")
+            return
+        modes = EXTERNAL_MIDI_OUT_MODES
+        mode, label = modes[clamp_index(state.submenu_index, len(modes))]
+        state.external_midi_out_mode = mode
+        if mode == "mirror":
+            connect_external_midi_mirror()
+        else:
+            state.external_midi_connected = False
+        leave_submenu(f"External MIDI OUT: {label}")
         return
     leave_submenu("Not implemented yet")
 
@@ -3938,6 +4284,13 @@ def handle_main_select() -> None:
         enter_submenu("midi")
     elif label == "DAC":
         enter_submenu("dac")
+    elif label == "Extension":
+        refresh_external_midi_state(quiet=True)
+        enforce_external_midi_out_policy()
+        if external_midi_out_available():
+            enter_submenu("external_midi_out")
+        else:
+            enter_submenu("placeholder")
     else:
         enter_submenu("placeholder")
 
@@ -3995,6 +4348,7 @@ def quick_resume_label() -> str:
             "preset": "Preset",
             "dac": "DAC",
             "midi": "MIDI Mode",
+            "external_midi_out": "External MIDI OUT",
             "placeholder": "Extension",
             "controls": "Sound Edit",
         }
@@ -4779,6 +5133,8 @@ def periodic_device_poll() -> None:
         return
     state.last_device_poll_time = now
     dac_changed = refresh_dac_options(quiet=True)
+    external_changed = refresh_external_midi_state(quiet=True)
+    enforce_external_midi_out_policy()
     old_connected = state.midi_connected
     if state.midi_mode == "usb_direct_raw":
         prev_raw_port = state.midi_src_port
@@ -4814,6 +5170,29 @@ def periodic_device_poll() -> None:
         state.midi_connected = state.bridge_running and (fluid_proc is not None and fluid_proc.poll() is None)
         if state.midi_connected and state.fluid_dst_port == "-":
             reconnect_midi_to_fluidsynth(force_draw=False)
+        if state.midi_connected and state.external_midi_out_mode == "mirror":
+            connect_external_midi_mirror(find_bridge_port())
+    elif state.midi_mode == "external_midi_seq":
+        prev_ext_connected = state.midi_connected
+        prev_ext_port = state.midi_src_port
+        selected_port, selected_name = choose_external_midi_seq_input()
+        state.midi_src_name = selected_name or 'No External MIDI'
+        state.midi_src_port = selected_port or '-'
+        state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
+        refresh_midi_display_text()
+        if not selected_port:
+            if prev_ext_connected:
+                mark_dirty("External MIDI disconnected")
+            return
+        if fluid_proc is not None and fluid_proc.poll() is not None:
+            pass
+        elif fluid_proc is not None and fluid_proc.poll() is None and (not prev_ext_connected or prev_ext_port != selected_port):
+            connect_external_midi_to_fluidsynth()
+            refresh_midi_display_text()
+            mark_dirty(f"MIDI {state.midi_display_text}")
+            return
+        if state.external_midi_out_mode == "mirror":
+            connect_external_midi_mirror(selected_port)
     else:
         prev_seq_connected = state.midi_connected
         prev_seq_port = state.selected_alsa_input
@@ -4847,6 +5226,8 @@ def periodic_device_poll() -> None:
         refresh_browser_entries(keep_name=keep)
     if dac_changed:
         mark_dirty("DAC list updated")
+    elif external_changed:
+        mark_dirty("External MIDI detected" if state.external_midi_present else "External MIDI removed")
     elif old_connected != state.midi_connected:
         mark_dirty(f"MIDI {state.midi_display_text}" if state.midi_connected else "Engine stopped")
 
@@ -5122,6 +5503,8 @@ def main() -> None:
         state.volume_percent = 100
 
     refresh_dac_options(quiet=True)
+    refresh_external_midi_state(quiet=True)
+    enforce_external_midi_out_policy()
     refresh_midi_options(quiet=True)
 
     sf_path, sf_name = SOUNDFONTS[state.sf_index]
@@ -5210,4 +5593,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Clear stale ALSA sequencer routes before starting Fluid Ardule.
+    # This avoids leftover aconnect links after Ctrl+C tests or systemctl restart.
+    # Keep this intentionally narrow: do not kill processes here.
+    run_cmd(["aconnect", "-x"])
+    time.sleep(0.3)
     main()
