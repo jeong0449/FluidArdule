@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260503j-inline-seq"
+SCRIPT_VERSION = "v20260503k-inline-seq"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -3604,6 +3604,54 @@ def open_player_log():
     return player_log_handle
 
 
+def write_external_panic_midi_file(path: str) -> None:
+    """Write a tiny SMF that sends panic CCs to all 16 MIDI channels."""
+    def vlq(value: int) -> bytes:
+        value = max(0, int(value))
+        buf = [value & 0x7F]
+        value >>= 7
+        while value:
+            buf.insert(0, (value & 0x7F) | 0x80)
+            value >>= 7
+        return bytes(buf)
+
+    events = bytearray()
+    first = True
+    # CC120 All Sound Off, CC123 All Notes Off, CC121 Reset All Controllers.
+    # Send them on all channels. Delta time is zero between events.
+    for ch in range(16):
+        for cc in (120, 123, 121):
+            events.extend(vlq(0 if first else 1))
+            events.extend(bytes([0xB0 | ch, cc, 0]))
+            first = False
+    events.extend(vlq(1))
+    events.extend(b"\xFF\x2F\x00")
+
+    header = b"MThd" + (6).to_bytes(4, "big") + (0).to_bytes(2, "big") + (1).to_bytes(2, "big") + (96).to_bytes(2, "big")
+    track = b"MTrk" + len(events).to_bytes(4, "big") + bytes(events)
+    Path(path).write_bytes(header + track)
+
+
+def send_external_midi_panic() -> None:
+    """Send All Sound Off / All Notes Off to the external USB MIDI OUT."""
+    refresh_external_midi_state(quiet=True)
+    if not state.external_midi_port:
+        return
+    tmp_path = "/tmp/fluidardule_ext_midi_panic.mid"
+    try:
+        write_external_panic_midi_file(tmp_path)
+        subprocess.run(
+            ["aplaymidi", "-p", state.external_midi_port, tmp_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2.0,
+            check=False,
+        )
+        state.external_midi_connected = True
+    except Exception as exc:
+        log(f"External MIDI panic failed: {exc}")
+
+
 def start_external_midi_file_mirror(path: str) -> None:
     """Play a MIDI file to the external USB MIDI OUT in parallel with audio playback.
 
@@ -3637,20 +3685,23 @@ def start_external_midi_file_mirror(path: str) -> None:
         mark_dirty(f"Ext MIDI file failed: {exc}")
 
 
-def stop_external_midi_file_mirror() -> None:
+def stop_external_midi_file_mirror(*, panic: bool = True) -> None:
     global player_ext_midi_proc
     proc = player_ext_midi_proc
     player_ext_midi_proc = None
-    if proc is None:
-        return
-    try:
-        if proc.poll() is None:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            time.sleep(0.2)
+    if proc is not None:
+        try:
             if proc.poll() is None:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except Exception:
-        pass
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                time.sleep(0.2)
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    if panic:
+        # Killing aplaymidi can leave notes sounding on an external module.
+        # FluidSynth is reset internally, but hardware modules need explicit MIDI panic.
+        send_external_midi_panic()
 
 
 def stop_player_only() -> None:
@@ -3765,6 +3816,11 @@ def toggle_pause_player() -> None:
         pgid = os.getpgid(player_proc.pid)
         if state.player_paused:
             os.killpg(pgid, signal.SIGCONT)
+            if player_ext_midi_proc is not None and player_ext_midi_proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(player_ext_midi_proc.pid), signal.SIGCONT)
+                except Exception:
+                    pass
             state.player_paused = False
             state.player_status = "Playing"
             set_play_led("ON")
@@ -3772,6 +3828,15 @@ def toggle_pause_player() -> None:
             mark_dirty("Resume")
         else:
             os.killpg(pgid, signal.SIGSTOP)
+            if player_ext_midi_proc is not None and player_ext_midi_proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(player_ext_midi_proc.pid), signal.SIGSTOP)
+                except Exception:
+                    pass
+            # Pause freezes the external aplaymidi process as well. Send a short
+            # external panic so sustained notes do not hang while paused.
+            if state.player_proc_kind == "midi_file":
+                send_external_midi_panic()
             state.player_paused = True
             state.player_status = "Paused"
             set_play_led("BLINK")
