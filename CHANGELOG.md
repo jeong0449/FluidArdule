@@ -4,6 +4,71 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-03 (KST)]
+
+### Major Features
+
+- Added full support for **USB MIDI Cable** as both:
+  - ALSA SEQ input device
+  - External MIDI output (mirror mode)
+- Enabled integration of **DIN keyboard + external sound module** using a single USB MIDI interface
+- Introduced **External MIDI OUT (Mirror)** feature under Extension menu
+  - Mirrors SEQ input and MIDI file playback to external module
+  - Independent from MIDI input mode
+
+### MIDI Mode Improvements
+
+- Refactored MIDI Mode UI:
+  - Removed submenu for ALSA device selection
+  - Allow direct selection of active ALSA MIDI devices
+- Display only **currently connected ALSA inputs** when entering MIDI Mode
+- Filtered out non-user ALSA ports:
+  - `aseqdump`
+  - `Midi Through`
+  - `System`
+- Preserved existing modes:
+  - USB Direct RAW
+  - UNO-2 bridge (SEQ)
+
+### UX / Behavior Changes
+
+- External MIDI OUT menu:
+  - Visible **only when USB MIDI Cable is connected**
+  - Available regardless of input mode (RAW / SEQ)
+- Mirror behavior:
+  - SEQ input → mirrored
+  - MIDI file playback → mirrored
+  - RAW input → not mirrored (by design)
+
+### Stability Improvements
+
+- Clear stale ALSA connections at startup:
+  - `aconnect -x`
+- Prevent routing conflicts during:
+  - Script restart
+  - Development cycles (Ctrl+C / rerun)
+- Maintain stable behavior under systemd execution
+
+### Playback Fixes
+
+- Fixed **stuck notes on external MIDI module** when:
+  - Stopping MIDI file playback
+  - Pausing playback
+- Added external MIDI panic handling:
+  - All Sound Off (CC120)
+  - All Notes Off (CC123)
+- Ensure external module properly resets on stop/pause
+
+### Notes
+
+- RAW mode intentionally keeps direct low-latency path (no mirror for live input)
+- Mirror feature is designed as an **output option**, not an input-mode feature
+- UI prioritizes stability over dynamic reconfiguration
+
+---
+
+
+
 ## [2026-04-27 (KST)]
 
 ### Added
