@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260503k-inline-seq"
+SCRIPT_VERSION = "v20260503s-inline-seq"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -82,6 +82,64 @@ EXTERNAL_MIDI_OUT_MODES = [
     ("off", "Off"),
     ("mirror", "Mirror"),
 ]
+EXTERNAL_MIDI_PC_PREVIEW_DEBOUNCE_SEC = 0.25
+
+# General MIDI program names. Displayed as 001-128, sent as MIDI PC 0-127.
+GM_PROGRAM_NAMES = [
+    "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+    "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavi",
+    "Celesta", "Glockenspiel", "Music Box", "Vibraphone",
+    "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+    "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ",
+    "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+    "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+    "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar harmonics",
+    "Acoustic Bass", "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass",
+    "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+    "Violin", "Viola", "Cello", "Contrabass",
+    "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+    "String Ensemble 1", "String Ensemble 2", "SynthStrings 1", "SynthStrings 2",
+    "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+    "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+    "French Horn", "Brass Section", "SynthBrass 1", "SynthBrass 2",
+    "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax",
+    "Oboe", "English Horn", "Bassoon", "Clarinet",
+    "Piccolo", "Flute", "Recorder", "Pan Flute",
+    "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+    "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)", "Lead 4 (chiff)",
+    "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass + lead)",
+    "Pad 1 (new age)", "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)",
+    "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)", "Pad 8 (sweep)",
+    "FX 1 (rain)", "FX 2 (soundtrack)", "FX 3 (crystal)", "FX 4 (atmosphere)",
+    "FX 5 (brightness)", "FX 6 (goblins)", "FX 7 (echoes)", "FX 8 (sci-fi)",
+    "Sitar", "Banjo", "Shamisen", "Koto",
+    "Kalimba", "Bag pipe", "Fiddle", "Shanai",
+    "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock",
+    "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+    "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
+    "Telephone Ring", "Helicopter", "Applause", "Gunshot",
+]
+
+def gm_program_label(index: int) -> str:
+    index = max(0, min(127, int(index)))
+    return f"{index + 1:03d} {GM_PROGRAM_NAMES[index]}"
+
+
+def gm_category_index_for_program(index: int) -> int:
+    return max(0, min(15, int(index) // 8))
+
+
+def gm_category_base(category_index: int) -> int:
+    return max(0, min(15, int(category_index))) * 8
+
+
+def gm_current_category_name() -> str:
+    return GM_CATEGORY_NAMES[gm_category_index_for_program(state.external_midi_pc_index)]
+
+
+def gm_current_category_program_indices() -> list[int]:
+    base = gm_category_base(gm_category_index_for_program(state.external_midi_pc_index))
+    return list(range(base, min(base + 8, len(GM_PROGRAM_NAMES))))
 BRIDGE_EXECUTABLE = "/home/pi/bin/uno_midi_bridge_sp"
 BRIDGE_PORT_HINT = "UNO-bridge"
 BRIDGE_AUTOSTART = False
@@ -284,6 +342,10 @@ class RuntimeState:
     external_midi_port: str | None = None
     external_midi_name: str | None = None
     external_midi_connected: bool = False
+    external_midi_pc_index: int = 0
+    external_midi_pc_channel: int = 1
+    pending_external_midi_pc_index: int | None = None
+    pending_external_midi_pc_due: float = 0.0
 
     midi_selected_name: str | None = None
     midi_options: list[tuple[str, str]] = field(default_factory=list)
@@ -668,6 +730,36 @@ def choose_raw_midi_input() -> tuple[str | None, str | None]:
                 return port, name
 
     return entries[0]
+
+
+def list_raw_midi_outputs() -> list[tuple[str, str]]:
+    code, out = run_cmd(["amidi", "-l"])
+    if code != 0 or not out:
+        return []
+
+    entries: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("dir"):
+            continue
+        m = _RAW_AMIDI_RE.match(line)
+        if not m:
+            continue
+        direction = m.group("dir")
+        port = m.group("port")
+        name = m.group("name").strip()
+        if "O" not in direction:
+            continue
+        entries.append((port, name))
+    return entries
+
+
+def find_external_midi_raw_output() -> tuple[str | None, str | None]:
+    for port, name in list_raw_midi_outputs():
+        text = f"{port} {name}".lower()
+        if any(hint.lower() in text for hint in EXTERNAL_MIDI_NAME_HINTS):
+            return port, name
+    return None, None
 
 
 # =========================================================
@@ -1437,6 +1529,23 @@ class TFTDisplay:
                 value_fill = ACCENT if idx != state.submenu_index else FG
                 draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
 
+    def _draw_submenu_external_midi_pc_rows(self, draw, options):
+        cat = gm_current_category_name()
+        hint = "RIGHT: next category"
+        draw.text((18, 42), f"{cat}   {hint}", font=self.font_small, fill=DIM)
+        # Clear and redraw a slightly lower list area so the category/hint line
+        # is always visible above the eight GM programs.
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        self._draw_scrolled_rows(
+            draw,
+            options,
+            state.submenu_index,
+            70,
+            32,
+            self.height - 50,
+            show_current_marks=True,
+        )
+
     def _draw_submenu(self, draw):
         title_map = {
             "soundfont": "Sound Source",
@@ -1445,7 +1554,9 @@ class TFTDisplay:
             "dac": "Select DAC",
             "midi": "MIDI Mode",
             "controls": "Sound Edit",
+            "extension": "Extension",
             "external_midi_out": "External MIDI OUT",
+            "external_midi_pc": "External MIDI PC Send",
             "placeholder": "Coming Soon",
         }
 
@@ -1457,16 +1568,21 @@ class TFTDisplay:
             if state.submenu_key == "preset" and state.category_entries:
                 cat = state.category_entries[clamp_index(state.category_index, len(state.category_entries))]
                 info = f"{info} / {cat}" if info else cat
+        elif state.submenu_key == "external_midi_pc":
+            info = gm_current_category_name()
 
         self._draw_submenu_title(draw, title, info)
-        self._draw_submenu_box(draw)
 
         options = get_submenu_options()
 
-        if state.submenu_key == "soundfont":
-            self._draw_submenu_soundfont_rows(draw, options)
+        if state.submenu_key == "external_midi_pc":
+            self._draw_submenu_external_midi_pc_rows(draw, options)
         else:
-            self._draw_submenu_generic_rows(draw, options)
+            self._draw_submenu_box(draw)
+            if state.submenu_key == "soundfont":
+                self._draw_submenu_soundfont_rows(draw, options)
+            else:
+                self._draw_submenu_generic_rows(draw, options)
 
     def _draw_file_source(self, draw):
         draw.text((16, 10), "File Player", font=self.font_title, fill=ACCENT)
@@ -3652,6 +3768,124 @@ def send_external_midi_panic() -> None:
         log(f"External MIDI panic failed: {exc}")
 
 
+def write_external_pc_midi_file(path: str, program_index: int, channel: int = 1) -> None:
+    """Write a tiny SMF containing one Program Change event."""
+    program_index = max(0, min(127, int(program_index)))
+    channel = max(1, min(16, int(channel)))
+    status = 0xC0 | (channel - 1)
+
+    events = bytearray()
+    # delta=0, Program Change, program number, delta=1, End of Track
+    events.extend(b"\x00")
+    events.extend(bytes([status, program_index]))
+    events.extend(b"\x01\xFF\x2F\x00")
+
+    header = (
+        b"MThd"
+        + (6).to_bytes(4, "big")
+        + (0).to_bytes(2, "big")
+        + (1).to_bytes(2, "big")
+        + (96).to_bytes(2, "big")
+    )
+    track = b"MTrk" + len(events).to_bytes(4, "big") + bytes(events)
+    Path(path).write_bytes(header + track)
+
+
+def send_external_midi_program_change(program_index: int, channel: int = 1) -> bool:
+    """Send a manual GM Program Change to the external USB MIDI OUT.
+
+    Use a tiny temporary SMF with aplaymidi because the USB MIDI cable is
+    already managed as an ALSA sequencer port elsewhere in this script.  Do not
+    wait for aplaymidi here; a one-event SMF exits on its own, and waiting with
+    a short timeout caused false failure messages even though the module did
+    change sounds.
+    """
+    refresh_external_midi_state(quiet=True)
+    if not state.external_midi_port:
+        mark_dirty("External MIDI missing")
+        return False
+
+    program_index = max(0, min(127, int(program_index)))
+    channel = max(1, min(16, int(channel)))
+    tmp_path = "/tmp/fluidardule_ext_midi_pc.mid"
+    try:
+        write_external_pc_midi_file(tmp_path, program_index, channel)
+        subprocess.Popen(
+            ["aplaymidi", "-p", state.external_midi_port, tmp_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+            text=True,
+        )
+        state.external_midi_connected = True
+        log(f"External MIDI PC CH{channel} -> {program_index + 1:03d} {GM_PROGRAM_NAMES[program_index]} via {state.external_midi_port}")
+        return True
+    except FileNotFoundError:
+        state.external_midi_connected = False
+        mark_dirty("aplaymidi missing")
+        return False
+    except Exception as exc:
+        state.external_midi_connected = False
+        log(f"External MIDI PC failed: {exc}")
+        return False
+
+
+
+def schedule_external_midi_pc_preview(program_index: int) -> None:
+    program_index = max(0, min(127, int(program_index)))
+    state.external_midi_pc_index = program_index
+    state.pending_external_midi_pc_index = program_index
+    state.pending_external_midi_pc_due = time.time() + EXTERNAL_MIDI_PC_PREVIEW_DEBOUNCE_SEC
+    mark_dirty(f"PC preview: {shorten_text(gm_program_label(program_index), 20)}")
+
+
+def process_pending_external_midi_pc_preview() -> None:
+    if state.pending_external_midi_pc_index is None:
+        return
+    if state.ui_mode != "submenu" or state.submenu_key != "external_midi_pc":
+        state.pending_external_midi_pc_index = None
+        state.pending_external_midi_pc_due = 0.0
+        return
+    if time.time() < state.pending_external_midi_pc_due:
+        return
+    index = state.pending_external_midi_pc_index
+    state.pending_external_midi_pc_index = None
+    state.pending_external_midi_pc_due = 0.0
+    ok = send_external_midi_program_change(index, state.external_midi_pc_channel)
+    mark_dirty(f"PC sent: {shorten_text(gm_program_label(index), 20)}" if ok else "External PC preview failed")
+
+
+def move_external_midi_pc_selection(delta: int) -> None:
+    indices = gm_current_category_program_indices()
+    if not indices:
+        mark_dirty("No GM programs")
+        return
+    current = state.external_midi_pc_index
+    try:
+        pos = indices.index(current)
+    except ValueError:
+        pos = clamp_index(state.submenu_index, len(indices))
+    new_pos = max(0, min(len(indices) - 1, pos + int(delta)))
+    if new_pos == pos:
+        mark_dirty("First item" if delta < 0 else "Last item")
+        return
+    state.submenu_index = new_pos
+    schedule_external_midi_pc_preview(indices[new_pos])
+
+
+def next_external_midi_pc_category() -> None:
+    current_cat = gm_category_index_for_program(state.external_midi_pc_index)
+    next_cat = (current_cat + 1) % 16
+    new_index = gm_category_base(next_cat)
+    state.submenu_index = 0
+
+    # The GM program list changes completely when the category changes.
+    # Force a full redraw so the TFT partial-update cache does not leave
+    # stale rows from the previous category on screen.
+    invalidate_full_display()
+
+    schedule_external_midi_pc_preview(new_index)
+
 def start_external_midi_file_mirror(path: str) -> None:
     """Play a MIDI file to the external USB MIDI OUT in parallel with audio playback.
 
@@ -4152,6 +4386,9 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
             if port == current_port or (current_name and label.lower() == current_name):
                 state.submenu_index = i
                 break
+    elif key == "extension":
+        refresh_external_midi_state(quiet=True)
+        state.submenu_index = 0
     elif key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
         current_modes = [mode for mode, _name in EXTERNAL_MIDI_OUT_MODES]
@@ -4159,6 +4396,11 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
             state.submenu_index = current_modes.index(state.external_midi_out_mode)
         except ValueError:
             state.submenu_index = 0
+    elif key == "external_midi_pc":
+        refresh_external_midi_state(quiet=True)
+        # Program selection is category-based. Keep the selected GM program
+        # globally, but show only the eight programs in its current category.
+        state.submenu_index = clamp_index(state.external_midi_pc_index % 8, 8)
 
 
 def leave_submenu(event: str = "Back") -> None:
@@ -4177,6 +4419,17 @@ def leave_submenu(event: str = "Back") -> None:
     state.submenu_key = None
     state.submenu_index = 0
     state.submenu_return_mode = None
+    mark_dirty(event)
+
+
+
+def return_to_extension_submenu(event: str = "Extension", index: int = 0) -> None:
+    """Return from an Extension child page to the first Extension menu level."""
+    state.ui_mode = "submenu"
+    state.submenu_key = "extension"
+    state.submenu_index = int(max(0, index))
+    state.submenu_return_mode = None
+    invalidate_full_display()
     mark_dirty(event)
 
 
@@ -4215,8 +4468,28 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         current_port = state.preferred_seq_port or state.selected_alsa_input
         current_name = (state.preferred_seq_name or state.selected_alsa_input_name or "").lower()
         return [(label, port == current_port or (current_name and label.lower() == current_name)) for port, label in options]
+    if key == "extension":
+        refresh_external_midi_state(quiet=True)
+        if not external_midi_out_available():
+            return [("External MIDI unavailable", False)]
+
+        # Show current Extension status directly on the first-level menu.
+        # This keeps the Extension page useful as a quick status view:
+        #   - External MIDI OUT shows Off/Mirror
+        #   - External MIDI PC Send shows the last selected GM program
+        out_label = "Mirror" if state.external_midi_out_mode == "mirror" else "Off"
+        pc_label = gm_program_label(state.external_midi_pc_index)
+        return [
+            (f"External MIDI OUT: {out_label}", False),
+            (f"PC Send: {pc_label}", False),
+        ]
     if key == "controls":
         return [("Sound Edit", False)]
+    if key == "external_midi_pc":
+        refresh_external_midi_state(quiet=True)
+        if not external_midi_out_available():
+            return [("External MIDI unavailable", False)]
+        return [(gm_program_label(i), i == state.external_midi_pc_index) for i in gm_current_category_program_indices()]
     if key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
         enforce_external_midi_out_policy()
@@ -4320,6 +4593,37 @@ def apply_current_submenu_selection() -> None:
         restart_engine(state.sf_index, state.dac_index)
         leave_submenu(f"ALSA MIDI: {shorten_text(label.replace(' MIDI 1', ''), 18)}")
         return
+    if key == "extension":
+        refresh_external_midi_state(quiet=True)
+        if not external_midi_out_available():
+            leave_submenu("External MIDI unavailable")
+            return
+        if state.submenu_index == 0:
+            enter_submenu("external_midi_out")
+            mark_dirty("External MIDI OUT")
+            return
+        if state.submenu_index == 1:
+            enter_submenu("external_midi_pc")
+            mark_dirty("External MIDI PC Send")
+            return
+        leave_submenu("Extension")
+        return
+    if key == "external_midi_pc":
+        refresh_external_midi_state(quiet=True)
+        if not external_midi_out_available():
+            leave_submenu("External MIDI unavailable")
+            return
+        indices = gm_current_category_program_indices()
+        if indices:
+            state.external_midi_pc_index = indices[clamp_index(state.submenu_index, len(indices))]
+        # SELECT confirms immediately. Cancel any delayed preview so the same
+        # Program Change is not sent twice after returning to Extension.
+        state.pending_external_midi_pc_index = None
+        state.pending_external_midi_pc_due = 0.0
+        ok = send_external_midi_program_change(state.external_midi_pc_index, state.external_midi_pc_channel)
+        label = gm_program_label(state.external_midi_pc_index)
+        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=1)
+        return
     if key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
         enforce_external_midi_out_policy()
@@ -4329,12 +4633,19 @@ def apply_current_submenu_selection() -> None:
             return
         modes = EXTERNAL_MIDI_OUT_MODES
         mode, label = modes[clamp_index(state.submenu_index, len(modes))]
+        previous_mode = state.external_midi_out_mode
         state.external_midi_out_mode = mode
         if mode == "mirror":
             connect_external_midi_mirror()
+            # Initialize an external sound module to a predictable GM state
+            # when External MIDI OUT is enabled. Send this only on the
+            # Off -> Mirror transition so normal PC Send changes are not
+            # overwritten while Mirror is already active.
+            if previous_mode != "mirror":
+                send_external_midi_program_change(0, state.external_midi_pc_channel)
         else:
             state.external_midi_connected = False
-        leave_submenu(f"External MIDI OUT: {label}")
+        return_to_extension_submenu(f"External MIDI OUT: {label}", index=0)
         return
     leave_submenu("Not implemented yet")
 
@@ -4355,7 +4666,7 @@ def handle_main_select() -> None:
         refresh_external_midi_state(quiet=True)
         enforce_external_midi_out_policy()
         if external_midi_out_available():
-            enter_submenu("external_midi_out")
+            enter_submenu("extension")
         else:
             enter_submenu("placeholder")
     else:
@@ -4415,7 +4726,9 @@ def quick_resume_label() -> str:
             "preset": "Preset",
             "dac": "DAC",
             "midi": "MIDI Mode",
+            "extension": "Extension",
             "external_midi_out": "External MIDI OUT",
+            "external_midi_pc": "External MIDI PC",
             "placeholder": "Extension",
             "controls": "Sound Edit",
         }
@@ -4924,6 +5237,38 @@ def handle_button_event(btn_value: str) -> None:
                     mark_dirty("UP long only for selected MIDI file")
             else:
                 mark_dirty("UP long unavailable here")
+            return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_out":
+        if btn == "LEFT":
+            pulse_button_activity()
+            return_to_extension_submenu("Extension", index=0)
+            return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_pc":
+        if btn == "UP":
+            pulse_button_activity()
+            move_external_midi_pc_selection(-1)
+            return
+        if btn == "DOWN":
+            pulse_button_activity()
+            move_external_midi_pc_selection(+1)
+            return
+        if btn == "RIGHT":
+            pulse_button_activity()
+            next_external_midi_pc_category()
+            return
+        if btn == "SEL":
+            pulse_button_activity()
+            apply_current_submenu_selection()
+            return
+        if btn == "LEFT":
+            pulse_button_activity()
+            state.pending_external_midi_pc_index = None
+            state.pending_external_midi_pc_due = 0.0
+            return_to_extension_submenu("External PC canceled", index=1)
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -5635,6 +5980,7 @@ def main() -> None:
             periodic_serial_ui_status()
             poll_player_state()
             process_pending_yoshimi_preview()
+            process_pending_external_midi_pc_preview()
             maybe_render()
     finally:
         stop_player_only()
