@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260503f-inline-seq"
+SCRIPT_VERSION = "v20260503j-inline-seq"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 SERIAL_BAUD = 115200
@@ -1988,17 +1988,19 @@ def refresh_external_midi_state(quiet: bool = False) -> bool:
 
 
 def external_midi_out_available() -> bool:
-    # External MIDI OUT mirror is meaningful only for SEQ-style input modes.
-    # In USB Direct RAW mode FluidSynth owns the raw MIDI input directly, so
-    # this Python UI/runtime process cannot mirror live input events. Hide and
-    # disable the feature there to avoid a misleading control.
-    return state.midi_mode != "usb_direct_raw" and state.external_midi_present
+    # External MIDI OUT is an output option, not an input-mode option.
+    # Show it whenever the configured USB MIDI cable is present.
+    # Live RAW keyboard input is not mirrored because FluidSynth owns the raw
+    # device directly, but MIDI file playback can still be mirrored and SEQ
+    # inputs are mirrored via aconnect.
+    return state.external_midi_present
 
 
 def enforce_external_midi_out_policy() -> None:
-    if state.midi_mode == "usb_direct_raw" and state.external_midi_out_mode != "off":
-        state.external_midi_out_mode = "off"
-        state.external_midi_connected = False
+    # Keep the selected External MIDI OUT mode across input-mode changes.
+    # RAW live input cannot be mirrored, but the menu should remain available
+    # when the USB MIDI cable is connected because MIDI file mirror still works.
+    return
 
 
 def connect_external_midi_mirror(src_port: str | None = None) -> bool:
