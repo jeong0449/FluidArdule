@@ -9,7 +9,7 @@
 // --------------------------------------------------
 // User-editable version
 // --------------------------------------------------
-const char FW_VERSION[] = "v2026-04-18a";
+const char FW_VERSION[] = "v2026-05-04c";
 
 // --------------------------------------------------
 // LCD
@@ -57,9 +57,18 @@ volatile long encPendingSteps = 0;
 volatile unsigned long edgeCountA = 0;
 volatile unsigned long edgeCountB = 0;
 
+// Match the final UNO-1 controller feel: one logical encoder step
+// after two valid quadrature transitions. Change to 4 if a specific
+// encoder feels too sensitive during hardware diagnosis.
+const int8_t ENC_TRANSITIONS_PER_STEP = 2;
+
 int lastSW = HIGH;
 unsigned long swPressCount = 0;
 unsigned long swLongPressCount = 0;
+
+int lastCompletedSwKind = 0;  // 0=none, 1=short, 2=long
+unsigned long lastCompletedSwAt = 0;
+
 bool swLatchedPressed = false;
 bool swLatchedLongTriggered = false;
 unsigned long swLatchedPressedAt = 0;
@@ -113,6 +122,12 @@ int potCCHist[DISPLAY_AVG_N] = {0,0,0,0};
 uint8_t potCCHistPos = 0;
 int potCCHistSum = 0;
 int potCCDisplay = 0;
+
+// Clean UI event line
+char lastEventText[17] = "Ready";
+unsigned long lastEventAt = 0;
+long lastEncoderDelta = 0;
+
 
 // --------------------------------------------------
 // Keypad state
@@ -234,6 +249,30 @@ void lcdWrite16(uint8_t row, const char* text) {
   lcd.print(buf);
 }
 
+void setEventText(const char* text) {
+  uint8_t i = 0;
+  while (i < 16 && text[i] != '\0') {
+    lastEventText[i] = text[i];
+    i++;
+  }
+  lastEventText[i] = '\0';
+  lastEventAt = millis();
+}
+
+void setKeyEvent(int btn, bool longPress) {
+  char buf[17];
+  const char* name = "KEY";
+  switch (btn) {
+    case BTN_RIGHT:  name = "RIGHT"; break;
+    case BTN_UP:     name = "UP"; break;
+    case BTN_DOWN:   name = "DOWN"; break;
+    case BTN_LEFT:   name = "LEFT"; break;
+    case BTN_SELECT: name = "SELECT"; break;
+  }
+  snprintf(buf, sizeof(buf), "%s %s", name, longPress ? "LONG" : "SHORT");
+  setEventText(buf);
+}
+
 
 void printBtnCompact() {
   if (stableBtn != BTN_NONE) {
@@ -342,6 +381,7 @@ void handleButtonCountingAndActions() {
       lastCompletedWasLongPress = true;
       lastCompletedBtnAt = millis();
       triggerLongBlink();
+      setKeyEvent(latchedPressedBtn, true);
 
       if (latchedPressedBtn == BTN_SELECT) {
         gainModeIndex++;
@@ -377,6 +417,7 @@ void handleButtonCountingAndActions() {
       } else {
         btnPressCount[latchedPressedBtn]++;
         triggerShortBlink();
+        setKeyEvent(latchedPressedBtn, false);
 
         Serial.print(F("BTN release/count: "));
         Serial.print(buttonNameF(latchedPressedBtn));
@@ -410,10 +451,10 @@ void handleEncoderISR() {
 
   encQuarterAcc += q;
 
-  if (encQuarterAcc >= 4) {
+  if (encQuarterAcc >= ENC_TRANSITIONS_PER_STEP) {
     encPendingSteps += 1;
     encQuarterAcc = 0;
-  } else if (encQuarterAcc <= -4) {
+  } else if (encQuarterAcc <= -ENC_TRANSITIONS_PER_STEP) {
     encPendingSteps -= 1;
     encQuarterAcc = 0;
   }
@@ -451,6 +492,10 @@ void processEncoderSteps() {
 
     encStepCount += dir;
     logicalPos += delta;
+    lastEncoderDelta = delta;
+    char encMsg[17];
+    snprintf(encMsg, sizeof(encMsg), "ENC %+ld", lastEncoderDelta);
+    setEventText(encMsg);
     triggerActivity();
 
     Serial.print(dir > 0 ? F("ENC CW   step=") : F("ENC CCW  step="));
@@ -486,8 +531,11 @@ void checkSwitch() {
         if (swLatchedPressed) {
           if (!swLatchedLongTriggered) {
             swPressCount++;
+            lastCompletedSwKind = 1;
+            lastCompletedSwAt = millis();
             lcdPage ^= 1;
             triggerShortBlink();
+            setEventText("ENC BTN SHORT");
             Serial.print(F("SW pressed  count="));
             Serial.print(swPressCount);
             Serial.print(F(" page="));
@@ -508,9 +556,27 @@ void checkSwitch() {
     if ((millis() - swLatchedPressedAt) >= LONG_PRESS_MS) {
       swLatchedLongTriggered = true;
       swLongPressCount++;
+      lastCompletedSwKind = 2;
+      lastCompletedSwAt = millis();
       triggerLongBlink();
+      setEventText("ENC BTN LONG");
+
+      gainModeIndex++;
+      if (gainModeIndex >= 4) gainModeIndex = 0;
+      noInterrupts();
+      encPendingSteps = 0;
+      encQuarterAcc = 0;
+      interrupts();
+      logicalPos = 0;
+      encStepCount = 0;
+      lastStepUs = 0;
+      gainDisplayUntil = millis() + LAST_BTN_HOLD_MS;
+
       Serial.print(F("SW long count="));
       Serial.println(swLongPressCount);
+      Serial.print(F("=== GAIN TOGGLED BY ENC SW: x"));
+      Serial.print(currentGain());
+      Serial.println(F(" ==="));
     }
   }
 }
@@ -557,7 +623,7 @@ void updateLcd() {
 
     if (!prankScreenToggle) {
       lcdWrite16(0, "Fluid Ardule");
-      char line2[32];
+      char line2[17];
       snprintf(line2, sizeof(line2), "FW %s", FW_VERSION);
       lcdWrite16(1, line2);
     } else {
@@ -571,43 +637,29 @@ void updateLcd() {
 
   char line0[17];
   char line1[17];
-  memset(line0, ' ', 16);
-  memset(line1, ' ', 16);
-  line0[16] = '\0';
-  line1[16] = '\0';
 
-  // Line 0: "B:<btn>   A0:<adc>"
-  line0[0] = 'B';
-  line0[1] = ':';
-  lcd.setCursor(2, 0); // temporary for printBtnCompact width estimate not used here
-
-  const char* btnBuf = "---";
+  // Line 1: plain event text only. Old abbreviations such as B:, S:, ST, A0
+  // are intentionally removed to avoid confusing status and event displays.
   if (stableBtn != BTN_NONE) {
     switch (stableBtn) {
-      case BTN_RIGHT: btnBuf = "R"; break;
-      case BTN_UP: btnBuf = "U"; break;
-      case BTN_DOWN: btnBuf = "D"; break;
-      case BTN_LEFT: btnBuf = "L"; break;
-      case BTN_SELECT: btnBuf = "S"; break;
+      case BTN_RIGHT:  snprintf(line0, sizeof(line0), "KEY RIGHT"); break;
+      case BTN_UP:     snprintf(line0, sizeof(line0), "KEY UP"); break;
+      case BTN_DOWN:   snprintf(line0, sizeof(line0), "KEY DOWN"); break;
+      case BTN_LEFT:   snprintf(line0, sizeof(line0), "KEY LEFT"); break;
+      case BTN_SELECT: snprintf(line0, sizeof(line0), "KEY SELECT"); break;
+      default:         snprintf(line0, sizeof(line0), "KEY"); break;
     }
-  } else if (lastCompletedBtn != BTN_NONE && (millis() - lastCompletedBtnAt) < LAST_BTN_HOLD_MS) {
-    switch (lastCompletedBtn) {
-      case BTN_RIGHT: btnBuf = lastCompletedWasLongPress ? "R-LP" : "(R)"; break;
-      case BTN_UP: btnBuf = lastCompletedWasLongPress ? "U-LP" : "(U)"; break;
-      case BTN_DOWN: btnBuf = lastCompletedWasLongPress ? "D-LP" : "(D)"; break;
-      case BTN_LEFT: btnBuf = lastCompletedWasLongPress ? "L-LP" : "(L)"; break;
-      case BTN_SELECT: btnBuf = lastCompletedWasLongPress ? "S-LP" : "(S)"; break;
-    }
-  }
-  snprintf(line0, sizeof(line0), "B:%-4s A0:%4d", btnBuf, buttonAdcDisplay);
-
-  if (gainDisplayUntil > now) {
-    snprintf(line1, sizeof(line1), "Gain x%d", currentGain());
-  } else if (lcdPage == 0) {
-    snprintf(line1, sizeof(line1), "Gx%d P:%5ld S:%d", currentGain(), logicalPos, sw == LOW ? 0 : 1);
+  } else if (sw == LOW && swLatchedPressed) {
+    snprintf(line0, sizeof(line0), swLatchedLongTriggered ? "ENC BTN LONG" : "ENC BTN DOWN");
+  } else if ((now - lastEventAt) < LAST_BTN_HOLD_MS) {
+    snprintf(line0, sizeof(line0), "%s", lastEventText);
   } else {
-    snprintf(line1, sizeof(line1), "V:%3d St:%4ld%c", potCCDisplay, encStepCount, sw == LOW ? '*' : ' ');
+    snprintf(line0, sizeof(line0), "Input test ready");
   }
+
+  // Line 2: current compact state only.
+  // P = potentiometer CC value, E = logical encoder position, G = gain.
+  snprintf(line1, sizeof(line1), "P%3d E%5ld G%d", potCCDisplay, logicalPos, currentGain());
 
   lcdWrite16(0, line0);
   lcdWrite16(1, line1);
@@ -669,7 +721,7 @@ void setup() {
   Serial.println(F("Fluid Ardule UNO-1 diagnostic"));
   deviceReady = true;
   Serial.println(F("1602 LCD edition"));
-  Serial.println(F("Encoder: interrupt + full-step + acceleration"));
+  Serial.println(F("Encoder: interrupt + state decode + acceleration"));
   Serial.print(F("Version: "));
   Serial.println(FW_VERSION);
   Serial.println(F("================================"));

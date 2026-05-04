@@ -2,7 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260502a version
+// 20260504d version
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -205,9 +205,22 @@ void sendEncStep(int step) {
   Serial.println(step);
 }
 
+String linkUiText();
+
 void setLocalDisplay(const String &line1, const String &line2) {
   l1Text = line1;
   l2Text = line2;
+}
+
+void setEventLine1(const String &line1) {
+  // Normal-operation LCD policy:
+  //   Line 1 = transient local/event message
+  //   Line 2 = current Pi/link/UI status, with P1/P2/P3 kept at right
+  l1Text = line1;
+}
+
+void setCurrentStatusLine2() {
+  l2Text = linkUiText();
 }
 
 void printPadded16(const String &s) {
@@ -307,8 +320,8 @@ void updateDebugTagTimeout() {
 void showButtonEvent(const String &name, bool isLongPress, KeyCode k) {
   if (powerState != POWER_NORMAL) return;
   String line1 = "BTN:" + name;
-  String line2 = isLongPress ? "LONG" : "SHORT";
-  setLocalDisplay(line1, line2);
+  setEventLine1(line1);
+  setCurrentStatusLine2();
   setDebugTag(makeButtonDebugTag(k, isLongPress));
 }
 
@@ -317,8 +330,8 @@ void showEncoderEvent(int step) {
   String line1 = "ENC:";
   if (step > 0) line1 += "+";
   line1 += String(step);
-  String line2 = "ACC:P" + String(accelProfile);
-  setLocalDisplay(line1, line2);
+  setEventLine1(line1);
+  setCurrentStatusLine2();
 }
 
 String linkUiText() {
@@ -331,7 +344,8 @@ String linkUiText() {
 void showPotEvent(int v) {
   if (powerState != POWER_NORMAL) return;
   String line1 = "POT:" + String(v);
-  setLocalDisplay(line1, linkUiText());
+  setEventLine1(line1);
+  setCurrentStatusLine2();
 }
 
 void showAccelSetupScreen() {
@@ -584,7 +598,8 @@ void applyAndExitAccelSettingMode() {
   accelProfile = accelDraft;
   accelSettingMode = false;
   sendAccelProfile();
-  setLocalDisplay("ACCEL APPL", "P" + String(accelProfile) + " " + String(accelName(accelProfile)));
+  setEventLine1("ACCEL APPL");
+  setCurrentStatusLine2();
 }
 
 void cycleAccelProfileByEncoderLongPress() {
@@ -595,9 +610,8 @@ void cycleAccelProfileByEncoderLongPress() {
   sendAccelProfile();
 
   String line1 = "ENC ACCEL";
-  String line2 = "P" + String(accelProfile) + " ";
-  line2 += String(accelName(accelProfile));
-  setLocalDisplay(line1, line2);
+  setEventLine1(line1);
+  setCurrentStatusLine2();
   setDebugTag("E-LP  ");
 }
 
@@ -647,7 +661,7 @@ void updateKeypad() {
           case KEY_UP:     setAccelDraftDelta(+1); break;
           case KEY_DOWN:   setAccelDraftDelta(-1); break;
           case KEY_SELECT: applyAndExitAccelSettingMode(); break;
-          case KEY_LEFT:   accelSettingMode = false; setLocalDisplay("ACCEL CANC", "P" + String(accelProfile)); break;
+          case KEY_LEFT:   accelSettingMode = false; setEventLine1("ACCEL CANC"); setCurrentStatusLine2(); break;
           default: break;
         }
       } else {
@@ -671,23 +685,75 @@ void updateEncoder() {
   int b = digitalRead(PIN_ENC_B);
   unsigned long now = millis();
 
-  if (a != lastEncA) {
-    if (a == LOW) {
-      int direction = (b == HIGH) ? +1 : -1;
-      holdInputLed();
-      if (accelSettingMode) {
-        setAccelDraftDelta(direction);
-      } else {
-        unsigned long dt = (lastEncStepMs == 0) ? 9999UL : (now - lastEncStepMs);
-        int mult = calcAccelMultiplier(dt, accelProfile);
-        int step = direction * mult;
-        sendEncStep(step);
-        showEncoderEvent(step);
-        lastEncStepMs = now;
-      }
+  // Encoder rotation only: use a valid-transition quadrature decoder instead
+  // of a single-edge direction guess. This rejects illegal/bouncy A/B jumps
+  // that can otherwise produce a one-step reverse glitch.
+  //
+  // Keep the same UI feel as the previous both-edge version by emitting one
+  // ENC step after two valid quadrature transitions. If a specific encoder
+  // feels too sensitive, change ENC_TRANSITIONS_PER_STEP from 2 to 4.
+  static bool encDecoderInit = false;
+  static uint8_t lastEncoded = 0;
+  static int8_t encTransitionAccum = 0;
+  const int8_t ENC_TRANSITIONS_PER_STEP = 2;
+
+  uint8_t encoded = ((a == HIGH) ? 0x02 : 0x00) | ((b == HIGH) ? 0x01 : 0x00);
+
+  if (!encDecoderInit) {
+    lastEncoded = encoded;
+    encDecoderInit = true;
+  } else if (encoded != lastEncoded) {
+    uint8_t transition = (lastEncoded << 2) | encoded;
+    int8_t delta = 0;
+
+    // Valid quadrature transitions only. Illegal two-bit jumps are ignored.
+    switch (transition) {
+      case 0b0001:
+      case 0b0111:
+      case 0b1110:
+      case 0b1000:
+        delta = -1;
+        break;
+      case 0b0010:
+      case 0b1011:
+      case 0b1101:
+      case 0b0100:
+        delta = +1;
+        break;
+      default:
+        delta = 0;
+        break;
     }
-    lastEncA = a;
+
+    if (delta != 0) {
+      encTransitionAccum += delta;
+
+      if (encTransitionAccum >= ENC_TRANSITIONS_PER_STEP || encTransitionAccum <= -ENC_TRANSITIONS_PER_STEP) {
+        int direction = (encTransitionAccum > 0) ? +1 : -1;
+        encTransitionAccum = 0;
+
+        holdInputLed();
+
+        if (accelSettingMode) {
+          setAccelDraftDelta(direction);
+        } else {
+          unsigned long dt = (lastEncStepMs == 0) ? 9999UL : (now - lastEncStepMs);
+          int mult = calcAccelMultiplier(dt, accelProfile);
+          int step = direction * mult;
+          sendEncStep(step);
+          showEncoderEvent(step);
+          lastEncStepMs = now;
+        }
+      }
+    } else {
+      // Resync after an illegal transition without producing a step.
+      encTransitionAccum = 0;
+    }
+
+    lastEncoded = encoded;
   }
+
+  lastEncA = a;
   lastEncB = b;
 
   int sw = digitalRead(PIN_ENC_SW);
@@ -715,7 +781,8 @@ void updateEncoder() {
         } else {
           sendLine("BTN:ENC_PUSH");
           startButtonLedBlink(1);
-          setLocalDisplay("BTN:ENCPSH", "SHORT");
+          setEventLine1("BTN:ENCPSH");
+          setCurrentStatusLine2();
           setDebugTag("E-SP  ");
         }
       }
@@ -803,7 +870,7 @@ void handleIncomingLine(String s) {
     piUiState = UI_READY;
     lastUiSeenMs = millis();
     if (powerState == POWER_NORMAL) {
-      setLocalDisplay("PI LINKED", linkUiText());
+      setCurrentStatusLine2();
     }
     return;
   }
@@ -814,7 +881,7 @@ void handleIncomingLine(String s) {
     piUiState = UI_BUSY;
     lastUiSeenMs = millis();
     if (powerState == POWER_NORMAL) {
-      setLocalDisplay("PI LINKED", linkUiText());
+      setCurrentStatusLine2();
     }
     return;
   }
