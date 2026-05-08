@@ -4,6 +4,60 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-08 (KST)]
+
+### Added
+- Added `User Preset` under `Sound Source`
+- Added JSON-based user preset storage:
+  - `/home/pi/sf2/user_presets.json`
+- Added Quick Menu action:
+  - `Save User Preset`
+- Added automatic preset naming based on:
+  - SoundFont/Yoshimi source
+  - Original preset name
+- Added automatic edit suffix generation:
+  - `ed1`, `ed2`, ...
+- Added support for storing:
+  - engine type
+  - SoundFont source
+  - bank/program
+  - preset name
+  - Yoshimi instrument path
+  - Sound Edit CC values
+- Added support for storing drum presets (`bank 128`)
+- Added overwrite confirmation dialog for duplicate preset names
+- Added `Press Right` hint for User Preset source entry
+
+### Changed
+- Removed fixed-slot limitation for User Presets
+- User Presets are now managed as a dynamic JSON list
+- User Preset browsing now requires explicit `SELECT` to load
+  - No preview during scrolling
+  - Prevents repeated engine reloads
+- Quick Menu navigation now supports rollover
+  - UP on first item wraps to bottom
+  - DOWN on last item wraps to top
+- Removed redundant `Power` item from Quick Menu
+  - Power Menu remains accessible via `SELECT long`
+
+### UI / UX
+- Preserved existing long-press muscle memory:
+  - `RIGHT long` → Quick Menu
+  - `DOWN long` → MIDI Panic
+  - `SELECT long` → Power Menu
+- Kept SoundFont browser preview behavior unchanged
+- User Presets now behave as stable “loadable memories”
+  rather than preview-scrolling presets
+
+### Internal
+- Added engine-aware User Preset loading
+- Added automatic SoundFont/Yoshimi restoration on load
+- Preserved existing menu-return consistency
+- No changes to UNO-1 button protocol
+- No changes to MIDI routing behavior
+
+---
+
 ## [2026-05-03 (KST)]
 
 ### Major Features
