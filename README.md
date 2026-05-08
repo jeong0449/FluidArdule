@@ -8,17 +8,21 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 
 ## What does it do?
 
-- Act as a standalone MIDI sound module with instant playability — connect a keyboard and play immediately (supporting FluidSynth and planned real-time synthesis via Yoshimi)
-- Control parameters via dedicated hardware UI (UNO-1)
+- Act as a standalone MIDI sound module with instant playability — connect a keyboard and play immediately
+- Support multiple sound engines including FluidSynth and Yoshimi
+- Browse and load SoundFont presets by category
+- Save and recall user-defined presets across different sound engines
+- Control synthesis and playback parameters via dedicated hardware UI (UNO-1)
 - Accept MIDI input from USB or DIN (DIN I/O via UNO-2 MIDI bridge)
 - Play MIDI files using FluidSynth
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
 - Output audio via I2S DAC or USB DAC
 - Mirror internal MIDI performance (live input and MIDI file playback) to external MIDI devices via USB MIDI interfaces
-- Support external MIDI modules such as Roland SC-D70 over USB, including port-aware selection (e.g., Part A / Part B / MIDI) *(currently under testing)*
+- Support external MIDI modules such as Roland SC-D70 over USB, including port-aware selection (e.g., Part A / Part B / MIDI)
 - Dynamically display only connected MIDI devices (device-driven UI)
+- Provide a hardware-oriented standalone instrument workflow with quick-access menus, MIDI panic, and persistent user presets
 
-> 🚧 Advanced performance features such as preset editing, user preset management, layering, combination patches, and keyboard split are not yet implemented and are planned for future development.
+> 🚧 Advanced performance features such as layering, combination patches, keyboard split, deeper preset editing, and performance memory management are planned for future development.
 
 ---
 
