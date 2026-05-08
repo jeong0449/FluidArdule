@@ -31,9 +31,14 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260503s-inline-seq"
+SCRIPT_VERSION = "v20260508c-user-preset"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
+# Optional exact UNO-2 identifier.  If set, MIDI Mode shows
+# "UNO-2 bridge (SEQ)" only when this by-id symlink exists.  Leave empty to
+# fall back to detecting any additional Arduino/Uno serial device other than
+# UNO-1.
+UNO2_SERIAL_PORT = ""  # e.g. "/dev/serial/by-id/usb-Arduino__...-if00"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 0.1
 SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC = 1.5
@@ -77,6 +82,23 @@ RAW_MIDI_PREFERRED_HINTS = [
 # can change across reboots or USB hotplug order changes.
 EXTERNAL_MIDI_NAME_HINTS = [
     "USB Midi Cable",
+    "SC-D70",
+    "SCD70",
+    "Roland SC-D70",
+]
+
+# Some external sound modules expose ALSA sequencer ports in both aconnect -i
+# and aconnect -o. For MIDI Mode, keep only ports that can be meaningful
+# performance inputs. USB MIDI cables remain visible because their DIN IN side
+# can carry keyboard input; for SC-D70, show only the generic "SC-D70 MIDI"
+# port and hide Part A/B, which are sound-module destinations.
+SEQ_INPUT_ALLOW_EXTERNAL_HINTS = [
+    "USB Midi Cable",
+]
+SEQ_INPUT_EXCLUDE_EXTERNAL_HINTS = [
+    "SC-D70",
+    "SCD70",
+    "Roland SC-D70",
 ]
 EXTERNAL_MIDI_OUT_MODES = [
     ("off", "Off"),
@@ -219,7 +241,7 @@ QUICK_MENU_ITEMS = [
     "Home",
     "Sound Source",
     "USB Eject",
-    "Power...",
+    "Save User Preset",
 ]
 
 FILE_ROOT_CANDIDATES = [
@@ -246,6 +268,8 @@ USB_MOUNT_POINT = f"{FILE_MEDIA_ROOT}/usb"
 USB_STATUS_POLL_INTERVAL_SEC = 1.0
 USB_EJECT_CMD = ["sudo", "-n", "/bin/umount", USB_MOUNT_POINT]
 USB_LABEL = "USB"
+
+USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
 
 POWER_MENU_ITEMS = ["Cancel", "Halt", "Reboot"]
 POWER_CONFIRM_ITEMS = ["No", "Yes"]
@@ -326,7 +350,6 @@ class RuntimeState:
     midi_mode: str = "usb_direct_raw"
     midi_mode_options: list[tuple[str, str]] = field(default_factory=lambda: [
         ("usb_direct_raw", "USB direct RAW"),
-        ("uno2_bridge_seq", "UNO-2 bridge (SEQ)"),
     ])
     bridge_proc: subprocess.Popen | None = None
     bridge_running: bool = False
@@ -341,6 +364,8 @@ class RuntimeState:
     external_midi_present: bool = False
     external_midi_port: str | None = None
     external_midi_name: str | None = None
+    preferred_external_midi_port: str | None = None
+    preferred_external_midi_name: str | None = None
     external_midi_connected: bool = False
     external_midi_pc_index: int = 0
     external_midi_pc_channel: int = 1
@@ -438,6 +463,9 @@ class RuntimeState:
     player_origin_dir: str | None = None
 
     pending_resume_after_sf_apply: bool = False
+
+    user_preset_entries: list[dict] = field(default_factory=list)
+    user_preset_target_index: int = 0
 
     # Ignore short burst of stale/noisy UI events after UNO-1 serial reconnect/reset.
     serial_input_ignore_until: float = 0.0
@@ -1519,13 +1547,22 @@ class TFTDisplay:
             row_text = f"{prefix}{text}{suffix}"
             draw_left_vcentered_text_list(draw, 28, top, 38, row_text, self.font_body, fill)
 
-            total, _drums = soundfont_preset_counts(idx)
-            if total:
-                value = str(total)
-                if total > 1:
-                    # Show the navigation hint only on the highlighted row.
-                    # Single-instrument sources do not need a "go deeper" hint.
-                    value += " > Press Right" if idx == state.submenu_index else " >"
+            if idx < len(SOUNDFONTS):
+                total, _drums = soundfont_preset_counts(idx)
+                if total:
+                    value = str(total)
+                    if total > 1:
+                        # Show the navigation hint only on the highlighted row.
+                        # Single-instrument sources do not need a "go deeper" hint.
+                        value += " > Press Right" if idx == state.submenu_index else " >"
+                    value_fill = ACCENT if idx != state.submenu_index else FG
+                    draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
+            else:
+                count = len(load_user_presets())
+                if count:
+                    value = f"{count} > Press Right" if idx == state.submenu_index else f"{count} >"
+                else:
+                    value = "0"
                 value_fill = ACCENT if idx != state.submenu_index else FG
                 draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
 
@@ -1555,8 +1592,12 @@ class TFTDisplay:
             "midi": "MIDI Mode",
             "controls": "Sound Edit",
             "extension": "Extension",
+            "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC Send",
+            "user_preset_load": "User Preset",
+            "user_preset_save": "Save User Preset",
+            "user_preset_overwrite": "Overwrite Preset?",
             "placeholder": "Coming Soon",
         }
 
@@ -1835,9 +1876,12 @@ class TFTDisplay:
         footer_hint = None
         if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
             try:
-                total, _drums = soundfont_preset_counts(state.submenu_index)
-                if total > 1:
-                    footer_hint = "Press > for presets"
+                if state.submenu_index < len(SOUNDFONTS):
+                    total, _drums = soundfont_preset_counts(state.submenu_index)
+                    if total > 1:
+                        footer_hint = "Press > for presets"
+                else:
+                    footer_hint = "Press > for user presets"
             except Exception:
                 pass
 
@@ -2070,6 +2114,53 @@ def find_bridge_port() -> str | None:
     return None
 
 
+def list_uno2_serial_candidates() -> list[str]:
+    """Return the configured UNO-2 serial device when available.
+
+    UNO-2 should be identified by its stable /dev/serial/by-id symlink, just
+    like UNO-1.  If UNO2_SERIAL_PORT is configured, use that exact identifier
+    only.  If it is left empty, fall back to the previous safe heuristic: any
+    additional Arduino/Uno USB-serial device under /dev/serial/by-id except the
+    configured UNO-1 control port.
+    """
+    configured = str(globals().get("UNO2_SERIAL_PORT", "") or "").strip()
+    if configured:
+        return [configured] if Path(configured).exists() else []
+
+    by_id = Path("/dev/serial/by-id")
+    if not by_id.exists():
+        return []
+
+    try:
+        uno1_real = os.path.realpath(SERIAL_PORT)
+    except Exception:
+        uno1_real = ""
+
+    candidates: list[str] = []
+    for path in sorted(by_id.glob("*")):
+        name_l = path.name.lower()
+        if not ("arduino" in name_l or "uno" in name_l):
+            continue
+        path_s = str(path)
+        try:
+            real = os.path.realpath(path_s)
+        except Exception:
+            real = ""
+        if path_s == SERIAL_PORT or (uno1_real and real == uno1_real):
+            continue
+        candidates.append(path_s)
+    return candidates
+
+
+def uno2_bridge_available() -> bool:
+    """Return True only when UNO-2/bridge appears physically available."""
+    if state.bridge_proc is not None and state.bridge_proc.poll() is None:
+        return True
+    if find_bridge_port():
+        return True
+    return bool(list_uno2_serial_candidates())
+
+
 def is_external_midi_item(item: dict) -> bool:
     text = f"{item.get('client_name', '')} {item.get('port_name', '')}".lower()
     return any(hint.lower() in text for hint in EXTERNAL_MIDI_NAME_HINTS)
@@ -2079,16 +2170,96 @@ def external_midi_label(item: dict) -> str:
     return f"{item['client_name']} / {item['port_name']}"
 
 
-def find_external_midi_seq_port() -> tuple[str | None, str | None]:
+def external_midi_display_name(label: str | None = None) -> str:
+    """Return a short user-facing name for an external MIDI target.
+
+    SC-D70 exposes three ALSA sequencer ports under the same client name:
+      - SC-D70 Part A
+      - SC-D70 Part B
+      - SC-D70 MIDI
+
+    If we only show the matched device hint ("SC-D70"), the Extension
+    device picker becomes ambiguous.  Keep USB MIDI Cable compact, but include
+    the SC-D70 port role for Roland modules.
+    """
+    label = label or state.external_midi_name or "External MIDI"
+    cleaned = label.replace(" MIDI 1", "").strip()
+
+    left = cleaned
+    right = ""
+    if " / " in cleaned:
+        left, right = cleaned.split(" / ", 1)
+
+    low = cleaned.lower()
+    right_low = right.lower()
+
+    if "sc-d70" in low or "scd70" in low:
+        if "part a" in right_low:
+            return "SC-D70 Part A"
+        if "part b" in right_low:
+            return "SC-D70 Part B"
+        if "midi" in right_low:
+            return "SC-D70 MIDI"
+        return "SC-D70"
+
+    if "usb midi cable" in low:
+        return "USB Midi Cable"
+
+    for hint in EXTERNAL_MIDI_NAME_HINTS:
+        if hint.lower() in low:
+            return hint
+
+    if right:
+        cleaned = right if right and right.lower() not in left.lower() else left
+    return shorten_text(cleaned, 18)
+
+
+def list_external_midi_seq_ports() -> list[tuple[str, str]]:
+    ports = []
+    seen = set()
     for item in parse_aconnect_ports():
-        if is_external_midi_item(item):
-            return item['port'], external_midi_label(item)
-    return None, None
+        if not is_external_midi_item(item):
+            continue
+        port = item['port']
+        label = external_midi_label(item)
+        if port in seen:
+            continue
+        seen.add(port)
+        ports.append((port, label))
+    return ports
+
+
+def find_external_midi_seq_port() -> tuple[str | None, str | None]:
+    ports = list_external_midi_seq_ports()
+    if not ports:
+        return None, None
+
+    # Prefer the user-selected external MIDI target if it is still present.
+    if state.preferred_external_midi_port:
+        for port, label in ports:
+            if port == state.preferred_external_midi_port:
+                return port, label
+    if state.preferred_external_midi_name:
+        pref = state.preferred_external_midi_name.lower()
+        for port, label in ports:
+            if label.lower() == pref or pref in label.lower():
+                return port, label
+
+    # Otherwise follow the hint order. This makes USB MIDI Cable win over
+    # SC-D70 when both are present until the user explicitly selects another.
+    for hint in EXTERNAL_MIDI_NAME_HINTS:
+        hint_l = hint.lower()
+        for port, label in ports:
+            if hint_l in label.lower():
+                return port, label
+
+    return ports[0]
 
 
 def refresh_external_midi_state(quiet: bool = False) -> bool:
     old_present = state.external_midi_present
     old_mode = state.external_midi_out_mode
+    old_port = state.external_midi_port
     port, label = find_external_midi_seq_port()
     state.external_midi_present = bool(port)
     state.external_midi_port = port
@@ -2097,7 +2268,7 @@ def refresh_external_midi_state(quiet: bool = False) -> bool:
         state.external_midi_connected = False
         if state.external_midi_out_mode != "off":
             state.external_midi_out_mode = "off"
-    changed = (old_present != state.external_midi_present) or (old_mode != state.external_midi_out_mode)
+    changed = (old_present != state.external_midi_present) or (old_mode != state.external_midi_out_mode) or (old_port != state.external_midi_port)
     if changed and not quiet:
         mark_dirty("External MIDI detected" if state.external_midi_present else "External MIDI removed")
     return changed
@@ -2151,6 +2322,7 @@ def list_alsa_seq_input_ports() -> list[tuple[str, str]]:
         port_name = item['port_name']
         client_name_l = client_name.lower()
         port_name_l = port_name.lower()
+        full_text_l = f"{client_name} {port_name}".lower()
 
         # Hide ALSA/system/debug ports from the user-facing MIDI input menu.
         # They may appear while Fluid Ardule is monitoring MIDI activity, but
@@ -2171,6 +2343,21 @@ def list_alsa_seq_input_ports() -> list[tuple[str, str]]:
             continue
         if 'announce' in port_name_l or 'timer' in port_name_l:
             continue
+
+        # SC-D70 exposes Part A/B/MIDI as ALSA-sequencer-capable ports.
+        # In Fluid Ardule's MIDI Mode, Part A/B are sound-module destinations
+        # and should not appear as performance inputs. Keep only the generic
+        # SC-D70 MIDI port visible. USB MIDI cables remain visible because
+        # their DIN IN side can be used as a real keyboard input.
+        is_sc_d70 = ("sc-d70" in full_text_l) or ("scd70" in full_text_l) or ("roland sc-d70" in full_text_l)
+        if is_sc_d70 and "midi" not in port_name_l:
+            continue
+
+        allowed_external_input = any(h.lower() in full_text_l for h in SEQ_INPUT_ALLOW_EXTERNAL_HINTS)
+        excluded_external_input = any(h.lower() in full_text_l for h in SEQ_INPUT_EXCLUDE_EXTERNAL_HINTS)
+        if excluded_external_input and not allowed_external_input and not (is_sc_d70 and "midi" in port_name_l):
+            continue
+
         label = f"{client_name} / {port_name}"
         options.append((item['port'], label))
     return options
@@ -2426,9 +2613,15 @@ def seq_menu_label(label: str) -> str:
 
 
 def build_midi_input_options() -> list[tuple[str, str]]:
-    # Base modes are always shown. ALSA SEQ inputs are added at menu-entry time
-    # as direct selectable items, so there is no second-level selector.
+    # Base RAW mode is always shown. UNO-2 bridge is shown only when its
+    # hardware/bridge is actually available, keeping the MIDI Mode menu
+    # device-driven and avoiding unusable entries.
     options = list(state.midi_mode_options)
+    if uno2_bridge_available():
+        options.append(("uno2_bridge_seq", "UNO-2 bridge (SEQ)"))
+
+    # ALSA SEQ inputs are added at menu-entry time as direct selectable items,
+    # so there is no second-level selector.
     for port, label in list_alsa_seq_input_ports():
         options.append((f"alsa_seq:{port}", seq_menu_label(label)))
     return options
@@ -2437,6 +2630,14 @@ def build_midi_input_options() -> list[tuple[str, str]]:
 def refresh_midi_options(quiet: bool = False) -> bool:
     old = list(state.midi_options)
     state.midi_options = build_midi_input_options()
+    if state.midi_mode == "uno2_bridge_seq" and not any(mode == "uno2_bridge_seq" for mode, _name in state.midi_options):
+        stop_bridge()
+        state.bridge_running = False
+        state.midi_mode = "usb_direct_raw"
+        state.midi_src_port = "-"
+        state.midi_src_name = "No raw MIDI"
+        if not quiet:
+            mark_dirty("UNO-2 removed")
     state.midi_selected_name = midi_mode_to_label(state.midi_mode)
     if state.midi_mode == "usb_direct_raw":
         prev_raw_port = state.midi_src_port
@@ -4348,6 +4549,302 @@ def toggle_pot_mode() -> None:
 
     show_footer_message(label, POT_MODE_FOOTER_HOLD_SEC)
 
+
+# =========================================================
+# User Preset helpers
+# =========================================================
+
+def load_user_presets() -> list[dict]:
+    """Load user presets as an ordered, dynamic JSON list.
+
+    Older slot-based files are accepted for backward compatibility, but the
+    rewritten file no longer stores or enforces slot numbers.
+    """
+    path = Path(USER_PRESET_PATH)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(f"user preset load failed: {exc}")
+        return []
+
+    if isinstance(payload, dict):
+        items = payload.get("presets", [])
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        items = []
+
+    presets: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cleaned = dict(item)
+        cleaned.pop("slot", None)
+        presets.append(cleaned)
+    return presets
+
+
+def save_user_presets(presets: list[dict]) -> bool:
+    path = Path(USER_PRESET_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cleaned_presets = []
+    for item in presets:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        entry.pop("slot", None)
+        cleaned_presets.append(entry)
+    payload = {
+        "format": "fluidardule_user_presets_v2",
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "presets": cleaned_presets,
+    }
+    try:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except Exception as exc:
+        log(f"user preset save failed: {exc}")
+        mark_dirty("User preset save failed")
+        return False
+
+
+def current_user_preset_base_name() -> str:
+    source_name = source_name_for_index(state.sf_index) if 0 <= state.sf_index < len(SOUNDFONTS) else state.sf_name
+    return re.sub(r"\s+", " ", f"{source_name} - {state.current_preset_name}".strip(" -")).strip() or "User Preset"
+
+
+def sound_edit_has_user_changes() -> bool:
+    # User Preset names get an "ed N" suffix only when the current sound has
+    # actually been edited from the normal Sound Edit defaults.  Volume is not
+    # part of User Preset state and is intentionally ignored here.
+    return bool(state.sound_edit_modified)
+
+
+def user_preset_existing_names(presets: list[dict], ignore_index: int | None = None) -> set[str]:
+    existing: set[str] = set()
+    for i, item in enumerate(presets):
+        if ignore_index is not None and i == ignore_index:
+            continue
+        if item and str(item.get("name", "")).strip():
+            existing.add(str(item.get("name", "")).strip())
+    return existing
+
+
+def user_preset_unique_name(base_name: str, presets: list[dict], ignore_index: int | None = None) -> str:
+    base = re.sub(r"\s+", " ", str(base_name or "User Preset")).strip() or "User Preset"
+    existing = user_preset_existing_names(presets, ignore_index=ignore_index)
+
+    if sound_edit_has_user_changes():
+        n = 1
+        while True:
+            candidate = f"{base} ed {n}"
+            if candidate not in existing:
+                return candidate
+            n += 1
+
+    if base not in existing:
+        return base
+    n = 2
+    while True:
+        candidate = f"{base} ({n})"
+        if candidate not in existing:
+            return candidate
+        n += 1
+
+
+def find_matching_user_preset_index(presets: list[dict], base_name: str | None = None) -> int | None:
+    base = re.sub(r"\s+", " ", str(base_name or current_user_preset_base_name())).strip()
+    if not base:
+        return None
+    for i, item in enumerate(presets):
+        if str(item.get("name", "")).strip() == base:
+            return i
+    return None
+
+
+def build_current_user_preset(presets: list[dict], overwrite_index: int | None = None) -> dict:
+    source_path = source_path_for_index(state.sf_index) if 0 <= state.sf_index < len(SOUNDFONTS) else ""
+    source_name = source_name_for_index(state.sf_index) if 0 <= state.sf_index < len(SOUNDFONTS) else state.sf_name
+    base_name = current_user_preset_base_name()
+    name = base_name
+    if overwrite_index is None:
+        name = user_preset_unique_name(base_name, presets, ignore_index=None)
+    elif 0 <= overwrite_index < len(presets):
+        # Keep a manually renamed user preset name when overwriting it.
+        name = str(presets[overwrite_index].get("name") or base_name).strip() or base_name
+    sound_edit = {str(int(k)): int(v) for k, v in sorted(state.sound_edit_values.items())}
+    return {
+        "name": name,
+        "engine": state.current_engine,
+        "source_name": source_name,
+        "source_path": source_path,
+        "sf_index_hint": state.sf_index,
+        "bank": int(state.current_preset_bank),
+        "program": int(state.current_preset_program),
+        "preset_name": state.current_preset_name,
+        "instrument_path": state.current_instrument_path,
+        "sound_edit": sound_edit,
+    }
+
+
+def user_preset_label(index: int, item: dict) -> str:
+    return f"{index + 1:02d} {shorten_text(str(item.get('name', 'User Preset')), 24)}"
+
+
+def enter_user_preset_save_menu() -> None:
+    presets = load_user_presets()
+    state.user_preset_entries = presets
+    state.ui_mode = "submenu"
+    state.submenu_key = "user_preset_save"
+    state.submenu_return_mode = "quick_menu"
+    match_index = find_matching_user_preset_index(presets)
+    # Row 0 is always "Save as New". If the same auto-name already exists,
+    # place the cursor on that existing preset so SELECT naturally offers
+    # Overwrite? instead of silently creating another copy.
+    state.submenu_index = (match_index + 1) if match_index is not None else 0
+    state.user_preset_target_index = max(0, state.submenu_index - 1)
+    invalidate_full_display()
+    mark_dirty("Save User Preset")
+
+
+def enter_user_preset_load_menu(return_mode: str | None = None) -> None:
+    presets = load_user_presets()
+    if not presets:
+        mark_dirty("No user presets")
+        return
+    state.user_preset_entries = presets
+    state.ui_mode = "submenu"
+    state.submenu_key = "user_preset_load"
+    state.submenu_return_mode = return_mode or "main"
+    state.submenu_index = 0
+    invalidate_full_display()
+    mark_dirty("User Preset")
+
+
+def save_current_user_preset_as_new() -> None:
+    presets = load_user_presets()
+    entry = build_current_user_preset(presets, overwrite_index=None)
+    presets.append(entry)
+    if save_user_presets(presets):
+        state.user_preset_entries = presets
+        mark_dirty(f"Saved: {shorten_text(entry['name'], 18)}")
+        state.ui_mode = "quick_menu"
+        state.submenu_key = None
+        state.submenu_return_mode = None
+        invalidate_full_display()
+
+
+def overwrite_user_preset(index: int) -> None:
+    presets = load_user_presets()
+    if index < 0 or index >= len(presets):
+        mark_dirty("Preset missing")
+        return
+    entry = build_current_user_preset(presets, overwrite_index=index)
+    presets[index] = entry
+    if save_user_presets(presets):
+        state.user_preset_entries = presets
+        mark_dirty(f"Saved: {shorten_text(entry['name'], 18)}")
+        state.ui_mode = "quick_menu"
+        state.submenu_key = None
+        state.submenu_return_mode = None
+        invalidate_full_display()
+
+
+def apply_sound_edit_values_from_user_preset(item: dict) -> None:
+    values = item.get("sound_edit") or {}
+    if not isinstance(values, dict):
+        return
+    for key, value in values.items():
+        try:
+            cc = int(key)
+            val = clamp_cc_value(int(value))
+        except Exception:
+            continue
+        state.sound_edit_values[cc] = val
+        state.sound_edit_a_values[cc] = val
+        default = None
+        for param in SOUND_EDIT_PARAMS:
+            if int(param["cc"]) == cc:
+                default = int(param["default"])
+                break
+        if default is not None and val != default:
+            state.sound_edit_modified.add(cc)
+        elif default is not None:
+            state.sound_edit_modified.discard(cc)
+        send_sound_edit_cc(cc, val)
+
+
+def find_source_index_for_user_preset(item: dict) -> int | None:
+    source_path = str(item.get("source_path", "")).strip()
+    source_name = str(item.get("source_name", "")).strip()
+    hint = item.get("sf_index_hint")
+    try:
+        hint_i = int(hint)
+        if 0 <= hint_i < len(SOUNDFONTS):
+            if not source_path or source_path_for_index(hint_i) == source_path:
+                return hint_i
+    except Exception:
+        pass
+    for i, (path, name) in enumerate(SOUNDFONTS):
+        if source_path and path == source_path:
+            return i
+        if source_name and name == source_name:
+            return i
+    return None
+
+
+def apply_user_preset(item: dict) -> None:
+    if not item:
+        mark_dirty("Empty preset")
+        return
+
+    source_index = find_source_index_for_user_preset(item)
+    if source_index is None:
+        mark_dirty("User preset source missing")
+        return
+
+    old_source_index = state.sf_index
+    engine = str(item.get("engine", "fluidsynth")).lower().strip() or "fluidsynth"
+    name = str(item.get("preset_name") or item.get("name") or "User Preset")
+    bank = int(item.get("bank", 0))
+    program = int(item.get("program", 0))
+    instrument_path = str(item.get("instrument_path") or "").strip()
+
+    state.sf_index = source_index
+    state.sf_name = source_name_for_index(source_index)
+
+    if engine == "yoshimi":
+        if not instrument_path:
+            mark_dirty("User preset path missing")
+            return
+        apply_preset(bank, program, name, engine="yoshimi", path=instrument_path)
+        # Yoshimi does not consume FluidSynth CC edits here, but the saved
+        # values remain in the JSON for future-compatible use.
+    else:
+        # A User Preset must recall its stored engine/source first, not merely
+        # change the bank/program on whichever engine happens to be active.
+        if (
+            source_index != old_source_index
+            or state.current_engine != "fluidsynth"
+            or fluid_proc is None
+            or fluid_proc.poll() is not None
+        ):
+            restart_engine(source_index, state.dac_index)
+        apply_preset(bank, program, name, engine="fluidsynth")
+        apply_sound_edit_values_from_user_preset(item)
+
+    leave_submenu(f"User Preset: {shorten_text(str(item.get('name', name)), 16)}")
+
+
+def apply_default_user_preset() -> None:
+    presets = load_user_presets()
+    if not presets:
+        mark_dirty("No user presets")
+        return
+    apply_user_preset(presets[0])
+
 # =========================================================
 # Menu helpers
 # =========================================================
@@ -4389,6 +4886,15 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
     elif key == "extension":
         refresh_external_midi_state(quiet=True)
         state.submenu_index = 0
+    elif key == "external_midi_device":
+        refresh_external_midi_state(quiet=True)
+        ports = list_external_midi_seq_ports()
+        state.submenu_index = 0
+        current = state.preferred_external_midi_port or state.external_midi_port
+        for i, (port, _label) in enumerate(ports):
+            if port == current:
+                state.submenu_index = i
+                break
     elif key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
         current_modes = [mode for mode, _name in EXTERNAL_MIDI_OUT_MODES]
@@ -4401,6 +4907,15 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
         # Program selection is category-based. Keep the selected GM program
         # globally, but show only the eight programs in its current category.
         state.submenu_index = clamp_index(state.external_midi_pc_index % 8, 8)
+    elif key == "user_preset_save":
+        state.user_preset_entries = load_user_presets()
+        match_index = find_matching_user_preset_index(state.user_preset_entries)
+        state.submenu_index = (match_index + 1) if match_index is not None else 0
+    elif key == "user_preset_load":
+        state.user_preset_entries = load_user_presets()
+        state.submenu_index = 0
+    elif key == "user_preset_overwrite":
+        state.submenu_index = 0
 
 
 def leave_submenu(event: str = "Back") -> None:
@@ -4414,6 +4929,8 @@ def leave_submenu(event: str = "Back") -> None:
         state.preset_index = 0
         state.preset_sf_index = None
         state.preset_source_name = ""
+    if state.submenu_key in {"user_preset_load", "user_preset_save", "user_preset_overwrite"}:
+        state.user_preset_entries = []
     state.ui_mode = target
     invalidate_full_display()
     state.submenu_key = None
@@ -4436,7 +4953,9 @@ def return_to_extension_submenu(event: str = "Extension", index: int = 0) -> Non
 def get_submenu_options() -> list[tuple[str, bool]]:
     key = state.submenu_key
     if key == "soundfont":
-        return [(name, i == state.sf_index) for i, (_path, name) in enumerate(SOUNDFONTS)]
+        rows = [(name, i == state.sf_index) for i, (_path, name) in enumerate(SOUNDFONTS)]
+        rows.append(("User Preset", False))
+        return rows
     if key == "preset_category":
         active_cat = categorize_preset(state.current_preset_bank, state.current_preset_program, state.current_preset_name)
         return [(cat, state.category_source_sf_index == state.sf_index and cat == active_cat) for cat in state.category_entries]
@@ -4478,13 +4997,20 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         #   - External MIDI OUT shows Off/Mirror
         #   - External MIDI PC Send shows the last selected GM program
         out_label = "Mirror" if state.external_midi_out_mode == "mirror" else "Off"
+        device_label = external_midi_display_name()
         pc_label = gm_program_label(state.external_midi_pc_index)
         return [
-            (f"External MIDI OUT: {out_label}", False),
-            (f"PC Send: {pc_label}", False),
+            (f"MIDI OUT [{device_label}]: {out_label}", False),
+            (f"PC Send [{device_label}]: {pc_label}", False),
         ]
     if key == "controls":
         return [("Sound Edit", False)]
+    if key == "external_midi_device":
+        ports = list_external_midi_seq_ports()
+        if not ports:
+            return [("External MIDI unavailable", False)]
+        current = state.preferred_external_midi_port or state.external_midi_port
+        return [(external_midi_display_name(label), port == current) for port, label in ports]
     if key == "external_midi_pc":
         refresh_external_midi_state(quiet=True)
         if not external_midi_out_available():
@@ -4496,6 +5022,18 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         if not external_midi_out_available():
             return [("External MIDI OUT unavailable", False)]
         return [(label, mode == state.external_midi_out_mode) for mode, label in EXTERNAL_MIDI_OUT_MODES]
+    if key == "user_preset_save":
+        if not state.user_preset_entries:
+            state.user_preset_entries = load_user_presets()
+        rows = [("Save as New", False)]
+        rows.extend((user_preset_label(i, item), False) for i, item in enumerate(state.user_preset_entries))
+        return rows
+    if key == "user_preset_load":
+        if not state.user_preset_entries:
+            state.user_preset_entries = load_user_presets()
+        return [(user_preset_label(i, item), False) for i, item in enumerate(state.user_preset_entries)]
+    if key == "user_preset_overwrite":
+        return [("No", False), ("Yes", False)]
     if key == "placeholder":
         return [("Reserved", False)]
     return []
@@ -4506,6 +5044,13 @@ def apply_current_submenu_selection() -> None:
     if key == "soundfont":
         resume_after_apply = state.pending_resume_after_sf_apply
         state.pending_resume_after_sf_apply = False
+        if state.submenu_index >= len(SOUNDFONTS):
+            # Keep the same convention as other Sound Sources:
+            # SELECT recalls a default item, RIGHT enters the full preset list.
+            apply_default_user_preset()
+            if resume_after_apply:
+                resume_selected_browser_file_after_sf_change()
+            return
         apply_soundfont_with_default_preset(state.submenu_index)
         leave_submenu("SoundFont applied")
         if resume_after_apply:
@@ -4599,14 +5144,30 @@ def apply_current_submenu_selection() -> None:
             leave_submenu("External MIDI unavailable")
             return
         if state.submenu_index == 0:
-            enter_submenu("external_midi_out")
-            mark_dirty("External MIDI OUT")
+            if len(list_external_midi_seq_ports()) > 1:
+                enter_submenu("external_midi_device")
+                mark_dirty("Select External MIDI")
+            else:
+                enter_submenu("external_midi_out")
+                mark_dirty("External MIDI OUT")
             return
         if state.submenu_index == 1:
             enter_submenu("external_midi_pc")
             mark_dirty("External MIDI PC Send")
             return
         leave_submenu("Extension")
+        return
+    if key == "external_midi_device":
+        ports = list_external_midi_seq_ports()
+        if not ports:
+            return_to_extension_submenu("External MIDI unavailable", index=0)
+            return
+        port, label = ports[clamp_index(state.submenu_index, len(ports))]
+        state.preferred_external_midi_port = port
+        state.preferred_external_midi_name = label
+        refresh_external_midi_state(quiet=True)
+        enter_submenu("external_midi_out")
+        mark_dirty(f"External MIDI: {external_midi_display_name(label)}")
         return
     if key == "external_midi_pc":
         refresh_external_midi_state(quiet=True)
@@ -4645,7 +5206,40 @@ def apply_current_submenu_selection() -> None:
                 send_external_midi_program_change(0, state.external_midi_pc_channel)
         else:
             state.external_midi_connected = False
-        return_to_extension_submenu(f"External MIDI OUT: {label}", index=0)
+        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=0)
+        return
+    if key == "user_preset_save":
+        presets = load_user_presets()
+        state.user_preset_entries = presets
+        if state.submenu_index <= 0:
+            save_current_user_preset_as_new()
+        else:
+            target_index = clamp_index(state.submenu_index - 1, len(presets))
+            if not presets:
+                save_current_user_preset_as_new()
+                return
+            state.user_preset_target_index = target_index
+            state.submenu_key = "user_preset_overwrite"
+            state.submenu_index = 0
+            invalidate_full_display()
+            mark_dirty("Overwrite?")
+        return
+    if key == "user_preset_overwrite":
+        if state.submenu_index == 1:
+            overwrite_user_preset(state.user_preset_target_index)
+        else:
+            state.submenu_key = "user_preset_save"
+            state.submenu_index = state.user_preset_target_index + 1
+            invalidate_full_display()
+            mark_dirty("Overwrite canceled")
+        return
+    if key == "user_preset_load":
+        presets = load_user_presets()
+        if not presets:
+            leave_submenu("No user presets")
+            return
+        item = presets[clamp_index(state.submenu_index, len(presets))]
+        apply_user_preset(item)
         return
     leave_submenu("Not implemented yet")
 
@@ -4727,8 +5321,12 @@ def quick_resume_label() -> str:
             "dac": "DAC",
             "midi": "MIDI Mode",
             "extension": "Extension",
+            "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC",
+            "user_preset_load": "User Preset",
+            "user_preset_save": "Save User Preset",
+            "user_preset_overwrite": "Overwrite Preset",
             "placeholder": "Extension",
             "controls": "Sound Edit",
         }
@@ -4814,8 +5412,8 @@ def quick_menu_select() -> None:
     if item == "USB Eject":
         request_usb_eject()
         return
-    if item == "Power...":
-        enter_power_menu()
+    if item == "Save User Preset":
+        enter_user_preset_save_menu()
         return
     mark_dirty("Not implemented yet")
 
@@ -4991,19 +5589,15 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "quick_menu":
         if btn == "UP":
             pulse_button_activity()
-            if state.quick_menu_index > 0:
-                state.quick_menu_index -= 1
-                mark_dirty(None)
-            else:
-                mark_dirty("First item")
+            if QUICK_MENU_ITEMS:
+                state.quick_menu_index = (state.quick_menu_index - 1) % len(QUICK_MENU_ITEMS)
+            mark_dirty(None)
             return
         if btn == "DOWN":
             pulse_button_activity()
-            if state.quick_menu_index < len(QUICK_MENU_ITEMS) - 1:
-                state.quick_menu_index += 1
-                mark_dirty(None)
-            else:
-                mark_dirty("Last item")
+            if QUICK_MENU_ITEMS:
+                state.quick_menu_index = (state.quick_menu_index + 1) % len(QUICK_MENU_ITEMS)
+            mark_dirty(None)
             return
         if btn == "LEFT":
             pulse_button_activity()
@@ -5241,6 +5835,21 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty(f"BTN ignored: {btn}")
         return
 
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_overwrite":
+        if btn == "LEFT":
+            pulse_button_activity()
+            state.submenu_key = "user_preset_save"
+            state.submenu_index = state.user_preset_target_index + 1
+            invalidate_full_display()
+            mark_dirty("Overwrite canceled")
+            return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_device":
+        if btn == "LEFT":
+            pulse_button_activity()
+            return_to_extension_submenu("Extension", index=0)
+            return
+
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_out":
         if btn == "LEFT":
             pulse_button_activity()
@@ -5279,9 +5888,13 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index > 0:
                 state.submenu_index -= 1
-                total, drums = soundfont_preset_counts(state.submenu_index)
-                sf_name = source_name_for_index(state.submenu_index)
-                mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+                if state.submenu_index < len(SOUNDFONTS):
+                    total, drums = soundfont_preset_counts(state.submenu_index)
+                    sf_name = source_name_for_index(state.submenu_index)
+                    mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+                else:
+                    count = len(load_user_presets())
+                    mark_dirty(f"User Preset: {count} saved")
             else:
                 mark_dirty("First item")
             return
@@ -5289,9 +5902,13 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index < len(options) - 1:
                 state.submenu_index += 1
-                total, drums = soundfont_preset_counts(state.submenu_index)
-                sf_name = source_name_for_index(state.submenu_index)
-                mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+                if state.submenu_index < len(SOUNDFONTS):
+                    total, drums = soundfont_preset_counts(state.submenu_index)
+                    sf_name = source_name_for_index(state.submenu_index)
+                    mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
+                else:
+                    count = len(load_user_presets())
+                    mark_dirty(f"User Preset: {count} saved")
             else:
                 mark_dirty("Last item")
             return
@@ -5305,7 +5922,10 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "RIGHT":
             pulse_button_activity()
-            enter_preset_submenu(state.submenu_index)
+            if state.submenu_index >= len(SOUNDFONTS):
+                enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
+            else:
+                enter_preset_submenu(state.submenu_index)
             return
         if btn == "LEFT":
             pulse_button_activity()
