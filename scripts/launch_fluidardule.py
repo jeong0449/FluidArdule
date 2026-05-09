@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260508c-user-preset"
+SCRIPT_VERSION = "v20260509m-user-preset-move-top"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -226,6 +226,13 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
 ]
 
+# Rename editor only: fixed-width text keeps the cursor aligned with characters.
+MONO_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+]
+
 MAIN_MENU = [
     "Sound Source",
     "File Player",
@@ -270,6 +277,8 @@ USB_EJECT_CMD = ["sudo", "-n", "/bin/umount", USB_MOUNT_POINT]
 USB_LABEL = "USB"
 
 USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
+USER_PRESET_RENAME_CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.,()"
+USER_PRESET_RENAME_MAX_LEN = 32
 
 POWER_MENU_ITEMS = ["Cancel", "Halt", "Reboot"]
 POWER_CONFIRM_ITEMS = ["No", "Yes"]
@@ -466,6 +475,20 @@ class RuntimeState:
 
     user_preset_entries: list[dict] = field(default_factory=list)
     user_preset_target_index: int = 0
+    user_preset_rename_text: str = ""
+    user_preset_rename_cursor: int = 0
+    current_user_preset_name: str | None = None
+    current_user_preset_kind: str | None = None
+    modal_message: str = ""
+    modal_submessage: str = ""
+
+    # Lightweight UI caches. Sound Source rendering should not repeatedly read
+    # preset JSON files on every draw; cache counts and invalidate only when the
+    # underlying User Preset list is changed.
+    soundfont_count_cache: dict[int, tuple[int, int]] = field(default_factory=dict)
+    user_preset_count_cache: int | None = None
+    sound_source_cache_preload_started: bool = False
+    sound_source_cache_preload_done: bool = False
 
     # Ignore short burst of stale/noisy UI events after UNO-1 serial reconnect/reset.
     serial_input_ignore_until: float = 0.0
@@ -1077,6 +1100,7 @@ class TFTDisplay:
         self.font_value = self._load_font(24)
         self.font_title = self._load_font(30)
         self.font_menu = self._load_font(26)
+        self.font_rename_mono = self._load_mono_font(22)
         self.prev_image = None
         self.prev_snapshot = None
 
@@ -1102,6 +1126,15 @@ class TFTDisplay:
                 except Exception:
                     continue
         return ImageFont.load_default()
+
+    def _load_mono_font(self, size: int):
+        for path in MONO_FONT_CANDIDATES:
+            if Path(path).exists():
+                try:
+                    return ImageFont.truetype(path, size)
+                except Exception:
+                    continue
+        return self._load_font(size)
 
     def _encode_region(self, rgb: Image.Image) -> bytes:
         pixels = rgb.load()
@@ -1194,6 +1227,8 @@ class TFTDisplay:
             "main_value_5": self._main_menu_value(5),
             "transient_footer_text": state.transient_footer_text,
             "transient_footer_until_active": time.time() < state.transient_footer_until,
+            "modal_message": state.modal_message,
+            "modal_submessage": state.modal_submessage,
         }
 
     def _footer_changed(self, prev: dict | None) -> bool:
@@ -1361,6 +1396,8 @@ class TFTDisplay:
 
     def render(self) -> None:
         prev_snapshot = self.prev_snapshot
+        if state.modal_message:
+            prev_snapshot = None
         if prev_snapshot and prev_snapshot.get("ui_mode") == state.ui_mode:
             if state.ui_mode == "main" and self._render_main_incremental(prev_snapshot):
                 state.last_render_time = time.time()
@@ -1398,6 +1435,8 @@ class TFTDisplay:
             self._draw_sound_edit(draw)
         if state.usb_eject_confirm:
             self._draw_usb_eject_confirm(draw)
+        if state.modal_message:
+            self._draw_modal_message(draw)
         self._draw_footer(draw)
         self._write_image(image)
         self.prev_snapshot = self._snapshot_state()
@@ -1411,6 +1450,13 @@ class TFTDisplay:
     def _main_menu_value(self, idx: int) -> str:
         label = MAIN_MENU[idx] if 0 <= idx < len(MAIN_MENU) else ""
         if label == "Sound Source":
+            if state.current_user_preset_name and state.current_user_preset_kind == "edited":
+                presets = load_user_presets()
+                current_name = str(state.current_user_preset_name).strip()
+                for i, item in enumerate(presets):
+                    if user_preset_is_edited(item) and str(item.get("name", "")).strip() == current_name:
+                        return user_preset_display_label(i, item, main=True)
+                return "*" + shorten_text(current_name, 18)
             return f"{state.sf_name}/{state.current_preset_name}"
         if label == "File Player":
             return Path(state.player_path).name if state.player_path else "Browse"
@@ -1426,12 +1472,31 @@ class TFTDisplay:
             return "Reserved"
         return ""
 
+    def _draw_overflow_hints(self, draw, *, current_idx: int, items_len: int, top_y: int, row_h: int, bottom_y: int) -> None:
+        """Draw tiny up/down indicators when a list has hidden rows."""
+        try:
+            items_len = int(items_len)
+            current_idx = int(current_idx)
+        except Exception:
+            return
+        if items_len <= 0:
+            return
+        max_rows = max(1, (bottom_y - top_y) // row_h)
+        start_idx = max(0, current_idx - max_rows + 1) if current_idx >= max_rows else 0
+        end_idx = min(items_len, start_idx + max_rows)
+        x = self.width - 18
+        if start_idx > 0:
+            draw.text((x, top_y - 2), "▲", font=self.font_small, fill=DIM)
+        if end_idx < items_len:
+            draw.text((x, bottom_y - 24), "▼", font=self.font_small, fill=DIM)
+
     def _draw_scrolled_rows(self, draw, labels, current_idx, top_y, row_h, bottom_y, show_current_marks=False):
         max_rows = max(1, (bottom_y - top_y) // row_h)
         total_count = len(labels)
         start_idx = max(0, current_idx - max_rows + 1) if current_idx >= max_rows else 0
+        end_idx = min(len(labels), start_idx + max_rows)
         row_margin = 3
-        for visible_row, idx in enumerate(range(start_idx, min(len(labels), start_idx + max_rows))):
+        for visible_row, idx in enumerate(range(start_idx, end_idx)):
             top = top_y + visible_row * row_h
             label = labels[idx]
             if isinstance(label, tuple):
@@ -1457,6 +1522,23 @@ class TFTDisplay:
             suffix = " *" if (show_current_marks and is_current) else ""
             row_text = f"{prefix}{index_prefix}{text}{suffix}"
             draw_left_vcentered_text_list(draw, 28, top, row_h, row_text, self.font_body, fill)
+        self._draw_overflow_hints(draw, current_idx=current_idx, items_len=total_count, top_y=top_y, row_h=row_h, bottom_y=bottom_y)
+
+        self._draw_scroll_hints(draw, start_idx, end_idx, total_count, top_y, bottom_y)
+
+    def _draw_scroll_hints(self, draw, start_idx: int, end_idx: int, total_count: int, top_y: int, bottom_y: int) -> None:
+        """Draw tiny overflow hints for scrollable list areas.
+
+        Use simple arrows instead of a full scrollbar to keep the UI musical
+        and low-noise.  The footer remains untouched.
+        """
+        if total_count <= max(1, end_idx - start_idx):
+            return
+        x = self.width - 18
+        if start_idx > 0:
+            draw.text((x, top_y - 2), "▲", font=self.font_small, fill=DIM)
+        if end_idx < total_count:
+            draw.text((x, bottom_y - 24), "▼", font=self.font_small, fill=DIM)
 
     def _draw_main(self, draw):
         y = 56
@@ -1497,6 +1579,8 @@ class TFTDisplay:
                 bbox = draw.textbbox((0, 0), value_text, font=self.font_value)
                 value_x = max(value_min_x, value_right_x - (bbox[2] - bbox[0]))
                 draw_left_vcentered_text(draw, value_x, top, row_h, value_text, self.font_value, value_fill)
+        self._draw_overflow_hints(draw, current_idx=state.menu_index, items_len=len(MAIN_MENU), top_y=y, row_h=row_h, bottom_y=list_bottom)
+
 
     def _draw_submenu_title(self, draw, title: str, info: str = ""):
         draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
@@ -1548,23 +1632,28 @@ class TFTDisplay:
             draw_left_vcentered_text_list(draw, 28, top, 38, row_text, self.font_body, fill)
 
             if idx < len(SOUNDFONTS):
-                total, _drums = soundfont_preset_counts(idx)
+                total, _drums = soundfont_preset_counts_cached(idx)
                 if total:
                     value = str(total)
                     if total > 1:
-                        # Show the navigation hint only on the highlighted row.
-                        # Single-instrument sources do not need a "go deeper" hint.
                         value += " > Press Right" if idx == state.submenu_index else " >"
                     value_fill = ACCENT if idx != state.submenu_index else FG
                     draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
-            else:
-                count = len(load_user_presets())
+            elif idx == len(SOUNDFONTS):
+                count = user_preset_count_cached()
                 if count:
                     value = f"{count} > Press Right" if idx == state.submenu_index else f"{count} >"
                 else:
                     value = "0"
                 value_fill = ACCENT if idx != state.submenu_index else FG
                 draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
+            else:
+                value = "SELECT" if idx == state.submenu_index else ""
+                if value:
+                    draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, FG)
+
+        self._draw_overflow_hints(draw, current_idx=state.submenu_index, items_len=len(options), top_y=56, row_h=38, bottom_y=self.height - 50)
+
 
     def _draw_submenu_external_midi_pc_rows(self, draw, options):
         cat = gm_current_category_name()
@@ -1583,6 +1672,54 @@ class TFTDisplay:
             show_current_marks=True,
         )
 
+    def _draw_user_preset_load_rows(self, draw, options):
+        # Leave a small in-list hint area above the normal footer.  The footer
+        # continues to show status/MIDI information, while this local hint
+        # teaches the context-specific long-press action for User Presets.
+        hint_y = self.height - 82
+        self._draw_scrolled_rows(
+            draw,
+            options,
+            state.submenu_index,
+            56,
+            36,
+            hint_y - 4,
+            show_current_marks=False,
+        )
+        draw.line((24, hint_y - 6, self.width - 24, hint_y - 6), fill=(42, 48, 62), width=1)
+        draw.text((28, hint_y), "Hold DOWN: Manage", font=self.font_small, fill=DIM)
+
+    def _draw_user_preset_rename(self, draw):
+        self._draw_submenu_title(draw, "Rename Preset")
+        draw.rounded_rectangle((12, 50, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+
+        text = state.user_preset_rename_text or " "
+        cursor = max(0, min(len(text) - 1, state.user_preset_rename_cursor))
+
+        # Keep only the editable name line and cursor line fixed-width.
+        # The rest of the UI continues to use the normal proportional fonts.
+        mono = self.font_rename_mono
+        max_text_width = self.width - 70
+        char_w = max(1, draw.textbbox((0, 0), "M", font=mono)[2])
+        max_chars = max(1, max_text_width // char_w)
+        if len(text) <= max_chars:
+            view_start = 0
+        else:
+            view_start = max(0, min(cursor - max_chars // 2, len(text) - max_chars))
+        visible_text = text[view_start:view_start + max_chars]
+        visible_cursor = max(0, min(cursor - view_start, len(visible_text) - 1))
+
+        draw.text((28, 78), visible_text, font=mono, fill=FG)
+
+        cursor_line = " " * visible_cursor + "^"
+        draw.text((28, 108), cursor_line, font=mono, fill=ACCENT)
+
+        current_char = text[cursor] if text and cursor < len(text) else " "
+        draw.text((28, 136), f"Char: {repr(current_char)[1:-1] or 'space'}", font=self.font_body, fill=ACCENT)
+        draw.text((28, 184), "Encoder: char   LEFT/RIGHT: move", font=self.font_small, fill=DIM)
+        draw.text((28, 208), "UP: insert space   DOWN: delete", font=self.font_small, fill=DIM)
+        draw.text((28, 232), "SELECT: save   SEL long: cancel", font=self.font_small, fill=DIM)
+
     def _draw_submenu(self, draw):
         title_map = {
             "soundfont": "Sound Source",
@@ -1598,6 +1735,9 @@ class TFTDisplay:
             "user_preset_load": "User Preset",
             "user_preset_save": "Save User Preset",
             "user_preset_overwrite": "Overwrite Preset?",
+            "user_preset_manage": "Manage Preset",
+            "user_preset_delete": "Delete Preset?",
+            "user_preset_rename": "Rename Preset",
             "placeholder": "Coming Soon",
         }
 
@@ -1618,10 +1758,14 @@ class TFTDisplay:
 
         if state.submenu_key == "external_midi_pc":
             self._draw_submenu_external_midi_pc_rows(draw, options)
+        elif state.submenu_key == "user_preset_rename":
+            self._draw_user_preset_rename(draw)
         else:
             self._draw_submenu_box(draw)
             if state.submenu_key == "soundfont":
                 self._draw_submenu_soundfont_rows(draw, options)
+            elif state.submenu_key == "user_preset_load":
+                self._draw_user_preset_load_rows(draw, options)
             else:
                 self._draw_submenu_generic_rows(draw, options)
 
@@ -1837,6 +1981,19 @@ class TFTDisplay:
         draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         self._draw_scrolled_rows(draw, labels, state.quick_menu_index, 52, 34, self.height - 50)
 
+    def _draw_modal_message(self, draw):
+        x1, y1 = 70, 96
+        x2, y2 = self.width - 70, self.height - 92
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=16, fill=(28, 34, 48), outline=ACCENT, width=2)
+        title = state.modal_message or "Loading..."
+        subtitle = state.modal_submessage or "Please wait"
+        tb = draw.textbbox((0, 0), title, font=self.font_title)
+        sb = draw.textbbox((0, 0), subtitle, font=self.font_body)
+        tx = x1 + ((x2 - x1) - (tb[2] - tb[0])) // 2
+        sx = x1 + ((x2 - x1) - (sb[2] - sb[0])) // 2
+        draw.text((tx, y1 + 38), title, font=self.font_title, fill=FG)
+        draw.text((sx, y1 + 86), subtitle, font=self.font_body, fill=DIM)
+
     def _draw_usb_eject_confirm(self, draw):
         draw.rounded_rectangle((70, 92, self.width - 70, self.height - 78), radius=14, fill=(28, 34, 48), outline=ACCENT, width=2)
         title = "Eject USB?"
@@ -1877,7 +2034,7 @@ class TFTDisplay:
         if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
             try:
                 if state.submenu_index < len(SOUNDFONTS):
-                    total, _drums = soundfont_preset_counts(state.submenu_index)
+                    total, _drums = soundfont_preset_counts_cached(state.submenu_index)
                     if total > 1:
                         footer_hint = "Press > for presets"
                 else:
@@ -1976,6 +2133,36 @@ display = TFTDisplay(FRAMEBUFFER_DEVICE, FRAMEBUFFER_SYS_DIR)
 
 def invalidate_full_display() -> None:
     display.prev_image = None
+
+
+def show_modal_message(text: str = "Loading...", subtext: str = "Please wait") -> None:
+    state.modal_message = text
+    state.modal_submessage = subtext
+    invalidate_full_display()
+    mark_dirty(text)
+    try:
+        display.render()
+    except Exception as exc:
+        log(f"modal render failed: {exc}")
+
+
+def clear_modal_message() -> None:
+    if state.modal_message or state.modal_submessage:
+        state.modal_message = ""
+        state.modal_submessage = ""
+        invalidate_full_display()
+        state.dirty = True
+
+
+def file_player_active() -> bool:
+    return state.player_status in {"Playing", "Paused"} or (player_proc is not None and player_proc.poll() is None)
+
+
+def block_sound_change_while_playing() -> bool:
+    if file_player_active():
+        mark_dirty("Stop file first")
+        return True
+    return False
 
 
 # =========================================================
@@ -3083,6 +3270,78 @@ def soundfont_preset_counts(sf_index: int) -> tuple[int, int]:
         return 0, 0
 
 
+def soundfont_preset_counts_cached(sf_index: int) -> tuple[int, int]:
+    """Return cached Sound Source preset counts for fast menu rendering."""
+    try:
+        sf_index = int(sf_index)
+    except Exception:
+        return 0, 0
+    if sf_index in state.soundfont_count_cache:
+        return state.soundfont_count_cache.get(sf_index, (0, 0))
+
+    # During background preload, do not block the UI by reading JSON on demand.
+    # The row can briefly show no count; it will update when preload finishes.
+    if state.sound_source_cache_preload_started and not state.sound_source_cache_preload_done:
+        return 0, 0
+
+    state.soundfont_count_cache[sf_index] = soundfont_preset_counts(sf_index)
+    return state.soundfont_count_cache.get(sf_index, (0, 0))
+
+
+
+def user_preset_count_cached() -> int:
+    """Return cached User Preset count for Sound Source display."""
+    if state.user_preset_count_cache is not None:
+        return int(state.user_preset_count_cache)
+
+    # During background preload, avoid blocking Sound Source entry.
+    if state.sound_source_cache_preload_started and not state.sound_source_cache_preload_done:
+        return 0
+
+    state.user_preset_count_cache = len(load_user_presets())
+    return int(state.user_preset_count_cache)
+
+
+
+def invalidate_user_preset_cache() -> None:
+    state.user_preset_count_cache = None
+
+
+def preload_sound_source_count_cache() -> None:
+    """Preload Sound Source counts in the background.
+
+    The Sound Source menu shows preset counts, which are useful but can make
+    the first entry feel slow if JSON files are read on demand.  Preload them
+    after startup so entering Sound Source normally uses already-filled cache.
+    """
+    if state.sound_source_cache_preload_started:
+        return
+    state.sound_source_cache_preload_started = True
+
+    def worker() -> None:
+        try:
+            # Give the initial UI/audio startup a short head start.
+            time.sleep(0.5)
+            for i in range(len(SOUNDFONTS)):
+                if not state.running:
+                    return
+                if i not in state.soundfont_count_cache:
+                    state.soundfont_count_cache[i] = soundfont_preset_counts(i)
+            if state.user_preset_count_cache is None:
+                state.user_preset_count_cache = len(load_user_presets())
+            state.sound_source_cache_preload_done = True
+            mark_dirty("Sound Source cache ready")
+        except Exception as exc:
+            log(f"sound source cache preload failed: {exc}")
+
+    try:
+        t = threading.Thread(target=worker, name="sound-source-cache-preload", daemon=True)
+        t.start()
+    except Exception as exc:
+        log(f"sound source cache preload start failed: {exc}")
+
+
+
 def choose_default_preset(presets: list[dict]) -> dict | None:
     if not presets:
         return None
@@ -3714,6 +3973,7 @@ def send_fluidsynth_command(command: str) -> bool:
 
 
 def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
+    clear_current_user_preset_state()
     state.current_preset_bank = int(bank)
     state.current_preset_program = int(program)
     if name:
@@ -4205,6 +4465,8 @@ def start_player(path: str) -> None:
         send_ui_status("READY", force=True)
         return
 
+    show_modal_message("Loading...", shorten_text(Path(path).name, 24))
+
     stop_player_only()
 
     # Media and MIDI-file playback both take exclusive control of the audio device.
@@ -4218,12 +4480,14 @@ def start_player(path: str) -> None:
         mark_dirty(f"Player missing: {cmd[0]}")
         if kind == "media":
             restart_engine(state.sf_index, state.dac_index)
+        clear_modal_message()
         send_ui_status("READY", force=True)
         return
     except Exception as exc:
         mark_dirty(f"Player start failed: {exc}")
         if kind == "media":
             restart_engine(state.sf_index, state.dac_index)
+        clear_modal_message()
         send_ui_status("READY", force=True)
         return
 
@@ -4238,6 +4502,7 @@ def start_player(path: str) -> None:
     state.ui_mode = "player"
     invalidate_full_display()
     set_play_led("ON")
+    clear_modal_message()
     mark_dirty(f"Play {Path(path).name}")
     send_ui_status("READY", force=True)
 
@@ -4603,6 +4868,7 @@ def save_user_presets(presets: list[dict]) -> bool:
     }
     try:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        invalidate_user_preset_cache()
         return True
     except Exception as exc:
         log(f"user preset save failed: {exc}")
@@ -4620,6 +4886,81 @@ def sound_edit_has_user_changes() -> bool:
     # actually been edited from the normal Sound Edit defaults.  Volume is not
     # part of User Preset state and is intentionally ignored here.
     return bool(state.sound_edit_modified)
+
+
+def current_user_preset_kind_for_save() -> str:
+    return "edited" if sound_edit_has_user_changes() else "bookmark"
+
+
+def user_preset_sound_edit_has_nondefault_values(item: dict) -> bool:
+    """Infer edited state from saved CC values for older User Preset JSON files.
+
+    Newer presets explicitly store user_kind / edited / sound_edit_modified.
+    Older presets may only have a full sound_edit dictionary, so compare it
+    against the current Sound Edit defaults and treat any non-default CC value
+    as an edited preset.
+    """
+    values = item.get("sound_edit") if isinstance(item, dict) else None
+    if not isinstance(values, dict):
+        return False
+
+    defaults = default_sound_edit_values()
+    for key, value in values.items():
+        try:
+            cc = int(key)
+            val = int(value)
+        except Exception:
+            continue
+        if cc in defaults and val != int(defaults[cc]):
+            return True
+    return False
+
+
+def user_preset_is_edited(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    kind = str(item.get("user_kind", "")).lower().strip()
+    if kind == "edited":
+        return True
+    if item.get("edited") is True:
+        return True
+
+    modified = item.get("sound_edit_modified")
+    if isinstance(modified, list) and len(modified) > 0:
+        return True
+
+    if user_preset_sound_edit_has_nondefault_values(item):
+        return True
+
+    # Backward-compatible recognition for presets saved before user_kind was
+    # added, because edited names were auto-suffixed as "ed N".
+    name = str(item.get("name", ""))
+    return bool(re.search(r"\bed\s*\d+$", name, re.IGNORECASE))
+
+
+def user_preset_display_label(index: int, item: dict, *, main: bool = False) -> str:
+    """Return compact display label for User Presets.
+
+    Bookmark:
+      list: 04 Power Drum 2
+      main: original source/preset display, not this helper
+
+    Edited:
+      list: 04*Power Drum 2 ed1
+      main: 04*Power Drum 2 ed1
+    """
+    name_limit = 20 if main else 23
+    name = shorten_text(str(item.get("name", "User Preset")), name_limit)
+    number = f"{index + 1:02d}"
+    if user_preset_is_edited(item):
+        return f"{number}*{name}"
+    return f"{number} {name}"
+
+
+def clear_current_user_preset_state() -> None:
+    state.current_user_preset_name = None
+    state.current_user_preset_kind = None
 
 
 def user_preset_existing_names(presets: list[dict], ignore_index: int | None = None) -> set[str]:
@@ -4675,8 +5016,13 @@ def build_current_user_preset(presets: list[dict], overwrite_index: int | None =
         # Keep a manually renamed user preset name when overwriting it.
         name = str(presets[overwrite_index].get("name") or base_name).strip() or base_name
     sound_edit = {str(int(k)): int(v) for k, v in sorted(state.sound_edit_values.items())}
+    modified_ccs = [int(k) for k in sorted(state.sound_edit_modified)]
+    user_kind = "edited" if modified_ccs else "bookmark"
     return {
         "name": name,
+        "user_kind": user_kind,
+        "edited": user_kind == "edited",
+        "sound_edit_modified": modified_ccs,
         "engine": state.current_engine,
         "source_name": source_name,
         "source_path": source_path,
@@ -4690,11 +5036,12 @@ def build_current_user_preset(presets: list[dict], overwrite_index: int | None =
 
 
 def user_preset_label(index: int, item: dict) -> str:
-    return f"{index + 1:02d} {shorten_text(str(item.get('name', 'User Preset')), 24)}"
+    return user_preset_display_label(index, item, main=False)
 
 
 def enter_user_preset_save_menu() -> None:
     presets = load_user_presets()
+    state.user_preset_count_cache = len(presets)
     state.user_preset_entries = presets
     state.ui_mode = "submenu"
     state.submenu_key = "user_preset_save"
@@ -4711,6 +5058,7 @@ def enter_user_preset_save_menu() -> None:
 
 def enter_user_preset_load_menu(return_mode: str | None = None) -> None:
     presets = load_user_presets()
+    state.user_preset_count_cache = len(presets)
     if not presets:
         mark_dirty("No user presets")
         return
@@ -4750,6 +5098,168 @@ def overwrite_user_preset(index: int) -> None:
         state.submenu_key = None
         state.submenu_return_mode = None
         invalidate_full_display()
+
+
+def delete_user_preset(index: int) -> None:
+    presets = load_user_presets()
+    if index < 0 or index >= len(presets):
+        mark_dirty("Preset missing")
+        return
+    name = str(presets[index].get("name", "User Preset"))
+    del presets[index]
+    if save_user_presets(presets):
+        state.user_preset_entries = presets
+        if presets:
+            state.ui_mode = "submenu"
+            state.submenu_key = "user_preset_load"
+            state.submenu_index = clamp_index(index, len(presets))
+            invalidate_full_display()
+            mark_dirty(f"Deleted: {shorten_text(name, 18)}")
+        else:
+            leave_submenu("No user presets")
+
+
+def move_user_preset_to_top(index: int) -> None:
+    """Move the selected User Preset to list position 1.
+
+    Sound Source > User Preset uses SELECT as "load default user preset",
+    so moving a favorite to the top makes it the default without adding
+    another submenu level.
+    """
+    presets = load_user_presets()
+    if index < 0 or index >= len(presets):
+        mark_dirty("Preset missing")
+        return
+    if index == 0:
+        state.user_preset_entries = presets
+        state.submenu_key = "user_preset_load"
+        state.submenu_index = 0
+        invalidate_full_display()
+        mark_dirty("Already at top")
+        return
+
+    item = presets.pop(index)
+    presets.insert(0, item)
+
+    if save_user_presets(presets):
+        state.user_preset_entries = presets
+        state.user_preset_count_cache = len(presets)
+        state.user_preset_target_index = 0
+        state.submenu_key = "user_preset_load"
+        state.submenu_index = 0
+        invalidate_full_display()
+        mark_dirty(f"Moved top: {shorten_text(str(item.get('name', 'User Preset')), 16)}")
+
+
+
+def enter_user_preset_manage_menu() -> None:
+    presets = load_user_presets()
+    if not presets:
+        mark_dirty("No user presets")
+        return
+    state.user_preset_entries = presets
+    state.user_preset_target_index = clamp_index(state.submenu_index, len(presets))
+    state.submenu_key = "user_preset_manage"
+    state.submenu_index = 0
+    invalidate_full_display()
+    mark_dirty("Manage preset")
+
+
+def start_user_preset_rename(index: int) -> None:
+    presets = load_user_presets()
+    if index < 0 or index >= len(presets):
+        mark_dirty("Preset missing")
+        return
+    if not user_preset_is_edited(presets[index]):
+        mark_dirty("Rename edited only")
+        return
+    name = str(presets[index].get("name", "User Preset")).strip() or "User Preset"
+    state.user_preset_entries = presets
+    state.user_preset_target_index = index
+    state.user_preset_rename_text = name[:USER_PRESET_RENAME_MAX_LEN] or " "
+    state.user_preset_rename_cursor = clamp_index(len(state.user_preset_rename_text) - 1, len(state.user_preset_rename_text))
+    state.submenu_key = "user_preset_rename"
+    state.submenu_index = 0
+    invalidate_full_display()
+    mark_dirty("Rename preset")
+
+
+def save_user_preset_rename() -> None:
+    presets = load_user_presets()
+    idx = state.user_preset_target_index
+    if idx < 0 or idx >= len(presets):
+        mark_dirty("Preset missing")
+        return
+    if not user_preset_is_edited(presets[idx]):
+        mark_dirty("Rename edited only")
+        return
+    new_name = re.sub(r"\s+", " ", state.user_preset_rename_text).strip()
+    if not new_name:
+        mark_dirty("Name empty")
+        return
+    presets[idx]["name"] = new_name[:USER_PRESET_RENAME_MAX_LEN]
+    if save_user_presets(presets):
+        state.user_preset_entries = presets
+        state.submenu_key = "user_preset_load"
+        state.submenu_index = clamp_index(idx, len(presets))
+        state.user_preset_rename_text = ""
+        state.user_preset_rename_cursor = 0
+        invalidate_full_display()
+        mark_dirty(f"Renamed: {shorten_text(new_name, 18)}")
+
+
+def cancel_user_preset_rename() -> None:
+    state.submenu_key = "user_preset_manage"
+    state.submenu_index = 0
+    state.user_preset_rename_text = ""
+    state.user_preset_rename_cursor = 0
+    invalidate_full_display()
+    mark_dirty("Rename canceled")
+
+
+def rename_char_delta(delta: int) -> None:
+    text = state.user_preset_rename_text or " "
+    cursor = clamp_index(state.user_preset_rename_cursor, len(text))
+    ch = text[cursor]
+    chars = USER_PRESET_RENAME_CHARS
+    try:
+        pos = chars.index(ch)
+    except ValueError:
+        pos = 0
+    new_ch = chars[(pos + int(delta)) % len(chars)]
+    state.user_preset_rename_text = text[:cursor] + new_ch + text[cursor + 1:]
+    state.user_preset_rename_cursor = cursor
+    mark_dirty("Edit name")
+
+
+def move_rename_cursor(delta: int) -> None:
+    text = state.user_preset_rename_text or " "
+    state.user_preset_rename_cursor = max(0, min(len(text) - 1, state.user_preset_rename_cursor + int(delta)))
+    mark_dirty("Move cursor")
+
+
+def insert_rename_space() -> None:
+    text = state.user_preset_rename_text or " "
+    if len(text) >= USER_PRESET_RENAME_MAX_LEN:
+        mark_dirty("Name max length")
+        return
+    cursor = clamp_index(state.user_preset_rename_cursor, len(text))
+    state.user_preset_rename_text = text[:cursor + 1] + " " + text[cursor + 1:]
+    state.user_preset_rename_cursor = cursor + 1
+    mark_dirty("Insert space")
+
+
+def delete_rename_char() -> None:
+    text = state.user_preset_rename_text or " "
+    cursor = clamp_index(state.user_preset_rename_cursor, len(text))
+    if len(text) <= 1:
+        state.user_preset_rename_text = " "
+        state.user_preset_rename_cursor = 0
+        mark_dirty("Name empty")
+        return
+    state.user_preset_rename_text = text[:cursor] + text[cursor + 1:]
+    state.user_preset_rename_cursor = max(0, min(cursor, len(state.user_preset_rename_text) - 1))
+    mark_dirty("Delete char")
 
 
 def apply_sound_edit_values_from_user_preset(item: dict) -> None:
@@ -4796,6 +5306,8 @@ def find_source_index_for_user_preset(item: dict) -> int | None:
 
 
 def apply_user_preset(item: dict) -> None:
+    if block_sound_change_while_playing():
+        return
     if not item:
         mark_dirty("Empty preset")
         return
@@ -4812,11 +5324,14 @@ def apply_user_preset(item: dict) -> None:
     program = int(item.get("program", 0))
     instrument_path = str(item.get("instrument_path") or "").strip()
 
+    show_modal_message("Loading...", shorten_text(str(item.get("name", name)), 24))
+
     state.sf_index = source_index
     state.sf_name = source_name_for_index(source_index)
 
     if engine == "yoshimi":
         if not instrument_path:
+            clear_modal_message()
             mark_dirty("User preset path missing")
             return
         apply_preset(bank, program, name, engine="yoshimi", path=instrument_path)
@@ -4835,8 +5350,65 @@ def apply_user_preset(item: dict) -> None:
         apply_preset(bank, program, name, engine="fluidsynth")
         apply_sound_edit_values_from_user_preset(item)
 
+    state.current_user_preset_name = str(item.get("name") or name).strip() or name
+    state.current_user_preset_kind = "edited" if user_preset_is_edited(item) else "bookmark"
+    clear_modal_message()
     leave_submenu(f"User Preset: {shorten_text(str(item.get('name', name)), 16)}")
 
+
+def find_current_user_preset_item() -> dict | None:
+    name = str(state.current_user_preset_name or "").strip()
+    if not name:
+        return None
+    for item in load_user_presets():
+        if str(item.get("name", "")).strip() == name:
+            return item
+    return None
+
+
+def refresh_current_sound() -> None:
+    """Restart/re-align the current sound without using full MIDI Panic.
+
+    This is a musical refresh action, not an emergency stop.  It restarts the
+    active engine and restores the last selected sound state, including saved
+    User Preset Sound Edit values or the current volatile Sound Edit values.
+    """
+    if block_sound_change_while_playing():
+        return
+
+    show_modal_message("Refreshing...", shorten_text(state.current_user_preset_name or state.current_preset_name, 24))
+
+    # If the current sound came from a User Preset, reload that exact preset so
+    # its source/engine and saved Sound Edit values are restored consistently.
+    user_item = find_current_user_preset_item()
+    if user_item is not None:
+        apply_user_preset(user_item)
+        return
+
+    sf_index = state.sf_index
+    dac_index = state.dac_index
+    engine = state.current_engine
+    bank = state.current_preset_bank
+    program = state.current_preset_program
+    name = state.current_preset_name
+    path = state.current_instrument_path
+    saved_sound_edit_values = dict(state.sound_edit_values)
+    saved_sound_edit_modified = set(state.sound_edit_modified)
+
+    try:
+        if engine == "yoshimi":
+            apply_preset(bank, program, name, engine="yoshimi", path=path)
+        else:
+            restart_engine(sf_index, dac_index)
+            apply_preset(bank, program, name, engine="fluidsynth")
+            state.sound_edit_values = dict(saved_sound_edit_values)
+            state.sound_edit_a_values = dict(saved_sound_edit_values)
+            state.sound_edit_modified = set(saved_sound_edit_modified)
+            apply_sound_edit_values_from_user_preset({"sound_edit": {str(k): v for k, v in saved_sound_edit_values.items()}})
+    finally:
+        clear_modal_message()
+
+    leave_submenu("Sound refreshed")
 
 def apply_default_user_preset() -> None:
     presets = load_user_presets()
@@ -4916,6 +5488,10 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
         state.submenu_index = 0
     elif key == "user_preset_overwrite":
         state.submenu_index = 0
+    elif key == "user_preset_manage":
+        state.submenu_index = 0
+    elif key == "user_preset_rename":
+        state.submenu_index = 0
 
 
 def leave_submenu(event: str = "Back") -> None:
@@ -4929,8 +5505,10 @@ def leave_submenu(event: str = "Back") -> None:
         state.preset_index = 0
         state.preset_sf_index = None
         state.preset_source_name = ""
-    if state.submenu_key in {"user_preset_load", "user_preset_save", "user_preset_overwrite"}:
+    if state.submenu_key in {"user_preset_load", "user_preset_save", "user_preset_overwrite", "user_preset_delete", "user_preset_manage", "user_preset_rename"}:
         state.user_preset_entries = []
+        state.user_preset_rename_text = ""
+        state.user_preset_rename_cursor = 0
     state.ui_mode = target
     invalidate_full_display()
     state.submenu_key = None
@@ -4955,6 +5533,7 @@ def get_submenu_options() -> list[tuple[str, bool]]:
     if key == "soundfont":
         rows = [(name, i == state.sf_index) for i, (_path, name) in enumerate(SOUNDFONTS)]
         rows.append(("User Preset", False))
+        rows.append(("Refresh Sound", False))
         return rows
     if key == "preset_category":
         active_cat = categorize_preset(state.current_preset_bank, state.current_preset_program, state.current_preset_name)
@@ -5034,6 +5613,20 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         return [(user_preset_label(i, item), False) for i, item in enumerate(state.user_preset_entries)]
     if key == "user_preset_overwrite":
         return [("No", False), ("Yes", False)]
+    if key == "user_preset_manage":
+        label = "Rename"
+        try:
+            presets = state.user_preset_entries or load_user_presets()
+            item = presets[clamp_index(state.user_preset_target_index, len(presets))]
+            if not user_preset_is_edited(item):
+                label = "Rename (edited only)"
+        except Exception:
+            pass
+        return [(label, False), ("Move to Top", False), ("Delete", False), ("Cancel", False)]
+    if key == "user_preset_delete":
+        return [("No", False), ("Yes", False)]
+    if key == "user_preset_rename":
+        return []
     if key == "placeholder":
         return [("Reserved", False)]
     return []
@@ -5042,12 +5635,19 @@ def get_submenu_options() -> list[tuple[str, bool]]:
 def apply_current_submenu_selection() -> None:
     key = state.submenu_key
     if key == "soundfont":
+        if block_sound_change_while_playing():
+            return
         resume_after_apply = state.pending_resume_after_sf_apply
         state.pending_resume_after_sf_apply = False
-        if state.submenu_index >= len(SOUNDFONTS):
+        if state.submenu_index == len(SOUNDFONTS):
             # Keep the same convention as other Sound Sources:
             # SELECT recalls a default item, RIGHT enters the full preset list.
             apply_default_user_preset()
+            if resume_after_apply:
+                resume_selected_browser_file_after_sf_change()
+            return
+        if state.submenu_index == len(SOUNDFONTS) + 1:
+            refresh_current_sound()
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
             return
@@ -5057,6 +5657,8 @@ def apply_current_submenu_selection() -> None:
             resume_selected_browser_file_after_sf_change()
         return
     if key == "preset":
+        if block_sound_change_while_playing():
+            return
         if not state.preset_entries:
             leave_submenu("No preset")
             return
@@ -5080,11 +5682,15 @@ def apply_current_submenu_selection() -> None:
         leave_submenu(f'Preset: {p["name"]}')
         return
     if key == "dac":
+        if block_sound_change_while_playing():
+            return
         if state.submenu_index != state.dac_index:
             restart_engine(state.sf_index, state.submenu_index)
         leave_submenu("DAC applied")
         return
     if key == "midi":
+        if block_sound_change_while_playing():
+            return
         if state.midi_options:
             selected_mode, selected_name = state.midi_options[state.submenu_index]
             previous_mode = state.midi_mode
@@ -5233,6 +5839,37 @@ def apply_current_submenu_selection() -> None:
             invalidate_full_display()
             mark_dirty("Overwrite canceled")
         return
+    if key == "user_preset_manage":
+        idx = state.user_preset_target_index
+        if state.submenu_index == 0:
+            start_user_preset_rename(idx)
+            return
+        if state.submenu_index == 1:
+            move_user_preset_to_top(idx)
+            return
+        if state.submenu_index == 2:
+            state.submenu_key = "user_preset_delete"
+            state.submenu_index = 0
+            invalidate_full_display()
+            mark_dirty("Delete preset?")
+            return
+        state.submenu_key = "user_preset_load"
+        state.submenu_index = clamp_index(idx, len(state.user_preset_entries or load_user_presets()))
+        invalidate_full_display()
+        mark_dirty("Manage canceled")
+        return
+    if key == "user_preset_delete":
+        if state.submenu_index == 1:
+            delete_user_preset(state.user_preset_target_index)
+        else:
+            state.submenu_key = "user_preset_manage"
+            state.submenu_index = 0
+            invalidate_full_display()
+            mark_dirty("Delete canceled")
+        return
+    if key == "user_preset_rename":
+        save_user_preset_rename()
+        return
     if key == "user_preset_load":
         presets = load_user_presets()
         if not presets:
@@ -5247,6 +5884,7 @@ def apply_current_submenu_selection() -> None:
 def handle_main_select() -> None:
     label = MAIN_MENU[clamp_index(state.menu_index, len(MAIN_MENU))]
     if label == "Sound Source":
+        preload_sound_source_count_cache()
         enter_submenu("soundfont")
     elif label == "File Player":
         enter_file_browser()
@@ -5327,6 +5965,7 @@ def quick_resume_label() -> str:
             "user_preset_load": "User Preset",
             "user_preset_save": "Save User Preset",
             "user_preset_overwrite": "Overwrite Preset",
+            "user_preset_delete": "Delete Preset",
             "placeholder": "Extension",
             "controls": "Sound Edit",
         }
@@ -5538,6 +6177,22 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty("Confirm USB eject")
         return
 
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
+        if btn == "SEL_LP":
+            pulse_button_activity(); cancel_user_preset_rename(); return
+        if btn == "SEL":
+            pulse_button_activity(); save_user_preset_rename(); return
+        if btn == "LEFT":
+            pulse_button_activity(); move_rename_cursor(-1); return
+        if btn == "RIGHT":
+            pulse_button_activity(); move_rename_cursor(+1); return
+        if btn == "UP":
+            pulse_button_activity(); insert_rename_space(); return
+        if btn == "DOWN":
+            pulse_button_activity(); delete_rename_char(); return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
     if state.ui_mode == "sound_edit":
         # Sound Edit has its own input handler, so global long-press actions
         # that must remain available are handled first and explicitly.
@@ -5578,6 +6233,11 @@ def handle_button_event(btn_value: str) -> None:
     if btn == "SEL_LP":
         pulse_button_activity()
         enter_power_menu()
+        return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_load" and btn == "DOWN_LP":
+        pulse_button_activity()
+        enter_user_preset_manage_menu()
         return
 
     # Panic remains the only direct emergency long-press action.
@@ -5844,6 +6504,24 @@ def handle_button_event(btn_value: str) -> None:
             mark_dirty("Overwrite canceled")
             return
 
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_manage":
+        if btn == "LEFT":
+            pulse_button_activity()
+            state.submenu_key = "user_preset_load"
+            state.submenu_index = state.user_preset_target_index
+            invalidate_full_display()
+            mark_dirty("Manage canceled")
+            return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_delete":
+        if btn == "LEFT":
+            pulse_button_activity()
+            state.submenu_key = "user_preset_manage"
+            state.submenu_index = 0
+            invalidate_full_display()
+            mark_dirty("Delete canceled")
+            return
+
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_device":
         if btn == "LEFT":
             pulse_button_activity()
@@ -5889,12 +6567,14 @@ def handle_button_event(btn_value: str) -> None:
             if state.submenu_index > 0:
                 state.submenu_index -= 1
                 if state.submenu_index < len(SOUNDFONTS):
-                    total, drums = soundfont_preset_counts(state.submenu_index)
+                    total, drums = soundfont_preset_counts_cached(state.submenu_index)
                     sf_name = source_name_for_index(state.submenu_index)
                     mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
-                else:
-                    count = len(load_user_presets())
+                elif state.submenu_index == len(SOUNDFONTS):
+                    count = user_preset_count_cached()
                     mark_dirty(f"User Preset: {count} saved")
+                else:
+                    mark_dirty("Refresh current sound")
             else:
                 mark_dirty("First item")
             return
@@ -5903,12 +6583,14 @@ def handle_button_event(btn_value: str) -> None:
             if state.submenu_index < len(options) - 1:
                 state.submenu_index += 1
                 if state.submenu_index < len(SOUNDFONTS):
-                    total, drums = soundfont_preset_counts(state.submenu_index)
+                    total, drums = soundfont_preset_counts_cached(state.submenu_index)
                     sf_name = source_name_for_index(state.submenu_index)
                     mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
-                else:
-                    count = len(load_user_presets())
+                elif state.submenu_index == len(SOUNDFONTS):
+                    count = user_preset_count_cached()
                     mark_dirty(f"User Preset: {count} saved")
+                else:
+                    mark_dirty("Refresh current sound")
             else:
                 mark_dirty("Last item")
             return
@@ -5922,8 +6604,10 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "RIGHT":
             pulse_button_activity()
-            if state.submenu_index >= len(SOUNDFONTS):
+            if state.submenu_index == len(SOUNDFONTS):
                 enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
+            elif state.submenu_index == len(SOUNDFONTS) + 1:
+                refresh_current_sound()
             else:
                 enter_preset_submenu(state.submenu_index)
             return
@@ -6435,8 +7119,29 @@ def handle_encoder_value(value: str) -> None:
     if step == 0:
         return
 
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
+        rename_char_delta(1 if step > 0 else -1)
+        last_enc_time = now
+        return
+
     # In Sound Edit, do not apply the global 20 ms navigation debounce.
     # UNO-1 already sends accelerated ENC steps, so use the raw signed value.
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
+        if btn == "SEL_LP":
+            pulse_button_activity(); cancel_user_preset_rename(); return
+        if btn == "SEL":
+            pulse_button_activity(); save_user_preset_rename(); return
+        if btn == "LEFT":
+            pulse_button_activity(); move_rename_cursor(-1); return
+        if btn == "RIGHT":
+            pulse_button_activity(); move_rename_cursor(+1); return
+        if btn == "UP":
+            pulse_button_activity(); insert_rename_space(); return
+        if btn == "DOWN":
+            pulse_button_activity(); delete_rename_char(); return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
     if state.ui_mode == "sound_edit":
         adjust_sound_edit_value(step)
         last_enc_time = now
@@ -6560,6 +7265,7 @@ def main() -> None:
 
     periodic_system_status_poll()
     mark_dirty("Ready")
+    preload_sound_source_count_cache()
     maybe_render(force=True)
 
     th = threading.Thread(target=serial_reader, daemon=True)
