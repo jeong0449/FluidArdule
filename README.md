@@ -23,6 +23,9 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - Provide a hardware-oriented standalone instrument workflow with quick-access menus, MIDI panic, and persistent user presets
 
 > 🚧 Advanced performance features such as layering, combination patches, keyboard split, deeper preset editing, and performance memory management are planned for future development.
+>
+> See also: [`docs/combination-system-design.md`](docs/combination-system-design.md)
+> — a proposed workstation-style Combination architecture based on User Presets, layering, and keyboard split.
 
 ---
 
