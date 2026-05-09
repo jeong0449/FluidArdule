@@ -4,6 +4,36 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-09 (KST)]
+
+### Added
+- Added User Preset management features
+  - Rename
+  - Delete
+  - Move to Top
+- Added `Refresh Sound`
+- Added `▲/▼` overflow hints for list navigation
+- Added centered Loading modal
+
+### Changed
+- Expanded User Preset from a simple save/load feature into a richer preset workflow
+- Distinguished edited presets from bookmarked presets
+- Improved `Sound Source > User Preset` SELECT behavior
+  - SELECT now loads the first User Preset directly
+- Added Sound Source count caching and preload
+- Improved rename editor UI with monospaced rendering
+
+### Improved
+- Blocked sound source changes during file playback
+- Improved sound-state recovery behavior
+- Improved Sound Source rendering responsiveness
+
+### Internal
+- Added User Preset helper and cache logic
+- Cleaned up Sound Source rendering structure
+
+---
+
 ## [2026-05-08 (KST)]
 
 ### Added
