@@ -4,6 +4,40 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-24 (KST) ]
+
+### Added
+- Added A0 resistor-ladder keypad calibration mode.
+- Added encoder long-press entry for calibration mode.
+- Added EEPROM-based storage and loading of calibrated keypad center values.
+- Added LCD-guided step-by-step calibration workflow.
+- Added “Hold key”, “OK”, and “Release key” feedback during calibration.
+- Added LCD blink feedback while measuring keypad ADC values.
+- Added release detection before advancing to the next calibration step.
+- Added encoder long-press cancel during calibration.
+- Added encoder long-press save/exit after successful calibration.
+
+### Changed
+- Replaced fixed ADC threshold keypad detection with calibrated nearest-center matching.
+- Improved keypad ADC stability using filtered sampling.
+- Prevented calibration entry during active playback.
+- Added temporary LCD warning when calibration is attempted during playback.
+- Suppressed runtime BTN/ENC/POT events during calibration.
+- Kept serial link alive during calibration by continuing safe heartbeat/ready signaling.
+
+### Fixed
+- Reduced false keypad detection caused by ADC drift.
+- Prevented the same held button from being misread as the next calibration step.
+- Improved UNO-Pi relink behavior after UNO reset.
+- Reduced risk of Pi watchdog/link monitor reacting incorrectly during calibration.
+
+### Notes
+- Calibration should be performed while playback is stopped.
+- During each calibration step, keep the requested key pressed until the LCD shows OK / Release.
+- If calibration is canceled or fails, the previous EEPROM-stored values remain unchanged.
+
+---
+
 ## [2026-05-09 (KST)]
 
 ### Added
