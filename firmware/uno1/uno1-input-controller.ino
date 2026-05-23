@@ -1,8 +1,9 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260504d version
+// 20260523e version - keypad calibration + reset-link hardening + playback guard + safe cancel UI + hold/release feedback
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -28,7 +29,7 @@
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
 //   Line 2 rightmost 2 chars : current encoder acceleration profile (P1/P2/P3)
-//   Encoder long press : acceleration profile control
+//   Encoder long press : keypad calibration control
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -47,6 +48,8 @@ const uint8_t PIN_LED_MIDI = 11;
 const unsigned long DEBOUNCE_MS = 45;
 const unsigned long LONGPRESS_MS = 700;
 const unsigned long READY_REPEAT_MS = 3000;
+const unsigned long READY_REPEAT_UNLINKED_MS = 500;
+const unsigned long READY_REPEAT_CAL_MS = 1000;  // Keep Pi-side serial watchdog calm during local calibration
 const unsigned long LCD_REFRESH_MS = 120;
 const unsigned long POT_SEND_MS = 60;
 const unsigned long LINK_TIMEOUT_MS = 3000;
@@ -64,16 +67,38 @@ const unsigned long ACK_DEBUG_DELAY_MS = 300;
 const int           POT_DELTA_SEND = 4;    // Serial POT reporting threshold
 const int           POT_DELTA_LED  = 12;   // Larger threshold to avoid LED stuck-on from A2 noise
 
-// ---- A0 thresholds (5.00V reference assumed) ----
-const int TH_LEFT_MAX   = 120;
-const int TH_UP_MAX     = 270;
-const int TH_DOWN_MAX   = 440;
-const int TH_RIGHT_MAX  = 680;
-const int TH_SELECT_MAX = 930;
+// ---- A0 keypad calibration ----
+// The old fixed-threshold method was vulnerable to module/temperature/Vcc drift.
+// Runtime decoding now uses button center values loaded from EEPROM, with
+// nearest-match selection and automatic midpoint boundaries.
+const uint16_t KEYPAD_DEFAULT_CENTER[5] = {60, 195, 355, 560, 805};  // LEFT, UP, DOWN, RIGHT, SELECT
+uint16_t keypadCenter[5] = {60, 195, 355, 560, 805};
 
-// Light-weight A0 keypad filtering.
-// Four reads cost well under 1 ms on AVR and greatly reduce single-sample noise.
-const uint8_t KEYPAD_ADC_SAMPLES = 4;
+// Keypad filtering.
+// Odd sample count allows a true median, which rejects single-sample spikes better
+// than a simple average on a resistor-ladder keypad.
+const uint8_t KEYPAD_ADC_SAMPLES = 7;
+
+// EEPROM layout for keypad calibration.
+const uint16_t CAL_MAGIC = 0xFA10;
+const uint8_t  CAL_VERSION = 1;
+const int      CAL_EEPROM_ADDR = 0;
+
+struct KeypadCalData {
+  uint16_t magic;
+  uint8_t version;
+  uint8_t reserved;
+  uint16_t center[5];
+  uint16_t checksum;
+};
+
+// Calibration capture rules.
+const int CAL_PRESS_MAX_ADC = 970;       // Below this, treat A0 as "some key is held"
+const int CAL_RELEASE_MIN_ADC = 990;     // Above this, treat A0 as released/no-key
+const uint8_t CAL_CAPTURE_SAMPLES = 25;  // Median-like trimmed average sample count
+const unsigned long CAL_HOLD_STABILIZE_MS = 360;  // Keep key held this long before capture
+const unsigned long CAL_LCD_BLINK_MS = 120;       // LCD blink interval while measuring/holding
+const int CAL_MIN_GAP_ADC = 60;          // Reject calibration if neighboring centers are too close
 
 enum KeyCode {
   KEY_NONE = 0,
@@ -160,23 +185,125 @@ uint8_t accelProfile = 2;
 bool accelSettingMode = false;
 uint8_t accelDraft = 2;
 
+// ---- Keypad calibration mode ----
+bool keypadCalMode = false;
+uint8_t keypadCalStep = 0;
+uint16_t keypadCalDraft[5] = {0, 0, 0, 0, 0};
+bool keypadCalWaitingRelease = false;
+unsigned long calDenyUntilMs = 0;  // Temporary LCD notice when calibration is refused during playback
+
 // ---- Serial RX ----
 String rxLine;
 
 int readKeypadAdcFiltered() {
-  long sum = 0;
+  int v[KEYPAD_ADC_SAMPLES];
+
   for (uint8_t i = 0; i < KEYPAD_ADC_SAMPLES; i++) {
-    sum += analogRead(PIN_KEYPAD);
+    v[i] = analogRead(PIN_KEYPAD);
+    delayMicroseconds(250);
   }
-  return (int)((sum + (KEYPAD_ADC_SAMPLES / 2)) / KEYPAD_ADC_SAMPLES);
+
+  for (uint8_t i = 0; i < KEYPAD_ADC_SAMPLES - 1; i++) {
+    for (uint8_t j = i + 1; j < KEYPAD_ADC_SAMPLES; j++) {
+      if (v[j] < v[i]) {
+        int t = v[i];
+        v[i] = v[j];
+        v[j] = t;
+      }
+    }
+  }
+
+  return v[KEYPAD_ADC_SAMPLES / 2];
+}
+
+uint16_t keypadCalChecksum(const KeypadCalData &d) {
+  uint16_t s = d.magic + d.version + d.reserved;
+  for (uint8_t i = 0; i < 5; i++) s += d.center[i];
+  return s ^ 0x5A5A;
+}
+
+bool keypadCentersValid(const uint16_t c[5]) {
+  for (uint8_t i = 0; i < 5; i++) {
+    if (c[i] > 1023) return false;
+  }
+
+  for (uint8_t i = 1; i < 5; i++) {
+    if (c[i] <= c[i - 1]) return false;
+    if ((int)c[i] - (int)c[i - 1] < CAL_MIN_GAP_ADC) return false;
+  }
+
+  if (c[4] >= CAL_RELEASE_MIN_ADC) return false;
+  return true;
+}
+
+void useDefaultKeypadCalibration() {
+  for (uint8_t i = 0; i < 5; i++) keypadCenter[i] = KEYPAD_DEFAULT_CENTER[i];
+}
+
+void loadKeypadCalibration() {
+  KeypadCalData d;
+  EEPROM.get(CAL_EEPROM_ADDR, d);
+
+  if (d.magic == CAL_MAGIC &&
+      d.version == CAL_VERSION &&
+      d.checksum == keypadCalChecksum(d) &&
+      keypadCentersValid(d.center)) {
+    for (uint8_t i = 0; i < 5; i++) keypadCenter[i] = d.center[i];
+  } else {
+    useDefaultKeypadCalibration();
+  }
+}
+
+void saveKeypadCalibration(const uint16_t c[5]) {
+  KeypadCalData d;
+  d.magic = CAL_MAGIC;
+  d.version = CAL_VERSION;
+  d.reserved = 0;
+  for (uint8_t i = 0; i < 5; i++) d.center[i] = c[i];
+  d.checksum = keypadCalChecksum(d);
+  EEPROM.put(CAL_EEPROM_ADDR, d);
+}
+
+KeyCode keyFromIndex(uint8_t i) {
+  switch (i) {
+    case 0: return KEY_LEFT;
+    case 1: return KEY_UP;
+    case 2: return KEY_DOWN;
+    case 3: return KEY_RIGHT;
+    case 4: return KEY_SELECT;
+    default: return KEY_NONE;
+  }
 }
 
 KeyCode decodeKeyFromA0(int v) {
-  if (v <= TH_LEFT_MAX)   return KEY_LEFT;
-  if (v <= TH_UP_MAX)     return KEY_UP;
-  if (v <= TH_DOWN_MAX)   return KEY_DOWN;
-  if (v <= TH_RIGHT_MAX)  return KEY_RIGHT;
-  if (v <= TH_SELECT_MAX) return KEY_SELECT;
+  // Above the release/no-key threshold, always regard it as no key.
+  if (v >= CAL_RELEASE_MIN_ADC) return KEY_NONE;
+
+  int bestIdx = -1;
+  int bestDiff = 32767;
+
+  for (uint8_t i = 0; i < 5; i++) {
+    int d = abs(v - (int)keypadCenter[i]);
+    if (d < bestDiff) {
+      bestDiff = d;
+      bestIdx = i;
+    }
+  }
+
+  if (bestIdx < 0) return KEY_NONE;
+
+  // Auto-tolerance: half the gap to the closest neighboring center, with a
+  // small margin removed so boundary noise is not accepted too eagerly.
+  int leftGap = 1024;
+  int rightGap = 1024;
+  if (bestIdx > 0) leftGap = (int)keypadCenter[bestIdx] - (int)keypadCenter[bestIdx - 1];
+  if (bestIdx < 4) rightGap = (int)keypadCenter[bestIdx + 1] - (int)keypadCenter[bestIdx];
+
+  int tol = min(leftGap, rightGap) / 2 - 8;
+  if (tol < 25) tol = 25;
+  if (tol > 120) tol = 120;
+
+  if (bestDiff <= tol) return keyFromIndex((uint8_t)bestIdx);
   return KEY_NONE;
 }
 
@@ -189,17 +316,25 @@ void sendReady() {
   lastReadySentMs = millis();
 }
 
+bool canSendRuntimeEvents() {
+  // After an UNO reset, the Pi may still be reopening the serial port.
+  // Keep the line quiet except for UNO_READY until HELLO/HB/UI confirms link.
+  return piLinked && powerState == POWER_NORMAL;
+}
+
 void sendAccelProfile() {
   Serial.print(F("ACCEL:"));
   Serial.println(accelProfile);
 }
 
 void sendPotValue(int v) {
+  if (!canSendRuntimeEvents()) return;
   Serial.print(F("POT:"));
   Serial.println(v);
 }
 
 void sendEncStep(int step) {
+  if (!canSendRuntimeEvents()) return;
   Serial.print(F("ENC:"));
   if (step > 0) Serial.print('+');
   Serial.println(step);
@@ -354,6 +489,221 @@ void showAccelSetupScreen() {
   line2 += String(accelName(accelDraft));
   if (accelDraft == accelProfile) line2 += " *";
   setLocalDisplay(line1, line2);
+}
+
+
+void showKeypadCalPrompt() {
+  String line1 = "CAL ";
+  line1 += String(keyName(keyFromIndex(keypadCalStep)));
+  String line2 = "Hold key ";
+  line2 += String(keypadCalStep + 1);
+  line2 += "/5";
+  setLocalDisplay(line1, line2);
+}
+
+void showKeypadCalMeasuring() {
+  String line1 = "MEAS ";
+  line1 += String(keyName(keyFromIndex(keypadCalStep)));
+  setLocalDisplay(line1, "Keep holding");
+  drawStatus();
+}
+
+void showKeypadCalRelease(uint16_t raw) {
+  String line1 = String(keyName(keyFromIndex(keypadCalStep)));
+  line1 += "=";
+  line1 += String(raw);
+  setLocalDisplay(line1, "Release key");
+}
+
+bool canEnterKeypadCalibrationNow() {
+  // Calibration is intentionally a local maintenance mode, but entering it
+  // while a MIDI file is playing can confuse the Pi-side runtime/watchdog
+  // state machine. PLAY:ON or PLAY:BLINK means the Pi has told UNO-1 that
+  // playback is active, so refuse calibration until playback is stopped.
+  return powerState == POWER_NORMAL && playLedMode == PLAY_LED_OFF;
+}
+
+void denyKeypadCalibrationDuringPlayback() {
+  calDenyUntilMs = millis() + 800;
+  setLocalDisplay("STOP PLAYBACK", "No CAL playing");
+  setDebugTag("CAL-N ");
+  startButtonLedBlink(2);
+}
+
+void enterKeypadCalibrationMode() {
+  if (!canEnterKeypadCalibrationNow()) {
+    denyKeypadCalibrationDuringPlayback();
+    return;
+  }
+
+  keypadCalMode = true;
+  keypadCalStep = 0;
+  keypadCalWaitingRelease = false;
+  accelSettingMode = false;
+
+  stableKey = KEY_NONE;
+  lastSampledKey = KEY_NONE;
+  keyLongSent = false;
+  encSwLongSent = true;  // Consume the long press that entered calibration.
+
+  for (uint8_t i = 0; i < 5; i++) keypadCalDraft[i] = 0;
+
+  setDebugTag("CAL   ");
+  showKeypadCalPrompt();
+}
+
+bool waitHeldForCalibrationCapture() {
+  showKeypadCalMeasuring();
+  unsigned long startMs = millis();
+  unsigned long lastBlinkMsLocal = 0;
+  bool backlightOn = true;
+
+  while (millis() - startMs < CAL_HOLD_STABILIZE_MS) {
+    int raw = readKeypadAdcFiltered();
+    if (raw > CAL_PRESS_MAX_ADC) {
+      lcd.backlight();
+      setLocalDisplay("CAL RETRY", "Hold longer");
+      drawStatus();
+      delay(450);
+      showKeypadCalPrompt();
+      return false;
+    }
+
+    unsigned long now = millis();
+    if (now - lastBlinkMsLocal >= CAL_LCD_BLINK_MS) {
+      lastBlinkMsLocal = now;
+      backlightOn = !backlightOn;
+      if (backlightOn) lcd.backlight();
+      else lcd.noBacklight();
+    }
+    delay(10);
+  }
+
+  lcd.backlight();
+  drawStatus();
+  return true;
+}
+
+uint16_t captureKeypadRawValue() {
+  int v[CAL_CAPTURE_SAMPLES];
+  unsigned long lastBlinkMsLocal = millis();
+  bool backlightOn = true;
+
+  for (uint8_t i = 0; i < CAL_CAPTURE_SAMPLES; i++) {
+    v[i] = analogRead(PIN_KEYPAD);
+    unsigned long now = millis();
+    if (now - lastBlinkMsLocal >= CAL_LCD_BLINK_MS) {
+      lastBlinkMsLocal = now;
+      backlightOn = !backlightOn;
+      if (backlightOn) lcd.backlight();
+      else lcd.noBacklight();
+    }
+    delay(3);
+  }
+
+  lcd.backlight();
+
+  for (uint8_t i = 0; i < CAL_CAPTURE_SAMPLES - 1; i++) {
+    for (uint8_t j = i + 1; j < CAL_CAPTURE_SAMPLES; j++) {
+      if (v[j] < v[i]) {
+        int t = v[i];
+        v[i] = v[j];
+        v[j] = t;
+      }
+    }
+  }
+
+  // Trim two samples from each end and average the stable middle region.
+  long sum = 0;
+  uint8_t count = 0;
+  for (uint8_t i = 2; i < CAL_CAPTURE_SAMPLES - 2; i++) {
+    sum += v[i];
+    count++;
+  }
+
+  return (uint16_t)((sum + (count / 2)) / count);
+}
+
+void failKeypadCalibration(const String &reason) {
+  lcd.backlight();
+  keypadCalMode = false;
+  keypadCalWaitingRelease = false;
+  // Do not overwrite the existing active/EEPROM calibration on failure.
+  // A failed maintenance attempt should leave the previous working values intact.
+  setLocalDisplay("CAL FAILED", reason);
+  setDebugTag("CAL-F ");
+}
+
+void applyAndExitKeypadCalibrationMode() {
+  lcd.backlight();
+  if (!keypadCentersValid(keypadCalDraft)) {
+    failKeypadCalibration("Bad values");
+    return;
+  }
+
+  for (uint8_t i = 0; i < 5; i++) keypadCenter[i] = keypadCalDraft[i];
+  saveKeypadCalibration(keypadCenter);
+
+  keypadCalMode = false;
+  keypadCalWaitingRelease = false;
+  setLocalDisplay("CAL SAVED", "EEPROM OK");
+  setDebugTag("CAL-S ");
+}
+
+void updateKeypadCalibration() {
+  if (!keypadCalMode) return;
+
+  // If the Pi starts or resumes playback while calibration is open, leave the
+  // maintenance mode without saving. This keeps the runtime serial protocol
+  // deterministic during music playback.
+  if (playLedMode != PLAY_LED_OFF || powerState != POWER_NORMAL) {
+    keypadCalMode = false;
+    keypadCalWaitingRelease = false;
+    setLocalDisplay("CAL ABORTED", "Playback active");
+    setDebugTag("CAL-A ");
+    return;
+  }
+
+  int raw = readKeypadAdcFiltered();
+
+  if (keypadCalWaitingRelease) {
+    if (raw >= CAL_RELEASE_MIN_ADC) {
+      keypadCalWaitingRelease = false;
+      keypadCalStep++;
+
+      if (keypadCalStep >= 5) {
+        if (keypadCentersValid(keypadCalDraft)) {
+          setLocalDisplay("CAL DONE", "Long=save");
+          setDebugTag("CALOK ");
+        } else {
+          failKeypadCalibration("Check order");
+        }
+      } else {
+        showKeypadCalPrompt();
+      }
+    }
+    return;
+  }
+
+  // All five keys have been captured. Wait for encoder long press to save.
+  if (keypadCalStep >= 5) return;
+
+  if (raw <= CAL_PRESS_MAX_ADC) {
+    delay(DEBOUNCE_MS);
+    raw = readKeypadAdcFiltered();
+    if (raw <= CAL_PRESS_MAX_ADC) {
+      if (!waitHeldForCalibrationCapture()) {
+        return;
+      }
+      uint16_t captured = captureKeypadRawValue();
+      keypadCalDraft[keypadCalStep] = captured;
+      lcd.backlight();
+      showKeypadCalRelease(captured);  // Solid LCD: measurement for this key is OK.
+      drawStatus();
+      keypadCalWaitingRelease = true;
+      startButtonLedBlink(1);
+    }
+  }
 }
 
 void drawStatus() {
@@ -616,6 +966,7 @@ void cycleAccelProfileByEncoderLongPress() {
 }
 
 void sendButtonMessage(KeyCode k, bool isLongPress) {
+  if (!canSendRuntimeEvents()) return;
   switch (k) {
     case KEY_LEFT:   sendLine(isLongPress ? "BTN:LEFT_LP"  : "BTN:LEFT"); break;
     case KEY_UP:     sendLine(isLongPress ? "BTN:UP_LP"    : "BTN:UP"); break;
@@ -629,6 +980,8 @@ void sendButtonMessage(KeyCode k, bool isLongPress) {
 }
 
 void updateKeypad() {
+  if (keypadCalMode) return;
+
   int raw = readKeypadAdcFiltered();
   KeyCode sampled = decodeKeyFromA0(raw);
   unsigned long now = millis();
@@ -734,7 +1087,9 @@ void updateEncoder() {
 
         holdInputLed();
 
-        if (accelSettingMode) {
+        if (keypadCalMode) {
+          // Ignore encoder rotation during keypad calibration.
+        } else if (accelSettingMode) {
           setAccelDraftDelta(direction);
         } else {
           unsigned long dt = (lastEncStepMs == 0) ? 9999UL : (now - lastEncStepMs);
@@ -774,12 +1129,14 @@ void updateEncoder() {
       // Released. If no long press was already handled, emit the normal short
       // encoder-push button event.
       if (encSwPressedMs != 0 && !encSwLongSent) {
-        if (accelSettingMode) {
+        if (keypadCalMode) {
+          // Encoder short press is deliberately ignored in calibration mode.
+        } else if (accelSettingMode) {
           applyAndExitAccelSettingMode();
           startButtonLedBlink(1);
           setDebugTag("E-SP  ");
         } else {
-          sendLine("BTN:ENC_PUSH");
+          if (canSendRuntimeEvents()) sendLine("BTN:ENC_PUSH");
           startButtonLedBlink(1);
           setEventLine1("BTN:ENCPSH");
           setCurrentStatusLine2();
@@ -793,12 +1150,26 @@ void updateEncoder() {
 
   if (encSwStable == LOW && !encSwLongSent && encSwPressedMs != 0 && (now - encSwPressedMs) >= LONGPRESS_MS) {
     startButtonLedBlink(2);
-    cycleAccelProfileByEncoderLongPress();
+    if (keypadCalMode) {
+      if (keypadCalStep >= 5) {
+        applyAndExitKeypadCalibrationMode();
+      } else {
+        lcd.backlight();
+        keypadCalMode = false;
+        keypadCalWaitingRelease = false;
+        setLocalDisplay("CAL CANCEL", "Not saved");
+        setDebugTag("CAL-C ");
+      }
+    } else {
+      enterKeypadCalibrationMode();
+    }
     encSwLongSent = true;
   }
 }
 
 void updatePot() {
+  if (keypadCalMode) return;
+
   unsigned long now = millis();
   int raw = analogRead(PIN_POT);
 
@@ -975,6 +1346,7 @@ void setup() {
 
   Serial.begin(115200);
   analogReference(DEFAULT);
+  loadKeypadCalibration();
 
   lcd.init();
   lcd.backlight();
@@ -982,14 +1354,19 @@ void setup() {
   setLocalDisplay("FluidArdul", "WAIT HELLO/HB");
   drawStatus();
 
-  delay(80);
-  sendReady();
-  sendAccelProfile();
+  // Give the Pi several chances to catch UNO_READY while its serial
+  // reconnect handler is still settling after an UNO reset. Runtime messages
+  // such as ACCEL/POT are deliberately not sent here; ACCEL is sent after HELLO.
+  for (uint8_t i = 0; i < 3; i++) {
+    delay(120);
+    sendReady();
+  }
 }
 
 void loop() {
   updateSerialRx();
   updatePlayLed();
+  updateKeypadCalibration();
   updateKeypad();
   updateEncoder();
   updatePot();
@@ -998,11 +1375,25 @@ void loop() {
 
   unsigned long now = millis();
 
-  if ((now - lastReadySentMs) >= READY_REPEAT_MS) {
+  unsigned long readyInterval;
+  if (keypadCalMode) {
+    // Calibration deliberately suppresses runtime BTN/ENC/POT events, but the
+    // serial link should not look dead to the Pi-side monitor.
+    readyInterval = READY_REPEAT_CAL_MS;
+  } else {
+    readyInterval = piLinked ? READY_REPEAT_MS : READY_REPEAT_UNLINKED_MS;
+  }
+  if ((now - lastReadySentMs) >= readyInterval) {
     sendReady();
   }
 
   updatePendingAckDebugTag();
+
+  if (calDenyUntilMs != 0 && now >= calDenyUntilMs && !keypadCalMode && powerState == POWER_NORMAL) {
+    calDenyUntilMs = 0;
+    setEventLine1("RUN MODE");
+    setCurrentStatusLine2();
+  }
 
   if ((now - lastLcdRefreshMs) >= LCD_REFRESH_MS) {
     drawStatus();
