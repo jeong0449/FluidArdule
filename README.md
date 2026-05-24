@@ -13,6 +13,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - Browse and load SoundFont presets by category
 - Save and recall user-defined presets across different sound engines
 - Control synthesis and playback parameters via dedicated hardware UI (UNO-1)
+- Self-calibrating 5-button analog keypad with EEPROM-persisted ADC center values
 - Accept MIDI input from USB or DIN (DIN I/O via UNO-2 MIDI bridge)
 - Play MIDI files using FluidSynth
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
