@@ -4,6 +4,16 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-24b (KST) ]
+
+### Hotfix
+- Improved keypad calibration stability.
+- Fixed an issue where calibration could
+  accidentally skip to the next button step
+  due to ADC release noise.
+  
+---
+
 ## [2026-05-24 (KST) ]
 
 ### Added
