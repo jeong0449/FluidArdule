@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260523e version - keypad calibration + reset-link hardening + playback guard + safe cancel UI + hold/release feedback
+// 20260524 combo-cal version - encoder accel restore + ENC+SELECT calibration + release/edge-safe capture
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -29,7 +29,10 @@
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
 //   Line 2 rightmost 2 chars : current encoder acceleration profile (P1/P2/P3)
-//   Encoder long press : keypad calibration control
+//   Encoder long press : acceleration profile cycle
+//   SELECT long press : Pi-side power menu, unchanged
+//   Encoder + SELECT simultaneous long press : keypad calibration entry
+//   Keypad calibration saves automatically after LEFT/UP/DOWN/RIGHT/SELECT capture
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -47,6 +50,7 @@ const uint8_t PIN_LED_MIDI = 11;
 // ---- Timing ----
 const unsigned long DEBOUNCE_MS = 45;
 const unsigned long LONGPRESS_MS = 700;
+const unsigned long CAL_COMBO_HOLD_MS = 900;  // Encoder switch + SELECT hold to enter keypad calibration
 const unsigned long READY_REPEAT_MS = 3000;
 const unsigned long READY_REPEAT_UNLINKED_MS = 500;
 const unsigned long READY_REPEAT_CAL_MS = 1000;  // Keep Pi-side serial watchdog calm during local calibration
@@ -97,6 +101,7 @@ const int CAL_PRESS_MAX_ADC = 970;       // Below this, treat A0 as "some key is
 const int CAL_RELEASE_MIN_ADC = 990;     // Above this, treat A0 as released/no-key
 const uint8_t CAL_CAPTURE_SAMPLES = 25;  // Median-like trimmed average sample count
 const unsigned long CAL_HOLD_STABILIZE_MS = 360;  // Keep key held this long before capture
+const unsigned long CAL_RELEASE_STABLE_MS = 220;  // Require all keys released this long before accepting next press
 const unsigned long CAL_LCD_BLINK_MS = 120;       // LCD blink interval while measuring/holding
 const int CAL_MIN_GAP_ADC = 60;          // Reject calibration if neighboring centers are too close
 
@@ -188,8 +193,13 @@ uint8_t accelDraft = 2;
 // ---- Keypad calibration mode ----
 bool keypadCalMode = false;
 uint8_t keypadCalStep = 0;
+unsigned long calComboStartMs = 0;
+bool calComboConsumed = false;
+bool selectEncOverlap = false;
 uint16_t keypadCalDraft[5] = {0, 0, 0, 0, 0};
 bool keypadCalWaitingRelease = false;
+bool keypadCalNeedInitialRelease = false;
+unsigned long keypadCalReleaseStableSinceMs = 0;
 unsigned long calDenyUntilMs = 0;  // Temporary LCD notice when calibration is refused during playback
 
 // ---- Serial RX ----
@@ -501,6 +511,10 @@ void showKeypadCalPrompt() {
   setLocalDisplay(line1, line2);
 }
 
+void showKeypadCalReleaseAll() {
+  setLocalDisplay("RELEASE ALL", "Then follow LCD");
+}
+
 void showKeypadCalMeasuring() {
   String line1 = "MEAS ";
   line1 += String(keyName(keyFromIndex(keypadCalStep)));
@@ -539,6 +553,8 @@ void enterKeypadCalibrationMode() {
   keypadCalMode = true;
   keypadCalStep = 0;
   keypadCalWaitingRelease = false;
+  keypadCalNeedInitialRelease = true;
+  keypadCalReleaseStableSinceMs = 0;
   accelSettingMode = false;
 
   stableKey = KEY_NONE;
@@ -549,10 +565,10 @@ void enterKeypadCalibrationMode() {
   for (uint8_t i = 0; i < 5; i++) keypadCalDraft[i] = 0;
 
   setDebugTag("CAL   ");
-  showKeypadCalPrompt();
+  showKeypadCalReleaseAll();
 }
 
-bool waitHeldForCalibrationCapture() {
+bool waitHeldForCalibrationCapture(KeyCode expectedKey) {
   showKeypadCalMeasuring();
   unsigned long startMs = millis();
   unsigned long lastBlinkMsLocal = 0;
@@ -560,9 +576,10 @@ bool waitHeldForCalibrationCapture() {
 
   while (millis() - startMs < CAL_HOLD_STABILIZE_MS) {
     int raw = readKeypadAdcFiltered();
-    if (raw > CAL_PRESS_MAX_ADC) {
+    KeyCode currentKey = decodeKeyFromA0(raw);
+    if (raw > CAL_PRESS_MAX_ADC || currentKey != expectedKey) {
       lcd.backlight();
-      setLocalDisplay("CAL RETRY", "Hold longer");
+      setLocalDisplay("CAL RETRY", "Hold exact key");
       drawStatus();
       delay(450);
       showKeypadCalPrompt();
@@ -628,6 +645,8 @@ void failKeypadCalibration(const String &reason) {
   lcd.backlight();
   keypadCalMode = false;
   keypadCalWaitingRelease = false;
+  keypadCalNeedInitialRelease = false;
+  keypadCalReleaseStableSinceMs = 0;
   // Do not overwrite the existing active/EEPROM calibration on failure.
   // A failed maintenance attempt should leave the previous working values intact.
   setLocalDisplay("CAL FAILED", reason);
@@ -646,6 +665,8 @@ void applyAndExitKeypadCalibrationMode() {
 
   keypadCalMode = false;
   keypadCalWaitingRelease = false;
+  keypadCalNeedInitialRelease = false;
+  keypadCalReleaseStableSinceMs = 0;
   setLocalDisplay("CAL SAVED", "EEPROM OK");
   setDebugTag("CAL-S ");
 }
@@ -659,40 +680,81 @@ void updateKeypadCalibration() {
   if (playLedMode != PLAY_LED_OFF || powerState != POWER_NORMAL) {
     keypadCalMode = false;
     keypadCalWaitingRelease = false;
+    keypadCalNeedInitialRelease = false;
+    keypadCalReleaseStableSinceMs = 0;
     setLocalDisplay("CAL ABORTED", "Playback active");
     setDebugTag("CAL-A ");
     return;
   }
 
   int raw = readKeypadAdcFiltered();
+  unsigned long now = millis();
 
-  if (keypadCalWaitingRelease) {
+  // Critical guard after ENC+SELECT entry:
+  // Do not accept the SELECT-release glitch, ADC bounce, or any leftover key
+  // state as the first LEFT calibration sample. Calibration starts only after
+  // A0 has been in the no-key region continuously for CAL_RELEASE_STABLE_MS.
+  if (keypadCalNeedInitialRelease) {
     if (raw >= CAL_RELEASE_MIN_ADC) {
-      keypadCalWaitingRelease = false;
-      keypadCalStep++;
-
-      if (keypadCalStep >= 5) {
-        if (keypadCentersValid(keypadCalDraft)) {
-          setLocalDisplay("CAL DONE", "Long=save");
-          setDebugTag("CALOK ");
-        } else {
-          failKeypadCalibration("Check order");
-        }
-      } else {
+      if (keypadCalReleaseStableSinceMs == 0) keypadCalReleaseStableSinceMs = now;
+      if ((now - keypadCalReleaseStableSinceMs) >= CAL_RELEASE_STABLE_MS) {
+        keypadCalNeedInitialRelease = false;
+        keypadCalReleaseStableSinceMs = 0;
         showKeypadCalPrompt();
       }
+    } else {
+      keypadCalReleaseStableSinceMs = 0;
+      showKeypadCalReleaseAll();
     }
     return;
   }
 
-  // All five keys have been captured. Wait for encoder long press to save.
+  // After each successful key capture, require a real release before moving to
+  // the next key. This prevents one long hold or release bounce from advancing
+  // multiple calibration steps.
+  if (keypadCalWaitingRelease) {
+    if (raw >= CAL_RELEASE_MIN_ADC) {
+      if (keypadCalReleaseStableSinceMs == 0) keypadCalReleaseStableSinceMs = now;
+      if ((now - keypadCalReleaseStableSinceMs) >= CAL_RELEASE_STABLE_MS) {
+        keypadCalWaitingRelease = false;
+        keypadCalReleaseStableSinceMs = 0;
+        keypadCalStep++;
+
+        if (keypadCalStep >= 5) {
+          // The entry gesture is already deliberate, so avoid another fragile
+          // SAVE/DISCARD button step. Save automatically after validation.
+          if (keypadCentersValid(keypadCalDraft)) {
+            setLocalDisplay("VERIFYING...", "Please wait");
+            drawStatus();
+            delay(350);
+            applyAndExitKeypadCalibrationMode();
+          } else {
+            failKeypadCalibration("Check order");
+          }
+        } else {
+          showKeypadCalPrompt();
+        }
+      }
+    } else {
+      keypadCalReleaseStableSinceMs = 0;
+    }
+    return;
+  }
+
   if (keypadCalStep >= 5) return;
 
-  if (raw <= CAL_PRESS_MAX_ADC) {
+  KeyCode expectedKey = keyFromIndex(keypadCalStep);
+  KeyCode sampledKey = decodeKeyFromA0(raw);
+
+  // Edge-safe capture: only the key currently requested by the LCD is accepted.
+  // A random ADC value in a different key band is ignored, not captured.
+  if (sampledKey == expectedKey && raw <= CAL_PRESS_MAX_ADC) {
     delay(DEBOUNCE_MS);
     raw = readKeypadAdcFiltered();
-    if (raw <= CAL_PRESS_MAX_ADC) {
-      if (!waitHeldForCalibrationCapture()) {
+    sampledKey = decodeKeyFromA0(raw);
+
+    if (sampledKey == expectedKey && raw <= CAL_PRESS_MAX_ADC) {
+      if (!waitHeldForCalibrationCapture(expectedKey)) {
         return;
       }
       uint16_t captured = captureKeypadRawValue();
@@ -701,11 +763,11 @@ void updateKeypadCalibration() {
       showKeypadCalRelease(captured);  // Solid LCD: measurement for this key is OK.
       drawStatus();
       keypadCalWaitingRelease = true;
+      keypadCalReleaseStableSinceMs = 0;
       startButtonLedBlink(1);
     }
   }
 }
-
 void drawStatus() {
   updateDebugTagTimeout();
 
@@ -965,6 +1027,50 @@ void cycleAccelProfileByEncoderLongPress() {
   setDebugTag("E-LP  ");
 }
 
+
+bool encoderSelectComboHeld() {
+  return encSwStable == LOW && stableKey == KEY_SELECT;
+}
+
+void resetEncoderSelectComboState() {
+  calComboStartMs = 0;
+  calComboConsumed = false;
+  selectEncOverlap = false;
+}
+
+void updateKeypadCalibrationEntryCombo() {
+  if (keypadCalMode || accelSettingMode || powerState != POWER_NORMAL) {
+    resetEncoderSelectComboState();
+    return;
+  }
+
+  if (encoderSelectComboHeld()) {
+    selectEncOverlap = true;
+    if (calComboStartMs == 0) calComboStartMs = millis();
+
+    if (!calComboConsumed && (millis() - calComboStartMs) >= CAL_COMBO_HOLD_MS) {
+      calComboConsumed = true;
+
+      // Consume both physical inputs. Do not leak SELECT/ENC long or short
+      // messages to the Pi when this maintenance combo is used.
+      keyLongSent = true;
+      encSwLongSent = true;
+
+      enterKeypadCalibrationMode();
+    }
+    return;
+  }
+
+  // If either side of the combo is released before the hold time, leave the
+  // overlap flag in place until SELECT release so updateKeypad() can suppress
+  // a stray BTN:SEL short event from a failed calibration-entry attempt.
+  if (encSwStable != LOW && stableKey != KEY_SELECT) {
+    resetEncoderSelectComboState();
+  } else {
+    calComboStartMs = 0;
+  }
+}
+
 void sendButtonMessage(KeyCode k, bool isLongPress) {
   if (!canSendRuntimeEvents()) return;
   switch (k) {
@@ -996,7 +1102,11 @@ void updateKeypad() {
   if (sampled == stableKey) {
     if (stableKey != KEY_NONE && !keyLongSent && (now - keyPressedMs) >= LONGPRESS_MS) {
       if (!accelSettingMode) {
-        sendButtonMessage(stableKey, true);
+        // SELECT is part of the local maintenance combo with the encoder
+        // switch. While the encoder is held, do not send BTN:SEL_LP to Pi.
+        if (!(stableKey == KEY_SELECT && encSwStable == LOW)) {
+          sendButtonMessage(stableKey, true);
+        }
       }
       keyLongSent = true;
     }
@@ -1018,7 +1128,12 @@ void updateKeypad() {
           default: break;
         }
       } else {
-        sendButtonMessage(prevStable, false);
+        // If SELECT overlapped with the encoder switch, it was an attempted
+        // local maintenance combo. Suppress the short SELECT message too;
+        // otherwise the Pi-side UI may receive an unintended SELECT.
+        if (!(prevStable == KEY_SELECT && selectEncOverlap)) {
+          sendButtonMessage(prevStable, false);
+        }
       }
     }
     keyPressedMs = 0;
@@ -1136,11 +1251,15 @@ void updateEncoder() {
           startButtonLedBlink(1);
           setDebugTag("E-SP  ");
         } else {
-          if (canSendRuntimeEvents()) sendLine("BTN:ENC_PUSH");
-          startButtonLedBlink(1);
-          setEventLine1("BTN:ENCPSH");
-          setCurrentStatusLine2();
-          setDebugTag("E-SP  ");
+          // If this encoder press overlapped SELECT, treat it as a local
+          // calibration-entry attempt and do not leak ENC_PUSH to the Pi.
+          if (!selectEncOverlap) {
+            if (canSendRuntimeEvents()) sendLine("BTN:ENC_PUSH");
+            startButtonLedBlink(1);
+            setEventLine1("BTN:ENCPSH");
+            setCurrentStatusLine2();
+            setDebugTag("E-SP  ");
+          }
         }
       }
       encSwPressedMs = 0;
@@ -1149,6 +1268,12 @@ void updateEncoder() {
   }
 
   if (encSwStable == LOW && !encSwLongSent && encSwPressedMs != 0 && (now - encSwPressedMs) >= LONGPRESS_MS) {
+    // Encoder + SELECT is handled by updateKeypadCalibrationEntryCombo().
+    // Do not treat it as the normal encoder long press.
+    if (!keypadCalMode && stableKey == KEY_SELECT) {
+      return;
+    }
+
     startButtonLedBlink(2);
     if (keypadCalMode) {
       if (keypadCalStep >= 5) {
@@ -1157,11 +1282,13 @@ void updateEncoder() {
         lcd.backlight();
         keypadCalMode = false;
         keypadCalWaitingRelease = false;
+        keypadCalNeedInitialRelease = false;
+        keypadCalReleaseStableSinceMs = 0;
         setLocalDisplay("CAL CANCEL", "Not saved");
         setDebugTag("CAL-C ");
       }
     } else {
-      enterKeypadCalibrationMode();
+      cycleAccelProfileByEncoderLongPress();
     }
     encSwLongSent = true;
   }
@@ -1368,6 +1495,7 @@ void loop() {
   updatePlayLed();
   updateKeypadCalibration();
   updateKeypad();
+  updateKeypadCalibrationEntryCombo();
   updateEncoder();
   updatePot();
   updateLinkLed();
