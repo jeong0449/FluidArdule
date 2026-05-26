@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260509m-user-preset-move-top"
+SCRIPT_VERSION = "v20260526b-radio-favorites-rightfix"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -235,7 +235,7 @@ MONO_FONT_CANDIDATES = [
 
 MAIN_MENU = [
     "Sound Source",
-    "File Player",
+    "Media Player",
     "Controls",
     "MIDI Mode",
     "DAC",
@@ -277,6 +277,24 @@ USB_EJECT_CMD = ["sudo", "-n", "/bin/umount", USB_MOUNT_POINT]
 USB_LABEL = "USB"
 
 USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
+
+RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
+RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
+
+DEFAULT_RADIO_STATIONS = [
+    {"id": "somafm_groovesalad", "name": "SomaFM Groove Salad", "url": "https://ice2.somafm.com/groovesalad-128-mp3"},
+    {"id": "somafm_dronezone", "name": "SomaFM Drone Zone", "url": "https://ice2.somafm.com/dronezone-128-mp3"},
+    {"id": "somafm_defcon", "name": "SomaFM DEF CON", "url": "https://ice2.somafm.com/defcon-128-mp3"},
+    {"id": "jazz24", "name": "Jazz24", "url": "https://live.wostreaming.net/direct/ppm-jazz24mp3-ibc1"},
+    {"id": "somafm_secretagent", "name": "SomaFM Secret Agent", "url": "https://ice2.somafm.com/secretagent-128-mp3"},
+    {"id": "somafm_lush", "name": "SomaFM Lush", "url": "https://ice2.somafm.com/lush-128-mp3"},
+    {"id": "somafm_u80s", "name": "SomaFM Underground 80s", "url": "https://ice2.somafm.com/u80s-128-mp3"},
+    {"id": "somafm_beatblender", "name": "SomaFM Beat Blender", "url": "https://ice2.somafm.com/beatblender-128-mp3"},
+    {"id": "somafm_illstreet", "name": "SomaFM Illinois Street Lounge", "url": "https://ice2.somafm.com/illstreet-128-mp3"},
+    {"id": "somafm_cliqhop", "name": "SomaFM Cliqhop", "url": "https://ice2.somafm.com/cliqhop-128-mp3"},
+    {"id": "somafm_folkfwd", "name": "SomaFM Folk Forward", "url": "https://ice2.somafm.com/folkfwd-128-mp3"},
+    {"id": "somafm_metal", "name": "SomaFM Metal Detector", "url": "https://ice2.somafm.com/metal-128-mp3"},
+]
 USER_PRESET_RENAME_CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.,()"
 USER_PRESET_RENAME_MAX_LEN = 32
 
@@ -420,6 +438,10 @@ class RuntimeState:
     browser_path: str = FILE_MEDIA_ROOT
     browser_entries: list[dict] = field(default_factory=list)
     browser_index: int = 0
+    radio_entries: list[dict] = field(default_factory=list)
+    radio_index: int = 0
+    radio_view_mode: str = "all"   # all / favorites
+
 
     player_proc_kind: str | None = None   # engine / media
     player_path: str | None = None
@@ -470,6 +492,8 @@ class RuntimeState:
     player_stop_requested: bool = False
     player_auto_next: bool = True
     player_origin_dir: str | None = None
+    player_return_mode: str | None = None  # file_browser / radio_browser
+    player_radio_station_id: str | None = None
 
     pending_resume_after_sf_apply: bool = False
 
@@ -704,6 +728,7 @@ def get_file_source_entries() -> list[dict]:
     entries = [{"type": "source", "name": "local", "display": "Local files"}]
     if state.usb_mounted:
         entries.append({"type": "source", "name": "usb", "display": "USB drive"})
+    entries.append({"type": "source", "name": "radio", "display": "Internet radio"})
     return entries
 
 
@@ -721,12 +746,239 @@ def file_source_select() -> None:
         mark_dirty("No source")
         return
     item = entries[clamp_index(state.browser_index, len(entries))]
+    if item["name"] == "radio":
+        enter_radio_browser()
+        return
     state.browser_path = USB_MOUNT_POINT if item["name"] == "usb" else resolve_file_root()
     refresh_browser_entries()
     state.browser_index = 0
     state.ui_mode = "file_browser"
     invalidate_full_display()
     mark_dirty(item["display"])
+
+
+def ensure_radio_files_on_demand() -> None:
+    """Create radio JSON files only when the Radio screen is used.
+
+    This keeps startup/main-loop/UNO timing identical to the stable script.
+    """
+    sf2_dir = Path("/home/pi/sf2")
+    sf2_dir.mkdir(parents=True, exist_ok=True)
+    stations_path = Path(RADIO_STATIONS_PATH)
+    favorites_path = Path(RADIO_FAVORITES_PATH)
+    if not stations_path.exists():
+        stations_path.write_text(json.dumps(DEFAULT_RADIO_STATIONS, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if not favorites_path.exists():
+        favorites_path.write_text("[]\n", encoding="utf-8")
+
+
+def load_radio_stations() -> list[dict]:
+    ensure_radio_files_on_demand()
+    try:
+        data = json.loads(Path(RADIO_STATIONS_PATH).read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            data = []
+    except Exception as exc:
+        log(f"radio_stations.json load failed: {exc}")
+        data = []
+
+    by_id: dict[str, dict] = {}
+    for item in data + DEFAULT_RADIO_STATIONS:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or item.get("name") or "").strip()
+        name = str(item.get("name") or sid).strip()
+        url = str(item.get("url") or "").strip()
+        if not sid or not name or not url:
+            continue
+        if sid not in by_id:
+            by_id[sid] = {"id": sid, "name": name, "url": url}
+    return list(by_id.values())
+
+
+def load_radio_favorites() -> set[str]:
+    ensure_radio_files_on_demand()
+    try:
+        data = json.loads(Path(RADIO_FAVORITES_PATH).read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return {str(x).strip() for x in data if str(x).strip()}
+    except Exception as exc:
+        log(f"radio_favorites.json load failed: {exc}")
+    return set()
+
+
+def save_radio_favorites(favorites: set[str]) -> None:
+    ensure_radio_files_on_demand()
+    Path(RADIO_FAVORITES_PATH).write_text(json.dumps(sorted(favorites), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def load_radio_entries_for_view(view_mode: str) -> list[dict]:
+    stations = load_radio_stations()
+    if view_mode == "favorites":
+        favorites = load_radio_favorites()
+        return [s for s in stations if str(s.get("id", "")).strip() in favorites]
+    return stations
+
+
+def enter_radio_browser(view_mode: str = "all", *, keep_index: bool = False) -> None:
+    if view_mode not in {"all", "favorites"}:
+        view_mode = "all"
+    old_index = state.radio_index
+    state.radio_view_mode = view_mode
+    state.radio_entries = load_radio_entries_for_view(view_mode)
+    state.radio_index = clamp_index(old_index if keep_index else 0, len(state.radio_entries))
+    state.ui_mode = "radio_browser"
+    invalidate_full_display()
+    if view_mode == "favorites":
+        mark_dirty(f"Radio favorites: {len(state.radio_entries)}")
+    else:
+        mark_dirty(f"Radio: {len(state.radio_entries)} stations")
+
+
+def current_radio_station() -> dict | None:
+    if radio_index_is_favorites_entry():
+        return None
+    if not state.radio_entries:
+        return None
+    return state.radio_entries[clamp_index(radio_station_index(), len(state.radio_entries))]
+
+
+def radio_display_labels() -> list[str]:
+    favorites = load_radio_favorites()
+    labels = []
+    if state.radio_view_mode == "all":
+        labels.append("★ Favorites")
+    for station in state.radio_entries:
+        star = "★ " if str(station.get("id", "")) in favorites else "  "
+        labels.append(star + str(station.get("name", "Radio")))
+    return labels
+
+
+def radio_index_is_favorites_entry() -> bool:
+    return state.radio_view_mode == "all" and state.radio_index == 0
+
+
+def radio_station_index() -> int:
+    return state.radio_index - 1 if state.radio_view_mode == "all" else state.radio_index
+
+
+def find_radio_station_by_id(station_id: str | None) -> dict | None:
+    sid = str(station_id or "").strip()
+    if not sid:
+        return None
+    for station in load_radio_stations():
+        if str(station.get("id", "")).strip() == sid:
+            return station
+    return None
+
+
+def toggle_current_radio_favorite() -> None:
+    station = current_radio_station()
+    if not station:
+        mark_dirty("No station")
+        return
+    sid = str(station.get("id", "")).strip()
+    if not sid:
+        mark_dirty("No station id")
+        return
+    favorites = load_radio_favorites()
+    if sid in favorites:
+        favorites.remove(sid)
+        msg = "Favorite removed"
+    else:
+        favorites.add(sid)
+        msg = "Favorite added"
+    save_radio_favorites(favorites)
+    if state.radio_view_mode == "favorites":
+        old_index = state.radio_index
+        state.radio_entries = load_radio_entries_for_view("favorites")
+        state.radio_index = clamp_index(old_index, len(state.radio_entries))
+    invalidate_full_display()
+    mark_dirty(msg)
+
+def toggle_radio_favorite_by_id(station_id: str | None, station_name: str | None = None) -> None:
+    """Toggle favorite for the currently playing radio station.
+
+    Player mode does not necessarily have a valid radio_browser selection, so
+    do not rely on current_radio_station() here.
+    """
+    sid = str(station_id or "").strip()
+    if not sid:
+        mark_dirty("No station id")
+        return
+    favorites = load_radio_favorites()
+    if sid in favorites:
+        favorites.remove(sid)
+        msg = "Favorite removed"
+    else:
+        favorites.add(sid)
+        msg = "Favorite added"
+    save_radio_favorites(favorites)
+    # Keep the favorites view coherent if the user returns there immediately.
+    if state.radio_view_mode == "favorites":
+        old_index = state.radio_index
+        state.radio_entries = load_radio_entries_for_view("favorites")
+        state.radio_index = clamp_index(old_index, len(state.radio_entries))
+    invalidate_full_display()
+    mark_dirty(msg)
+
+
+def start_radio_station(station: dict) -> None:
+    url = str(station.get("url", "")).strip()
+    name = str(station.get("name", "Radio")).strip() or "Radio"
+    if not url:
+        mark_dirty("No radio URL")
+        return
+
+    send_ui_status("BUSY", force=True)
+    global player_proc
+    stop_player_only()
+    stop_fluidsynth()
+
+    audio = state.audio_device
+    mpv_audio = "alsa/default" if audio == "default" else f"alsa/{audio}"
+    cmd = [
+        "mpv",
+        "--no-video",
+        "--really-quiet",
+        "--no-terminal",
+        "--idle=no",
+        f"--audio-device={mpv_audio}",
+        url,
+    ]
+
+    show_modal_message("Connecting radio...", shorten_text(name, 24))
+    log(f"RADIO cmd={' '.join(cmd)}")
+    log_handle = open_player_log()
+    try:
+        player_proc = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle, preexec_fn=os.setsid, text=True)
+    except FileNotFoundError:
+        restart_engine(state.sf_index, state.dac_index)
+        clear_modal_message()
+        mark_dirty("mpv missing")
+        send_ui_status("READY", force=True)
+        return
+    except Exception as exc:
+        restart_engine(state.sf_index, state.dac_index)
+        clear_modal_message()
+        mark_dirty(f"Radio failed: {exc}")
+        send_ui_status("READY", force=True)
+        return
+
+    state.player_path = name
+    state.player_proc_kind = "radio"
+    state.player_paused = False
+    state.player_status = "Playing"
+    state.player_stop_requested = False
+    state.player_origin_dir = None
+    state.player_return_mode = "radio_browser"
+    state.player_radio_station_id = str(station.get("id", "")).strip() or None
+    state.ui_mode = "player"
+    invalidate_full_display()
+    set_play_led("ON")
+    clear_modal_message()
+    mark_dirty(f"Radio: {name}")
+    send_ui_status("READY", force=True)
 
 
 # =========================================================
@@ -1425,6 +1677,8 @@ class TFTDisplay:
             self._draw_file_source(draw)
         elif state.ui_mode == "file_browser":
             self._draw_file_browser(draw)
+        elif state.ui_mode == "radio_browser":
+            self._draw_radio_browser(draw)
         elif state.ui_mode == "player":
             self._draw_player(draw)
         elif state.ui_mode == "power_menu":
@@ -1458,7 +1712,7 @@ class TFTDisplay:
                         return user_preset_display_label(i, item, main=True)
                 return "*" + shorten_text(current_name, 18)
             return f"{state.sf_name}/{state.current_preset_name}"
-        if label == "File Player":
+        if label == "Media Player":
             return Path(state.player_path).name if state.player_path else "Browse"
         if label == "Controls":
             return "Sound Edit"
@@ -1770,7 +2024,7 @@ class TFTDisplay:
                 self._draw_submenu_generic_rows(draw, options)
 
     def _draw_file_source(self, draw):
-        draw.text((16, 10), "File Player", font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), "Media Player", font=self.font_title, fill=ACCENT)
         sf_text = state.sf_name
         usb_text = usb_status_text()
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
@@ -1781,8 +2035,22 @@ class TFTDisplay:
         labels = [entry["display"] for entry in get_file_source_entries()] or ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 40, self.height - 50)
 
+    def _draw_radio_browser(self, draw):
+        title = "Radio Favorites" if state.radio_view_mode == "favorites" else "Internet Radio"
+        draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
+        sf_text = state.sf_name
+        usb_text = usb_status_text()
+        right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
+        bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
+        draw.text((self.width - 16 - (bbox[2]-bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        hint = "SELECT: enter/play  RIGHT: favorite  LEFT: back"
+        draw.text((18, 42), hint, font=self.font_small, fill=DIM)
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        labels = radio_display_labels() if state.radio_entries else ["(empty)"]
+        self._draw_scrolled_rows(draw, labels, state.radio_index, 70, 36, self.height - 50)
+
     def _draw_file_browser(self, draw):
-        draw.text((16, 10), "File Player", font=self.font_title, fill=ACCENT)
+        draw.text((16, 10), "Media Player", font=self.font_title, fill=ACCENT)
         sf_text = state.sf_name
         usb_text = usb_status_text()
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
@@ -1803,8 +2071,8 @@ class TFTDisplay:
         right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
         sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
         draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
-        name = Path(state.player_path).name if state.player_path else "No file"
-        kind = state.player_proc_kind.upper() if state.player_proc_kind else "-"
+        name = state.player_path if state.player_proc_kind == "radio" else (Path(state.player_path).name if state.player_path else "No file")
+        kind = "RADIO" if state.player_proc_kind == "radio" else (state.player_proc_kind.upper() if state.player_proc_kind else "-")
         draw.text((18, 44), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
 
         draw.rounded_rectangle((12, 70, self.width - 12, 122), radius=12, fill=BOX_BG)
@@ -1814,9 +2082,14 @@ class TFTDisplay:
         draw.rounded_rectangle((12, 132, self.width - 12, 286), radius=12, fill=BOX_BG)
 
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
-        up_label = "PREV"
-        down_label = "NEXT"
-        right_label = "-"
+        if state.player_proc_kind == "radio":
+            up_label = "-"
+            down_label = "-"
+            right_label = "FAV"
+        else:
+            up_label = "PREV"
+            down_label = "NEXT"
+            right_label = "-"
         if state.player_status == "Stopped":
             sel_label = "PLAY"
         else:
@@ -4499,6 +4772,8 @@ def start_player(path: str) -> None:
     state.player_status = "Playing"
     state.player_stop_requested = False
     state.player_origin_dir = str(Path(path).parent)
+    state.player_return_mode = "file_browser"
+    state.player_radio_station_id = None
     state.ui_mode = "player"
     invalidate_full_display()
     set_play_led("ON")
@@ -5886,7 +6161,7 @@ def handle_main_select() -> None:
     if label == "Sound Source":
         preload_sound_source_count_cache()
         enter_submenu("soundfont")
-    elif label == "File Player":
+    elif label == "Media Player":
         enter_file_browser()
     elif label == "Controls":
         enter_sound_edit()
@@ -5928,6 +6203,8 @@ def make_quick_snapshot() -> dict:
         "browser_path": state.browser_path,
         "browser_index": state.browser_index,
         "player_path": state.player_path,
+        "radio_view_mode": state.radio_view_mode,
+        "radio_index": state.radio_index,
     }
 
 
@@ -5944,6 +6221,8 @@ def quick_resume_label() -> str:
         path = str(snap.get("browser_path") or "")
         name = "USB" if normalize_path(path).startswith(normalize_path(USB_MOUNT_POINT)) else Path(path).name or "Files"
         return f"Files/{shorten_text(name, 10)}"
+    if mode == "radio_browser":
+        return "Radio/Fav" if snap.get("radio_view_mode") == "favorites" else "Radio"
     if mode == "player":
         if snap.get("player_path"):
             return f"Player/{shorten_text(Path(snap['player_path']).name, 10)}"
@@ -6012,6 +6291,10 @@ def restore_quick_snapshot() -> None:
         state.browser_index = clamp_index(old_index, len(state.browser_entries))
     elif state.ui_mode == "file_source":
         state.browser_index = clamp_index(snap.get("browser_index", state.browser_index), len(get_file_source_entries()))
+    elif state.ui_mode == "radio_browser":
+        state.radio_view_mode = snap.get("radio_view_mode", state.radio_view_mode)
+        state.radio_entries = load_radio_entries_for_view(state.radio_view_mode)
+        state.radio_index = clamp_index(snap.get("radio_index", state.radio_index), len(radio_display_labels()))
 
     invalidate_full_display()
     mark_dirty("Resume")
@@ -6145,7 +6428,12 @@ def stop_player_keep_player(event: str = "Stopped") -> None:
 
 
 def return_player_to_browser(event: str = "Back to list") -> None:
-    state.ui_mode = "file_browser"
+    if state.player_return_mode == "radio_browser":
+        state.ui_mode = "radio_browser"
+        state.radio_entries = load_radio_entries_for_view(state.radio_view_mode)
+        state.radio_index = clamp_index(state.radio_index, len(radio_display_labels()))
+    else:
+        state.ui_mode = "file_browser"
     invalidate_full_display()
     state.player_status = "Stopped"
     state.player_paused = False
@@ -6283,6 +6571,52 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty("UP long unused")
         return
 
+    if state.ui_mode == "radio_browser":
+        labels_len = len(radio_display_labels())
+        if btn == "UP":
+            pulse_button_activity()
+            if labels_len and state.radio_index > 0:
+                state.radio_index -= 1
+                mark_dirty(None)
+            else:
+                mark_dirty("First station")
+            return
+        if btn == "DOWN":
+            pulse_button_activity()
+            if labels_len and state.radio_index < labels_len - 1:
+                state.radio_index += 1
+                mark_dirty(None)
+            else:
+                mark_dirty("Last station")
+            return
+        if btn in {"SEL", "SELECT"}:
+            pulse_button_activity()
+            if radio_index_is_favorites_entry():
+                enter_radio_browser("favorites")
+                return
+            station = current_radio_station()
+            if station:
+                start_radio_station(station)
+            else:
+                mark_dirty("No station")
+            return
+        if btn == "RIGHT":
+            pulse_button_activity()
+            if radio_index_is_favorites_entry():
+                enter_radio_browser("favorites")
+            else:
+                toggle_current_radio_favorite()
+            return
+        if btn == "LEFT":
+            pulse_button_activity()
+            if state.radio_view_mode == "favorites":
+                enter_radio_browser("all")
+            else:
+                enter_file_source()
+            return
+        mark_dirty(f"Radio BTN ignored: {btn}")
+        return
+
     if state.ui_mode == "power_menu":
         if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT"}:
             mark_dirty("Power action running")
@@ -6372,7 +6706,13 @@ def handle_button_event(btn_value: str) -> None:
                 else:
                     toggle_pause_player()
             else:
-                if state.player_path:
+                if state.player_return_mode == "radio_browser":
+                    station = find_radio_station_by_id(state.player_radio_station_id)
+                    if station:
+                        start_radio_station(station)
+                    else:
+                        mark_dirty("No radio station")
+                elif state.player_path:
                     start_player(state.player_path)
                 else:
                     mark_dirty("No file")
@@ -6382,6 +6722,13 @@ def handle_button_event(btn_value: str) -> None:
                 return_player_to_browser("Back to list")
             else:
                 stop_player_keep_player("Stopped")
+            return
+        if btn == "RIGHT":
+            pulse_button_activity()
+            if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
+                toggle_radio_favorite_by_id(state.player_radio_station_id, state.player_path)
+            else:
+                mark_dirty("RIGHT unused")
             return
         if btn == "UP":
             play_adjacent(-1); return
