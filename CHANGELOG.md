@@ -4,6 +4,20 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-26 (KST)]
+
+### UNO-1 Calibration Improvements
+
+- Fixed calibration step progression after capturing keypad values
+- Removed EEPROM-based key validation during calibration mode
+- Improved recovery from incorrect stored ADC calibration values
+- Reduced false key detection caused by encoder long-press release noise
+- Improved calibration stability using ADC settling delay and multi-sample averaging
+- Reduced unnecessary "Hold exact key" calibration failures
+- Improved EEPROM save flow after calibration completion
+
+---
+
 ## [2026-05-24b (KST) ]
 
 ### Hotfix
