@@ -102,6 +102,12 @@ sudo systemctl disable bluetooth
 sudo systemctl disable avahi-daemon
 sudo systemctl disable triggerhappy
 sudo systemctl disable hciuart
+sudo systemctl disable apt-daily.service
+sudo systemctl disable apt-daily-upgrade.service
+sudo systemctl disable apt-daily.timer
+sudo systemctl disable apt-daily-upgrade.timer
+sudo systemctl stop apt-daily.service
+sudo systemctl stop apt-daily-upgrade.service
 
 # Desktop version only:
 sudo systemctl set-default multi-user.target
