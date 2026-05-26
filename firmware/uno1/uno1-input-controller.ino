@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260524 combo-cal version - encoder accel restore + ENC+SELECT calibration + release/edge-safe capture
+// 20260526 release-safe combo-cal version - tolerant release detection + ENC/SELECT release guard
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -98,7 +98,7 @@ struct KeypadCalData {
 
 // Calibration capture rules.
 const int CAL_PRESS_MAX_ADC = 970;       // Below this, treat A0 as "some key is held"
-const int CAL_RELEASE_MIN_ADC = 990;     // Above this, treat A0 as released/no-key
+const int CAL_RELEASE_MIN_ADC = 960;     // Above this, treat A0 as released/no-key. 960 is safer than 990 for real resistor-ladder modules
 const uint8_t CAL_CAPTURE_SAMPLES = 25;  // Median-like trimmed average sample count
 const unsigned long CAL_HOLD_STABILIZE_MS = 360;  // Keep key held this long before capture
 const unsigned long CAL_RELEASE_STABLE_MS = 220;  // Require all keys released this long before accepting next press
@@ -274,6 +274,22 @@ void saveKeypadCalibration(const uint16_t c[5]) {
   EEPROM.put(CAL_EEPROM_ADDR, d);
 }
 
+
+
+bool keypadAnalogReleased(int raw) {
+  // Some 5-key resistor-ladder boards do not return a perfect 1023 when idle,
+  // especially after wiring, enclosure assembly, USB ground changes, or Vcc drift.
+  // Treat the high ADC region as released instead of requiring near-perfect 1023.
+  return raw >= CAL_RELEASE_MIN_ADC;
+}
+
+bool calibrationEntryControlsReleased(int raw) {
+  // Initial release after ENC+SELECT entry should mean both sides of the
+  // entry gesture are physically released: keypad SELECT on A0 and encoder SW.
+  // encSwStable is debounced by updateEncoder(); one extra loop after release is OK.
+  return keypadAnalogReleased(raw) && encSwStable == HIGH;
+}
+
 KeyCode keyFromIndex(uint8_t i) {
   switch (i) {
     case 0: return KEY_LEFT;
@@ -287,7 +303,7 @@ KeyCode keyFromIndex(uint8_t i) {
 
 KeyCode decodeKeyFromA0(int v) {
   // Above the release/no-key threshold, always regard it as no key.
-  if (v >= CAL_RELEASE_MIN_ADC) return KEY_NONE;
+  if (keypadAnalogReleased(v)) return KEY_NONE;
 
   int bestIdx = -1;
   int bestDiff = 32767;
@@ -512,7 +528,7 @@ void showKeypadCalPrompt() {
 }
 
 void showKeypadCalReleaseAll() {
-  setLocalDisplay("RELEASE ALL", "Then follow LCD");
+  setLocalDisplay("RELEASE ALL", "SEL+ENC off");
 }
 
 void showKeypadCalMeasuring() {
@@ -522,11 +538,18 @@ void showKeypadCalMeasuring() {
   drawStatus();
 }
 
-void showKeypadCalRelease(uint16_t raw) {
-  String line1 = String(keyName(keyFromIndex(keypadCalStep)));
-  line1 += "=";
-  line1 += String(raw);
-  setLocalDisplay(line1, "Release key");
+void showKeypadCalRelease(uint8_t capturedStep, uint16_t raw) {
+  String line2 = String(keyName(keyFromIndex(capturedStep)));
+  line2 += "=";
+  line2 += String(raw);
+
+  if (keypadCalStep < 5) {
+    String line1 = "CAL ";
+    line1 += String(keyName(keyFromIndex(keypadCalStep)));
+    setLocalDisplay(line1, line2);
+  } else {
+    setLocalDisplay("CAL DONE", line2);
+  }
 }
 
 bool canEnterKeypadCalibrationNow() {
@@ -568,7 +591,7 @@ void enterKeypadCalibrationMode() {
   showKeypadCalReleaseAll();
 }
 
-bool waitHeldForCalibrationCapture(KeyCode expectedKey) {
+bool waitHeldForCalibrationCapture() {
   showKeypadCalMeasuring();
   unsigned long startMs = millis();
   unsigned long lastBlinkMsLocal = 0;
@@ -576,10 +599,14 @@ bool waitHeldForCalibrationCapture(KeyCode expectedKey) {
 
   while (millis() - startMs < CAL_HOLD_STABILIZE_MS) {
     int raw = readKeypadAdcFiltered();
-    KeyCode currentKey = decodeKeyFromA0(raw);
-    if (raw > CAL_PRESS_MAX_ADC || currentKey != expectedKey) {
+    // During calibration, do not decode the held key using the existing
+    // EEPROM centers. EEPROM may contain stale/wrong-but-valid values, which
+    // would reject the very key we are trying to recalibrate. At this point
+    // the LCD prompt defines the target key; we only require that some key is
+    // held steadily in the pressed ADC region.
+    if (raw > CAL_PRESS_MAX_ADC) {
       lcd.backlight();
-      setLocalDisplay("CAL RETRY", "Hold exact key");
+      setLocalDisplay("CAL RETRY", "Hold key steady");
       drawStatus();
       delay(450);
       showKeypadCalPrompt();
@@ -695,7 +722,7 @@ void updateKeypadCalibration() {
   // state as the first LEFT calibration sample. Calibration starts only after
   // A0 has been in the no-key region continuously for CAL_RELEASE_STABLE_MS.
   if (keypadCalNeedInitialRelease) {
-    if (raw >= CAL_RELEASE_MIN_ADC) {
+    if (calibrationEntryControlsReleased(raw)) {
       if (keypadCalReleaseStableSinceMs == 0) keypadCalReleaseStableSinceMs = now;
       if ((now - keypadCalReleaseStableSinceMs) >= CAL_RELEASE_STABLE_MS) {
         keypadCalNeedInitialRelease = false;
@@ -704,21 +731,22 @@ void updateKeypadCalibration() {
       }
     } else {
       keypadCalReleaseStableSinceMs = 0;
-      showKeypadCalReleaseAll();
+      String line2 = "A0=" + String(raw);
+      if (encSwStable == LOW) line2 = "ENC still ON";
+      setLocalDisplay("RELEASE ALL", line2);
     }
     return;
   }
 
-  // After each successful key capture, require a real release before moving to
-  // the next key. This prevents one long hold or release bounce from advancing
-  // multiple calibration steps.
+  // After each successful key capture, require a real release before accepting
+  // the next key. The step is advanced immediately at capture time, so the LCD
+  // can show the next requested key right away instead of staying on CAL LEFT.
   if (keypadCalWaitingRelease) {
-    if (raw >= CAL_RELEASE_MIN_ADC) {
+    if (keypadAnalogReleased(raw)) {
       if (keypadCalReleaseStableSinceMs == 0) keypadCalReleaseStableSinceMs = now;
       if ((now - keypadCalReleaseStableSinceMs) >= CAL_RELEASE_STABLE_MS) {
         keypadCalWaitingRelease = false;
         keypadCalReleaseStableSinceMs = 0;
-        keypadCalStep++;
 
         if (keypadCalStep >= 5) {
           // The entry gesture is already deliberate, so avoid another fragile
@@ -743,24 +771,30 @@ void updateKeypadCalibration() {
 
   if (keypadCalStep >= 5) return;
 
-  KeyCode expectedKey = keyFromIndex(keypadCalStep);
-  KeyCode sampledKey = decodeKeyFromA0(raw);
-
-  // Edge-safe capture: only the key currently requested by the LCD is accepted.
-  // A random ADC value in a different key band is ignored, not captured.
-  if (sampledKey == expectedKey && raw <= CAL_PRESS_MAX_ADC) {
+  // Calibration capture must not depend on current EEPROM centers.
+  // The user follows the LCD sequence: LEFT -> UP -> DOWN -> RIGHT -> SELECT.
+  // We therefore accept any stable press and store its raw A0 value into the
+  // current step. Final validation still checks monotonic order and spacing.
+  if (raw <= CAL_PRESS_MAX_ADC) {
     delay(DEBOUNCE_MS);
     raw = readKeypadAdcFiltered();
-    sampledKey = decodeKeyFromA0(raw);
 
-    if (sampledKey == expectedKey && raw <= CAL_PRESS_MAX_ADC) {
-      if (!waitHeldForCalibrationCapture(expectedKey)) {
+    if (raw <= CAL_PRESS_MAX_ADC) {
+      if (!waitHeldForCalibrationCapture()) {
         return;
       }
+      uint8_t capturedStep = keypadCalStep;
       uint16_t captured = captureKeypadRawValue();
-      keypadCalDraft[keypadCalStep] = captured;
+      keypadCalDraft[capturedStep] = captured;
+
+      // Advance immediately after a valid capture. This gives clear feedback
+      // that LEFT was accepted and the next target is now UP, while
+      // keypadCalWaitingRelease still prevents the held LEFT key from being
+      // interpreted as another calibration input.
+      keypadCalStep++;
+
       lcd.backlight();
-      showKeypadCalRelease(captured);  // Solid LCD: measurement for this key is OK.
+      showKeypadCalRelease(capturedStep, captured);  // Solid LCD: measurement for this key is OK.
       drawStatus();
       keypadCalWaitingRelease = true;
       keypadCalReleaseStableSinceMs = 0;
