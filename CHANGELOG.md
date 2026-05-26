@@ -6,15 +6,28 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ## [2026-05-26 (KST)]
 
-### UNO-1 Calibration Improvements
+### Internet Radio
 
-- Fixed calibration step progression after capturing keypad values
-- Removed EEPROM-based key validation during calibration mode
-- Improved recovery from incorrect stored ADC calibration values
-- Reduced false key detection caused by encoder long-press release noise
-- Improved calibration stability using ADC settling delay and multi-sample averaging
-- Reduced unnecessary "Hold exact key" calibration failures
-- Improved EEPROM save flow after calibration completion
+- Added Internet Radio source to Media Player
+- Added mpv-based streaming radio playback
+- Added curated default radio station list
+- Added persistent radio favorites support
+- Added Favorites browser inside Internet Radio
+- Added RIGHT-button favorite toggle during playback
+- Fixed LEFT navigation from radio player back to radio list
+- Added separate radio playback state handling
+- Renamed "File Player" menu to "Media Player"
+- Added lazy initialization for radio JSON files
+
+### UNO-1 Calibration
+
+- Fixed calibration step progression after keypad capture
+- Removed EEPROM-based key validation during calibration
+- Improved recovery from incorrect stored ADC values
+- Reduced false key detection after encoder long-press release
+- Improved ADC stabilization and multi-sample averaging
+- Reduced unnecessary "Hold exact key" failures
+- Improved EEPROM save flow after calibration
 
 ---
 
