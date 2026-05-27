@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "v20260526b-radio-favorites-rightfix"
+SCRIPT_VERSION = "260527c_wifi-priority-restart"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -281,6 +281,13 @@ USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
 RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
 RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
 
+WIFI_INTERFACE = "wlan0"
+WPA_SUPPLICANT_CONF = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+WPA_SUPPLICANT_CONF_FALLBACK = "/etc/wpa_supplicant/wpa_supplicant.conf"
+WIFI_SELECTED_PRIORITY = 50
+WIFI_OTHER_PRIORITY = 10
+
+
 DEFAULT_RADIO_STATIONS = [
     {"id": "somafm_groovesalad", "name": "SomaFM Groove Salad", "url": "https://ice2.somafm.com/groovesalad-128-mp3"},
     {"id": "somafm_dronezone", "name": "SomaFM Drone Zone", "url": "https://ice2.somafm.com/dronezone-128-mp3"},
@@ -441,6 +448,11 @@ class RuntimeState:
     radio_entries: list[dict] = field(default_factory=list)
     radio_index: int = 0
     radio_view_mode: str = "all"   # all / favorites
+
+    wifi_enabled: bool = True
+    wifi_current_ssid: str = ""
+    wifi_scan_results: list[str] = field(default_factory=list)
+    wifi_known_ssids: list[str] = field(default_factory=list)
 
 
     player_proc_kind: str | None = None   # engine / media
@@ -981,6 +993,267 @@ def start_radio_station(station: dict) -> None:
     send_ui_status("READY", force=True)
 
 
+
+# =========================================================
+# Wi-Fi helpers
+# =========================================================
+
+def wifi_conf_paths() -> list[str]:
+    """Return existing wpa_supplicant config paths, wlan0-specific first.
+
+    Raspberry Pi OS may run wpa_supplicant@wlan0 with
+    /etc/wpa_supplicant/wpa_supplicant-wlan0.conf, while older setups use
+    /etc/wpa_supplicant/wpa_supplicant.conf.  Keep both in sync when both
+    exist, but prefer the wlan0-specific file for reading.
+    """
+    paths: list[str] = []
+    for p in (WPA_SUPPLICANT_CONF, WPA_SUPPLICANT_CONF_FALLBACK):
+        if p and p not in paths and Path(p).exists():
+            paths.append(p)
+    if not paths:
+        paths.append(WPA_SUPPLICANT_CONF)
+    return paths
+
+
+def parse_wpa_supplicant_networks(conf_path: str | None = None) -> list[str]:
+    """Return SSIDs listed in the active wpa_supplicant config."""
+    paths = [conf_path] if conf_path else wifi_conf_paths()
+    text = ""
+    used_path = ""
+    for path in paths:
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="ignore")
+            used_path = path
+            break
+        except Exception as exc:
+            log(f"Wi-Fi config read failed ({path}): {exc}")
+    if not text:
+        return []
+
+    ssids: list[str] = []
+    for block in re.findall(r'network\s*=\s*\{(.*?)\}', text, flags=re.S):
+        m = re.search(r'^\s*ssid\s*=\s*"((?:\\.|[^"\\])*)"', block, flags=re.M)
+        if not m:
+            continue
+        ssid = bytes(m.group(1), "utf-8").decode("unicode_escape", errors="ignore")
+        if ssid and ssid not in ssids:
+            ssids.append(ssid)
+    return ssids
+
+
+def wifi_is_enabled() -> bool:
+    code, out = run_cmd(["rfkill", "list", "wifi"])
+    if code == 0 and out:
+        return "Soft blocked: yes" not in out
+    return Path(f"/sys/class/net/{WIFI_INTERFACE}").exists()
+
+
+def wifi_current_ssid() -> str:
+    code, out = run_cmd(["iwgetid", WIFI_INTERFACE, "-r"])
+    if code == 0 and out.strip():
+        return out.strip()
+    # Do not depend on wpa_cli here. Some interface-specific wpa_supplicant
+    # setups connect normally but do not expose the default control socket.
+    return ""
+
+
+def refresh_wifi_status() -> None:
+    state.wifi_enabled = wifi_is_enabled()
+    state.wifi_current_ssid = wifi_current_ssid() if state.wifi_enabled else ""
+    state.wifi_known_ssids = parse_wpa_supplicant_networks()
+
+
+def wifi_status_label(*, short: bool = False) -> str:
+    refresh_wifi_status()
+    if not state.wifi_enabled:
+        return "Off"
+    if state.wifi_current_ssid:
+        return state.wifi_current_ssid if short else f"Connected: {state.wifi_current_ssid}"
+    return "On" if short else "On / not connected"
+
+
+def restart_wifi_services() -> bool:
+    """Restart OS-managed Wi-Fi services and let priority choose the AP."""
+    ok = True
+    commands = [
+        ["sudo", "-n", "systemctl", "restart", f"wpa_supplicant@{WIFI_INTERFACE}"],
+        ["sudo", "-n", "systemctl", "restart", "dhcpcd"],
+    ]
+    for cmd in commands:
+        code, out = run_cmd(cmd)
+        if code != 0:
+            ok = False
+            log(f"Wi-Fi service command failed: {' '.join(cmd)} :: {out}")
+    return ok
+
+
+def set_wifi_enabled(enabled: bool) -> bool:
+    if enabled:
+        run_cmd(["sudo", "-n", "rfkill", "unblock", "wifi"])
+        run_cmd(["sudo", "-n", "ip", "link", "set", WIFI_INTERFACE, "up"])
+        restart_wifi_services()
+    else:
+        run_cmd(["sudo", "-n", "rfkill", "block", "wifi"])
+    refresh_wifi_status()
+    return state.wifi_enabled == enabled
+
+
+def scan_wifi_ssids() -> list[str]:
+    """Show configured SSIDs that are currently visible on the air.
+
+    Prefer iw/iwlist because this project should not depend on wpa_cli control
+    sockets; automatic OS connection already works through systemd.
+    """
+    known = parse_wpa_supplicant_networks()
+    state.wifi_known_ssids = known
+    if not wifi_is_enabled():
+        state.wifi_scan_results = []
+        refresh_wifi_status()
+        return []
+
+    detected: set[str] = set()
+
+    code, out = run_cmd(["sudo", "-n", "iw", "dev", WIFI_INTERFACE, "scan"])
+    if code == 0 and out:
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("SSID: "):
+                ssid = line.split("SSID: ", 1)[1].strip()
+                if ssid:
+                    detected.add(ssid)
+
+    if not detected:
+        code, out = run_cmd(["sudo", "-n", "iwlist", WIFI_INTERFACE, "scan"])
+        if code == 0:
+            for ssid in re.findall(r'ESSID:"(.*?)"', out):
+                if ssid:
+                    detected.add(ssid)
+
+    visible_known = [ssid for ssid in known if ssid in detected]
+    state.wifi_scan_results = visible_known
+    refresh_wifi_status()
+    return visible_known
+
+
+def update_priorities_in_wpa_text(text: str, selected_ssid: str) -> tuple[str, bool]:
+    """Return config text with selected_ssid priority raised."""
+    changed = False
+
+    def repl(match: re.Match) -> str:
+        nonlocal changed
+        block = match.group(0)
+        body = match.group(1)
+        m = re.search(r'^\s*ssid\s*=\s*"((?:\\.|[^"\\])*)"', body, flags=re.M)
+        if not m:
+            return block
+        ssid = bytes(m.group(1), "utf-8").decode("unicode_escape", errors="ignore")
+        if not ssid:
+            return block
+        priority = WIFI_SELECTED_PRIORITY if ssid == selected_ssid else WIFI_OTHER_PRIORITY
+        new_line = f"        priority={priority}"
+        if re.search(r'^\s*priority\s*=.*$', body, flags=re.M):
+            new_body = re.sub(r'^\s*priority\s*=.*$', new_line, body, count=1, flags=re.M)
+        else:
+            # Insert before the closing brace while preserving the existing block.
+            new_body = body.rstrip() + "\n" + new_line + "\n"
+        new_block = "network={" + new_body + "}"
+        if new_block != block:
+            changed = True
+        return new_block
+
+    new_text = re.sub(r'network\s*=\s*\{(.*?)\}', repl, text, flags=re.S)
+    return new_text, changed
+
+
+def write_text_with_sudo(path: str, text: str) -> bool:
+    tmp = f"/tmp/fluidardule-{Path(path).name}"
+    try:
+        Path(tmp).write_text(text, encoding="utf-8")
+    except Exception as exc:
+        log(f"Wi-Fi temp config write failed: {exc}")
+        return False
+    code, out = run_cmd(["sudo", "-n", "install", "-m", "600", "-o", "root", "-g", "root", tmp, path])
+    try:
+        Path(tmp).unlink(missing_ok=True)
+    except Exception:
+        pass
+    if code != 0:
+        log(f"Wi-Fi config install failed ({path}): {out}")
+        return False
+    return True
+
+
+def set_wifi_priority_for_ssid(ssid: str) -> bool:
+    """Raise selected SSID priority in existing config files."""
+    ok_any = False
+    for path in wifi_conf_paths():
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="ignore")
+        except Exception as exc:
+            log(f"Wi-Fi config read failed ({path}): {exc}")
+            continue
+        new_text, changed = update_priorities_in_wpa_text(text, ssid)
+        if not changed:
+            ok_any = True
+            continue
+        if write_text_with_sudo(path, new_text):
+            ok_any = True
+    return ok_any
+
+
+def wait_for_wifi_connection(ssid: str, timeout_sec: float = 15.0) -> bool:
+    """Wait until the selected SSID becomes the active association."""
+    deadline = time.time() + float(timeout_sec)
+    while time.time() < deadline:
+        refresh_wifi_status()
+        if state.wifi_current_ssid == ssid:
+            return True
+        time.sleep(0.75)
+    refresh_wifi_status()
+    return state.wifi_current_ssid == ssid
+
+
+def connect_wifi_ssid(ssid: str) -> bool:
+    """Select Wi-Fi by rewriting priority and restarting OS Wi-Fi services.
+
+    This intentionally avoids wpa_cli select_network because this Fluid Ardule
+    image already connects reliably at boot using wpa_supplicant priority, even
+    when the wpa_cli control socket is unavailable.
+    """
+    ssid = str(ssid or "").strip()
+    if not ssid:
+        return False
+    if ssid not in parse_wpa_supplicant_networks():
+        mark_dirty("Wi-Fi network not configured")
+        return False
+    if not wifi_is_enabled():
+        set_wifi_enabled(True)
+
+    if not set_wifi_priority_for_ssid(ssid):
+        mark_dirty("Wi-Fi config update failed")
+        return False
+
+    show_modal_message("Switching Wi-Fi...", shorten_text(ssid, 24))
+    send_ui_status("BUSY", force=True)
+    services_ok = restart_wifi_services()
+    ok = wait_for_wifi_connection(ssid, timeout_sec=15.0)
+    clear_modal_message()
+    send_ui_status("READY", force=True)
+    if not ok:
+        log(f"Wi-Fi priority switch timeout for {ssid}; current={state.wifi_current_ssid or '-'}; services_ok={services_ok}")
+    return ok
+
+
+def wifi_menu_options() -> list[tuple[str, bool]]:
+    refresh_wifi_status()
+    rows = [(f"Wi-Fi: {'On' if state.wifi_enabled else 'Off'}", state.wifi_enabled)]
+    rows.append(("Scan known networks", False))
+    if state.wifi_scan_results:
+        rows.extend((ssid, ssid == state.wifi_current_ssid) for ssid in state.wifi_scan_results)
+    else:
+        rows.append(("No configured network found", False))
+    return rows
+
 # =========================================================
 # Raw MIDI discovery
 # =========================================================
@@ -1481,6 +1754,9 @@ class TFTDisplay:
             "transient_footer_until_active": time.time() < state.transient_footer_until,
             "modal_message": state.modal_message,
             "modal_submessage": state.modal_submessage,
+            "wifi_enabled": state.wifi_enabled,
+            "wifi_current_ssid": state.wifi_current_ssid,
+            "wifi_scan_results": tuple(state.wifi_scan_results),
         }
 
     def _footer_changed(self, prev: dict | None) -> bool:
@@ -1721,9 +1997,10 @@ class TFTDisplay:
         if label == "DAC":
             return state.dac_name
         if label == "Extension":
+            wifi = wifi_status_label(short=True)
             if external_midi_out_available():
-                return f"ExtMIDI:{state.external_midi_out_mode.upper()}"
-            return "Reserved"
+                return f"WiFi:{wifi} Ext:{state.external_midi_out_mode.upper()}"
+            return f"WiFi:{wifi}"
         return ""
 
     def _draw_overflow_hints(self, draw, *, current_idx: int, items_len: int, top_y: int, row_h: int, bottom_y: int) -> None:
@@ -1983,6 +2260,7 @@ class TFTDisplay:
             "midi": "MIDI Mode",
             "controls": "Sound Edit",
             "extension": "Extension",
+            "wifi": "Wi-Fi",
             "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC Send",
@@ -2005,6 +2283,8 @@ class TFTDisplay:
                 info = f"{info} / {cat}" if info else cat
         elif state.submenu_key == "external_midi_pc":
             info = gm_current_category_name()
+        elif state.submenu_key == "wifi":
+            info = wifi_status_label(short=False)
 
         self._draw_submenu_title(draw, title, info)
 
@@ -5731,7 +6011,12 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
                 state.submenu_index = i
                 break
     elif key == "extension":
+        refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
+        state.submenu_index = 0
+    elif key == "wifi":
+        refresh_wifi_status()
+        scan_wifi_ssids()
         state.submenu_index = 0
     elif key == "external_midi_device":
         refresh_external_midi_state(quiet=True)
@@ -5842,21 +6127,23 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         current_name = (state.preferred_seq_name or state.selected_alsa_input_name or "").lower()
         return [(label, port == current_port or (current_name and label.lower() == current_name)) for port, label in options]
     if key == "extension":
+        refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
-        if not external_midi_out_available():
-            return [("External MIDI unavailable", False)]
 
-        # Show current Extension status directly on the first-level menu.
-        # This keeps the Extension page useful as a quick status view:
-        #   - External MIDI OUT shows Off/Mirror
-        #   - External MIDI PC Send shows the last selected GM program
-        out_label = "Mirror" if state.external_midi_out_mode == "mirror" else "Off"
-        device_label = external_midi_display_name()
-        pc_label = gm_program_label(state.external_midi_pc_index)
-        return [
-            (f"MIDI OUT [{device_label}]: {out_label}", False),
-            (f"PC Send [{device_label}]: {pc_label}", False),
-        ]
+        rows = [(f"Wi-Fi [{wifi_status_label(short=True)}]", False)]
+        if external_midi_out_available():
+            # Show current Extension status directly on the first-level menu.
+            # Wi-Fi is always the first Extension item; External MIDI follows.
+            out_label = "Mirror" if state.external_midi_out_mode == "mirror" else "Off"
+            device_label = external_midi_display_name()
+            pc_label = gm_program_label(state.external_midi_pc_index)
+            rows.extend([
+                (f"MIDI OUT [{device_label}]: {out_label}", False),
+                (f"PC Send [{device_label}]: {pc_label}", False),
+            ])
+        return rows
+    if key == "wifi":
+        return wifi_menu_options()
     if key == "controls":
         return [("Sound Edit", False)]
     if key == "external_midi_device":
@@ -6020,11 +6307,16 @@ def apply_current_submenu_selection() -> None:
         leave_submenu(f"ALSA MIDI: {shorten_text(label.replace(' MIDI 1', ''), 18)}")
         return
     if key == "extension":
+        refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
-        if not external_midi_out_available():
-            leave_submenu("External MIDI unavailable")
-            return
         if state.submenu_index == 0:
+            enter_submenu("wifi", return_mode="submenu")
+            mark_dirty("Wi-Fi")
+            return
+        if not external_midi_out_available():
+            leave_submenu("Extension")
+            return
+        if state.submenu_index == 1:
             if len(list_external_midi_seq_ports()) > 1:
                 enter_submenu("external_midi_device")
                 mark_dirty("Select External MIDI")
@@ -6032,11 +6324,31 @@ def apply_current_submenu_selection() -> None:
                 enter_submenu("external_midi_out")
                 mark_dirty("External MIDI OUT")
             return
-        if state.submenu_index == 1:
+        if state.submenu_index == 2:
             enter_submenu("external_midi_pc")
             mark_dirty("External MIDI PC Send")
             return
         leave_submenu("Extension")
+        return
+    if key == "wifi":
+        if state.submenu_index == 0:
+            ok = set_wifi_enabled(not state.wifi_enabled)
+            invalidate_full_display()
+            mark_dirty("Wi-Fi On" if state.wifi_enabled else "Wi-Fi Off" if ok else "Wi-Fi toggle failed")
+            return
+        if state.submenu_index == 1:
+            scan_wifi_ssids()
+            invalidate_full_display()
+            mark_dirty(f"Wi-Fi scan: {len(state.wifi_scan_results)} found")
+            return
+        idx = state.submenu_index - 2
+        if 0 <= idx < len(state.wifi_scan_results):
+            ssid = state.wifi_scan_results[idx]
+            ok = connect_wifi_ssid(ssid)
+            invalidate_full_display()
+            mark_dirty(f"Wi-Fi: {shorten_text(ssid, 22)}" if ok else "Wi-Fi connect failed")
+        else:
+            mark_dirty("No configured network")
         return
     if key == "external_midi_device":
         ports = list_external_midi_seq_ports()
@@ -6064,7 +6376,7 @@ def apply_current_submenu_selection() -> None:
         state.pending_external_midi_pc_due = 0.0
         ok = send_external_midi_program_change(state.external_midi_pc_index, state.external_midi_pc_channel)
         label = gm_program_label(state.external_midi_pc_index)
-        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=1)
+        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=2)
         return
     if key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
@@ -6087,7 +6399,7 @@ def apply_current_submenu_selection() -> None:
                 send_external_midi_program_change(0, state.external_midi_pc_channel)
         else:
             state.external_midi_connected = False
-        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=0)
+        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=1)
         return
     if key == "user_preset_save":
         presets = load_user_presets()
@@ -6170,12 +6482,10 @@ def handle_main_select() -> None:
     elif label == "DAC":
         enter_submenu("dac")
     elif label == "Extension":
+        refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
         enforce_external_midi_out_policy()
-        if external_midi_out_available():
-            enter_submenu("extension")
-        else:
-            enter_submenu("placeholder")
+        enter_submenu("extension")
     else:
         enter_submenu("placeholder")
 
@@ -6238,6 +6548,7 @@ def quick_resume_label() -> str:
             "dac": "DAC",
             "midi": "MIDI Mode",
             "extension": "Extension",
+            "wifi": "Wi-Fi",
             "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC",
@@ -6869,16 +7180,22 @@ def handle_button_event(btn_value: str) -> None:
             mark_dirty("Delete canceled")
             return
 
-    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_device":
+    if state.ui_mode == "submenu" and state.submenu_key == "wifi":
         if btn == "LEFT":
             pulse_button_activity()
             return_to_extension_submenu("Extension", index=0)
             return
 
+    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_device":
+        if btn == "LEFT":
+            pulse_button_activity()
+            return_to_extension_submenu("Extension", index=1)
+            return
+
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_out":
         if btn == "LEFT":
             pulse_button_activity()
-            return_to_extension_submenu("Extension", index=0)
+            return_to_extension_submenu("Extension", index=1)
             return
 
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_pc":
@@ -6902,7 +7219,7 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             state.pending_external_midi_pc_index = None
             state.pending_external_midi_pc_due = 0.0
-            return_to_extension_submenu("External PC canceled", index=1)
+            return_to_extension_submenu("External PC canceled", index=2)
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
