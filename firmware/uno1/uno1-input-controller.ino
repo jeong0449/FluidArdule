@@ -1512,7 +1512,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  setLocalDisplay("FluidArdul", "WAIT HELLO/HB");
+  setLocalDisplay("UNO-1", "WAIT HELLO/HB");
   drawStatus();
 
   // Give the Pi several chances to catch UNO_READY while its serial
