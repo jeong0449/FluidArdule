@@ -3,6 +3,22 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+## [2026-05-27 (KST)]
+
+- Added Wi-Fi selector to Extension menu
+- Implemented Wi-Fi ON/OFF control
+- Added "Scan known networks" support
+- Added selection among visible configured SSIDs
+- Switched Wi-Fi selection logic from direct wpa_cli control
+  to priority-based reconnect strategy
+- Added automatic wpa_supplicant restart after selection
+- Improved compatibility with wpa_supplicant@wlan0 systems
+- Added network diagnostics documentation
+- Documented interface-specific Wi-Fi configuration behavior
+- Added quick SSID/IP diagnostic commands
+- Documented wpa_cli control socket limitations
+
+---
 
 ## [2026-05-26 (KST)]
 
