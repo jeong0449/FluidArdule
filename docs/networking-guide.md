@@ -110,12 +110,57 @@ sudo systemctl enable dhcpcd
 
 ## 7. Diagnostics
 
+### Quick Network Status
+
+```bash
+iwgetid
+hostname -I
+```
+
+These commands display:
+
+- Current connected SSID
+- Current IP address
+
+For continuously updated status:
+
+```bash
+watch -n 1 "iwgetid ; hostname -I"
+```
+
+---
+
+### Detailed Wireless Diagnostics
+
 ```bash
 iw dev wlan0 link
 ip a
+```
+
+These commands provide:
+
+- Signal strength
+- Frequency/channel
+- Bitrate
+- Interface state
+- Full IP/interface information
+
+---
+
+### Wi-Fi Service Status
+
+```bash
 systemctl status wpa_supplicant@wlan0
 journalctl -u wpa_supplicant@wlan0
 ```
+
+These commands are useful for diagnosing:
+
+- Connection failures
+- Reconnection loops
+- Authentication problems
+- rfkill issues
+- Service startup problems
 
 ---
 
