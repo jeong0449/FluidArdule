@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260527c_wifi-priority-restart"
+SCRIPT_VERSION = "260527e_wifi-conf-sudo-read"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -1015,18 +1015,35 @@ def wifi_conf_paths() -> list[str]:
     return paths
 
 
+def read_wifi_conf_text(path: str) -> str:
+    """Read a root-protected wpa_supplicant config safely.
+
+    The config is normally 600 root:root. Fluid Ardule usually runs as the
+    pi user, so direct open() may fail even though systemd can use the file.
+    Try normal read first, then fall back to sudo cat with non-interactive
+    sudo. This keeps the main Python process non-root.
+    """
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")
+    except PermissionError:
+        code, out = run_cmd(["sudo", "-n", "cat", path])
+        if code == 0:
+            return out
+        log(f"Wi-Fi config sudo read failed ({path}): {out}")
+        return ""
+    except Exception as exc:
+        log(f"Wi-Fi config read failed ({path}): {exc}")
+        return ""
+
+
 def parse_wpa_supplicant_networks(conf_path: str | None = None) -> list[str]:
     """Return SSIDs listed in the active wpa_supplicant config."""
     paths = [conf_path] if conf_path else wifi_conf_paths()
     text = ""
-    used_path = ""
     for path in paths:
-        try:
-            text = Path(path).read_text(encoding="utf-8", errors="ignore")
-            used_path = path
+        text = read_wifi_conf_text(path)
+        if text:
             break
-        except Exception as exc:
-            log(f"Wi-Fi config read failed ({path}): {exc}")
     if not text:
         return []
 
@@ -1187,10 +1204,8 @@ def set_wifi_priority_for_ssid(ssid: str) -> bool:
     """Raise selected SSID priority in existing config files."""
     ok_any = False
     for path in wifi_conf_paths():
-        try:
-            text = Path(path).read_text(encoding="utf-8", errors="ignore")
-        except Exception as exc:
-            log(f"Wi-Fi config read failed ({path}): {exc}")
+        text = read_wifi_conf_text(path)
+        if not text:
             continue
         new_text, changed = update_priorities_in_wpa_text(text, ssid)
         if not changed:
@@ -1226,8 +1241,22 @@ def connect_wifi_ssid(ssid: str) -> bool:
     if ssid not in parse_wpa_supplicant_networks():
         mark_dirty("Wi-Fi network not configured")
         return False
+
+    # Hotfix 2026-05-27:
+    # If the selected SSID is already connected, do not rewrite priority or
+    # restart Wi-Fi services. A service restart can briefly disturb USB/serial
+    # timing on the Raspberry Pi and may make UNO-1 appear disconnected.
+    refresh_wifi_status()
+    if state.wifi_enabled and state.wifi_current_ssid == ssid:
+        mark_dirty(f"Already connected: {ssid}")
+        return True
+
     if not wifi_is_enabled():
         set_wifi_enabled(True)
+        refresh_wifi_status()
+        if state.wifi_enabled and state.wifi_current_ssid == ssid:
+            mark_dirty(f"Already connected: {ssid}")
+            return True
 
     if not set_wifi_priority_for_ssid(ssid):
         mark_dirty("Wi-Fi config update failed")
