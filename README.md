@@ -14,6 +14,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 - Save and recall user-defined presets across different sound engines
 - Control synthesis and playback parameters via dedicated hardware UI (UNO-1)
 - Self-calibrating 5-button analog keypad with EEPROM-persisted ADC center values
+  - Calibration mode is accessible even when keypad navigation becomes unreliable
   - ENC + SELECT long press enters keypad calibration mode
 - Accept MIDI input from USB or DIN (DIN I/O via UNO-2 MIDI bridge)
 - Play MIDI files using FluidSynth
@@ -37,7 +38,7 @@ A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-ba
 
 - **Raspberry Pi**: core system (synthesis, playback, control)
 - **TFT-LCD**: dedicated UI display driven by the Python application (not a general-purpose system display)
-- **UNO-1**: UI controller (buttons, encoder, potentiometer, LEDs)
+- **UNO-1**: dedicated UI controller (buttons, encoder, potentiometer, LEDs, keypad calibration)
 - (Optional) **UNO-2**: MIDI bridge for devices with 5-pin DIN only (keyboard controllers or external sound modules)
 
 External MIDI output can also be handled directly via USB MIDI interfaces without UNO-2, which is often simpler and more stable.
@@ -108,7 +109,7 @@ Key features:
 - Automatic device detection — only connected devices are shown in the UI
 
 This allows Fluid Ardule to function not only as a sound module,
-but also as a flexible MIDI routing and control station for external hardware.
+but also as a flexible MIDI routing and control station for external hardware modules..
 
 ---
 
@@ -131,6 +132,7 @@ As a result:
 - UI remains responsive when user interaction occurs
 
 This approach aligns with dedicated hardware synthesizers, where display updates are deprioritized during active performance.
+The UI subsystem is also designed to tolerate temporary controller-side instability and allow recovery without requiring SSH access whenever possible.
 
 ---
 
@@ -157,7 +159,7 @@ Hardware assembly can be inferred from the system overview and components docume
 
 🚧 Work in progress  
 
-This repository documents the evolving system architecture and integration of related components.
+This repository documents the evolving system architecture, hardware integration, and standalone instrument workflow of Fluid Ardule.
 
 ---
 
