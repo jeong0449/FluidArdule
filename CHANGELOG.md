@@ -3,6 +3,24 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+
+## [2026-05-28 (KST)]
+
+### UNO-1 stability improvement
+
+- Investigated intermittent I2C LCD corruption during Fluid Ardule service restart
+- Identified Arduino UNO auto-reset during USB serial reconnect as the root cause
+- Added DTR/RTS suppression and serial open holdoff in Python runtime
+- Added 10 µF electrolytic capacitor between RESET and GND on UNO-1
+- Significantly improved LCD stability during repeated service restart tests
+
+Observed symptoms before the fix:
+
+- Random LCD character corruption
+- Partial LCD initialization after reconnect
+- Increased instability after repeated restart attempts
+
+---
 ## [2026-05-27 (KST)]
 
 - Added Wi-Fi selector to Extension menu
