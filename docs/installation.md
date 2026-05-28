@@ -761,6 +761,12 @@ TimeoutStopSec=5
 WantedBy=multi-user.target
 ```
 
+Enable:
+
+```bash
+sudo systemctl enable fluid_ardule.service
+```
+
 ---
 
 ## 5. Logging and Debugging
