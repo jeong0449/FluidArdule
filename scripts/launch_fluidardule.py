@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260527e_wifi-conf-sudo-read"
+SCRIPT_VERSION = "260528b_uno1-serial-open-holdoff"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -42,6 +42,7 @@ UNO2_SERIAL_PORT = ""  # e.g. "/dev/serial/by-id/usb-Arduino__...-if00"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 0.1
 SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC = 1.5
+SERIAL_OUTPUT_HOLDOFF_AFTER_OPEN_SEC = 2.0
 
 SOUNDFONTS = [
     ("/home/pi/sf2/SalC5Light2.sf2", "SalC5"),
@@ -7452,9 +7453,38 @@ def open_serial() -> serial.Serial:
     port_path = Path(SERIAL_PORT)
     if not port_path.exists():
         raise FileNotFoundError(f"Serial port not found: {SERIAL_PORT}")
-    ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
-    time.sleep(2.0)
-    ser.reset_input_buffer()
+
+    # Keep HUPCL disabled so closing/reopening the port is less likely to
+    # toggle modem-control lines and reset UNO-1 during service restart.
+    # This is best-effort; Arduino Uno auto-reset is partly hardware-driven.
+    try:
+        subprocess.run(["stty", "-F", SERIAL_PORT, "-hupcl"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except Exception:
+        pass
+
+    # Open the port manually instead of using serial.Serial(...) directly.
+    # This lets us set DTR/RTS low before open, reducing UNO auto-reset risk.
+    ser = serial.Serial()
+    ser.port = SERIAL_PORT
+    ser.baudrate = SERIAL_BAUD
+    ser.timeout = SERIAL_TIMEOUT
+    ser.write_timeout = 0.05
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+
+    try:
+        ser.setDTR(False)
+        ser.setRTS(False)
+    except Exception:
+        pass
+
+    try:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+    except Exception:
+        pass
     return ser
 
 
@@ -7468,6 +7498,18 @@ def serial_reader() -> None:
                 ser = open_serial()
                 serial_read_error_count = 0
                 serial_write_error_count = 0
+                # After opening the serial port, wait before sending anything to UNO-1.
+                # If the port open still triggered an Arduino auto-reset, this holdoff
+                # lets UNO-1 finish booting and prevents early HELLO/HB/UI messages
+                # from racing with LCD initialization.
+                state.serial_input_ignore_until = time.time() + SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC
+                time.sleep(SERIAL_OUTPUT_HOLDOFF_AFTER_OPEN_SEC)
+                try:
+                    ser.reset_input_buffer()
+                    ser.reset_output_buffer()
+                except Exception:
+                    pass
+
                 with serial_lock:
                     serial_handle = ser
                 send_serial_line("HELLO")
