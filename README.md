@@ -86,6 +86,7 @@ External MIDI modules can also be connected directly to the Raspberry Pi via USB
 
 ---
 
+
 ## Hardware Layout
 
 <a href="images/fluid-ardule-system-wiring-diagram.png">
@@ -94,6 +95,33 @@ External MIDI modules can also be connected directly to the Raspberry Pi via USB
 
 Click the diagram to enlarge.  
 See [components.md](docs/components.md) for the parts list.
+
+### UNO-1 Auto-Reset Suppression
+
+Fluid Ardule may reopen the UNO-1 serial port during service restart or reconnect events.
+
+On the Arduino UNO, opening the USB serial port can trigger an automatic MCU reset through the standard DTR auto-reset circuit. In some cases this caused the I2C LCD module to display garbled characters because the LCD itself remained powered while only the MCU was reset.
+
+
+Symptoms included:
+
+- Random or corrupted LCD characters
+- Partial LCD initialization after service restart
+- Increased instability after repeated reconnect attempts
+
+To improve runtime stability, a 10 µF electrolytic capacitor was added between RESET and GND on UNO-1:
+
+- `+` → RESET
+- `-` → GND
+
+This suppresses unintended auto-reset during serial reconnects and significantly improves LCD stability.
+
+>[!Note]
+>- Automatic sketch upload reset may become unreliable after this modification.
+>- Manual RESET button press or USB reconnect may be required during firmware upload.
+
+
+
 
 ---
 
