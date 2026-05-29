@@ -216,10 +216,16 @@ This preserves startup stability while maintaining convenient firmware developme
 
 # Firmware Improvement
 
-A firmware mitigation was also implemented.
+A firmware mitigation was also implemented to complement the hardware startup stabilization measures.
 
-When Raspberry Pi establishes its first successful HELLO link, the LCD is now
-reinitialized.
+The original implementation was introduced on **2026-05-29** in commit **0380f4a**:
+
+```text
+0380f4a
+Add LCD recovery on first HELLO
+```
+
+When Raspberry Pi establishes its first successful HELLO link, the LCD is now reinitialized.
 
 Conceptually:
 
@@ -234,11 +240,16 @@ if (!wasLinked)
 
 Purpose:
 
-- Re-synchronize LCD state
+- Re-synchronize LCD controller state
 - Recover from startup-related controller issues
 - Improve robustness during service restart events
+- Provide an additional recovery path beyond RESET timing stabilization
 
 This creates a software recovery layer in addition to the hardware stabilization layer.
+
+> [!NOTE]
+> This document refers to the original LCD recovery mechanism introduced in commit `0380f4a` on 2026-05-29.
+> The exact implementation may evolve in later firmware revisions, but the troubleshooting results described here are based on that original mitigation.
 
 ---
 
