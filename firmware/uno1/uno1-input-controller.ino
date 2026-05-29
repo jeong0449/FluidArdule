@@ -68,8 +68,8 @@ const unsigned long BUTTON_LED_BLINK_OFF_MS = 70;
 const unsigned long PLAY_LED_BLINK_MS = 500;
 const unsigned long DEBUG_TAG_HOLD_MS = 1200;
 const unsigned long ACK_DEBUG_DELAY_MS = 300;
-const int           POT_DELTA_SEND = 4;    // Serial POT reporting threshold
-const int           POT_DELTA_LED  = 12;   // Larger threshold to avoid LED stuck-on from A2 noise
+const int           POT_DELTA_SEND = 31;   // Serial POT reporting threshold (anout 3% of 1023)
+const int           POT_DELTA_LED  = 31;   // Larger threshold to avoid LED stuck-on from A2 noise (same threshold)
 
 // ---- A0 keypad calibration ----
 // The old fixed-threshold method was vulnerable to module/temperature/Vcc drift.
