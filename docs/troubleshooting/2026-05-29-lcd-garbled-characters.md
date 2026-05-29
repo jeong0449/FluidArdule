@@ -140,6 +140,8 @@ Observed result:
 - Significant reduction in LCD corruption
 - Improved cold-start reliability
 
+Subsequent testing showed that removing the capacitor caused the garbled-character problem to reappear, even when LCD reinitialization on HELLO reception remained enabled.
+
 ---
 
 # Interpretation
@@ -241,9 +243,10 @@ if (!wasLinked)
 Purpose:
 
 - Re-synchronize LCD controller state
-- Recover from startup-related controller issues
 - Improve robustness during service restart events
 - Provide an additional recovery path beyond RESET timing stabilization
+
+Subsequent testing showed that this firmware mechanism alone is insufficient to prevent the startup garbling issue. The RESET-GND 10 µF capacitor remains the primary mitigation, while LCD reinitialization on HELLO acts as a secondary recovery layer.
 
 This creates a software recovery layer in addition to the hardware stabilization layer.
 
@@ -288,6 +291,8 @@ The most effective mitigation currently appears to be:
 
 1. RESET-GND 10 µF startup stabilization capacitor
 2. LCD reinitialization after first HELLO message
+
+Experimental evidence indicates that the startup stabilization capacitor plays the primary role. Removing the capacitor caused the problem to return, whereas the HELLO-triggered LCD reinitialization alone did not fully prevent the issue.
 
 ---
 
