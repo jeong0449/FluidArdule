@@ -13,6 +13,12 @@ Rare cases of garbled characters ("alien text") were observed on the UNO-1 I2C L
 The problem appeared intermittently during startup and occasionally during Raspberry Pi
 service restart or serial link establishment.
 
+<a href="../../images/2026-05-29-lcd-garbled-display.jpg">
+  <img src="../../images/2026-05-29-lcd-garbled-display.jpg" width="400">
+</a>
+
+*Figure 1. Garbled LCD characters observed during startup.*
+
 Investigation showed that the problem was unlikely to be a simple LCD hardware fault.
 Evidence pointed instead toward startup timing, reset behavior, and LCD initialization
 sequencing.
