@@ -4,6 +4,15 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-05-29 (KST)]
+
+- Added LCD reinitialization on first Pi HELLO link establishment.
+- Added detachable RESET-GND 10µF startup stabilization capacitor.
+- Confirmed that the capacitor may interfere with Arduino auto-reset during sketch upload.
+- Approximately 25 consecutive service restart tests completed without LCD garbled-character events.
+
+---
+
 ## [2026-05-28 (KST)]
 
 ### UNO-1 stability improvement
