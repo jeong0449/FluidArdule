@@ -829,6 +829,15 @@ void drawStatus() {
   lcd.print(makeLine2WithAccel(l2Text));
 }
 
+void reinitLcdController() {
+  // Software recovery layer for the I2C LCD backpack/HD44780 state.
+  // Cold start already performs lcd.init() in setup(); this function is used
+  // at the second critical transition: first Raspberry Pi serial link.
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+}
+
 void notePiSeen() {
   lastPiSeenMs = millis();
   piLinked = true;
@@ -1361,20 +1370,38 @@ void handleIncomingLine(String s) {
 
   if (s == "HELLO") {
     bool wasLinked = piLinked;
+    bool firstLink = !wasLinked;
+
     notePiSeen();
+
+    // The I2C LCD is fully initialized at cold start, but the first Pi link
+    // establishment is a second critical state transition. Reinitialize the
+    // LCD once here so a marginal or glitched LCD controller/backpack state is
+    // realigned before the linked status is drawn. Avoid doing this during
+    // keypad calibration because calibration deliberately controls the LCD.
+    if (firstLink && !keypadCalMode) {
+      reinitLcdController();
+    }
+
     if (powerState == POWER_REBOOT_ARMED) {
       powerState = POWER_NORMAL;
       powerLinkLostMs = 0;
-      if (!wasLinked) setLocalDisplay("PI LINKED", linkUiText());
+      if (firstLink) setLocalDisplay("PI LINKED", linkUiText());
     } else if (powerState == POWER_OFF_OK) {
       // If communication resumes after the safe-unplug screen, the Pi was not
       // really finished. Re-arm shutdown instead of falling back to WAIT PI.
       powerState = POWER_SHUTDOWN_ARMED;
       powerLinkLostMs = 0;
       setLocalDisplay("FINALIZING", "PLEASE WAIT");
-    } else if (!wasLinked) {
+    } else if (firstLink) {
       setLocalDisplay("PI LINKED", linkUiText());
     }
+
+    if (firstLink && !keypadCalMode) {
+      drawStatus();
+      lastLcdRefreshMs = millis();
+    }
+
     sendReady();
     sendAccelProfile();
     return;
