@@ -96,29 +96,30 @@ External MIDI modules can also be connected directly to the Raspberry Pi via USB
 Click the diagram to enlarge.  
 See [components.md](docs/components.md) for the parts list.
 
-### UNO-1 Auto-Reset Suppression
+### UNO-1 Reset Stabilization Capacitor
 
-Fluid Ardule may reopen the UNO-1 serial port during service restart or reconnect events.
+Rare cases of garbled characters were occasionally observed on the I2C LCD during power-up and, less frequently, during Raspberry Pi serial link establishment.
 
-On the Arduino UNO, opening the USB serial port can trigger an automatic MCU reset through the standard DTR auto-reset circuit. In some cases this caused the I2C LCD module to display garbled characters because the LCD itself remained powered while only the MCU was reset.
+Investigation suggested that the issue was related to startup timing rather than LCD hardware failure. In some situations, the Arduino UNO could begin executing `lcd.init()` before the LCD controller and PCF8574 I2C backpack had fully stabilized.
 
-
-Symptoms included:
-
-- Random or corrupted LCD characters
-- Partial LCD initialization after service restart
-- Increased instability after repeated reconnect attempts
-
-To improve runtime stability, a 10 µF electrolytic capacitor was added between RESET and GND on UNO-1:
+To improve startup reliability, a 10 µF electrolytic capacitor was added between RESET and GND on UNO-1:
 
 - `+` → RESET
 - `-` → GND
 
-This suppresses unintended auto-reset during serial reconnects and significantly improves LCD stability.
+This slightly delays and stabilizes the release of the RESET signal during power-up, allowing the LCD subsystem to settle before initialization begins.
 
->[!Note]
->- Automatic sketch upload reset may become unreliable after this modification.
->- Manual RESET button press or USB reconnect may be required during firmware upload.
+Observed results:
+
+- Significantly reduced occurrence of garbled LCD characters
+- Improved cold-start reliability
+- More consistent LCD initialization after power-up
+
+> [!NOTE]
+> - The capacitor is connected between **RESET** and **GND**. It is **not** a power-supply decoupling capacitor.
+> - This modification may interfere with the Arduino UNO auto-reset mechanism used during sketch upload.
+> - Firmware upload may require temporarily disconnecting the capacitor, removing the UNO-1 shield, manually pressing RESET, or reconnecting USB power.
+> - The capacitor is intended as a startup stabilization measure and is not required for normal Arduino operation.
 
 
 
