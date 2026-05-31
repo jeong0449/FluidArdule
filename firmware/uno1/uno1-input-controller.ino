@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260526 release-safe combo-cal version - tolerant release detection + ENC/SELECT release guard
+// 20260531 encoder reversal reset version - tolerant release detection + ENC/SELECT release guard
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -48,7 +48,7 @@ const uint8_t PIN_LED_PLAY = 12;
 const uint8_t PIN_LED_MIDI = 11;
 
 // ---- Timing ----
-const unsigned long DEBOUNCE_MS = 35;
+const unsigned long DEBOUNCE_MS = 45;
 const unsigned long LONGPRESS_MS = 700;
 const unsigned long CAL_COMBO_HOLD_MS = 900;  // Encoder switch + SELECT hold to enter keypad calibration
 const unsigned long READY_REPEAT_MS = 3000;
@@ -1237,6 +1237,18 @@ void updateEncoder() {
     }
 
     if (delta != 0) {
+      // If the user reverses the encoder direction before a full step has
+      // been emitted, discard the unfinished movement from the previous
+      // direction.  Otherwise the first click after reversal can be consumed
+      // merely cancelling encTransitionAccum, which feels unlike a commercial
+      // synth/workstation encoder.  Keep ENC_TRANSITIONS_PER_STEP at 2 so the
+      // decoder still rejects most bounce-induced reverse glitches.
+      if (encTransitionAccum != 0 &&
+          ((delta > 0 && encTransitionAccum < 0) ||
+           (delta < 0 && encTransitionAccum > 0))) {
+        encTransitionAccum = 0;
+      }
+
       encTransitionAccum += delta;
 
       if (encTransitionAccum >= ENC_TRANSITIONS_PER_STEP || encTransitionAccum <= -ENC_TRANSITIONS_PER_STEP) {
