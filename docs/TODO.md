@@ -1,9 +1,9 @@
+# Fluid Ardule TODO
+
+## High Priority
+
 ### Encoder navigation magnitude
-Added: 2026-05-31
+
+UNO reports ENC:+/-1..3 correctly, but Python UI navigation does not always appear to consume the full reported movement.
 
 Status: Investigating
-
-Observed:
-
-- UNO LCD reports ENC:+/-3 correctly.
-- Python UI does not always appear to consume the full reported movement.
