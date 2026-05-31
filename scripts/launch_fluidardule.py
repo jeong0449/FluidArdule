@@ -31,7 +31,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260528b_uno1-serial-open-holdoff"
+SCRIPT_VERSION = "260530n_restart-detached-exit"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -306,8 +306,10 @@ DEFAULT_RADIO_STATIONS = [
 USER_PRESET_RENAME_CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.,()"
 USER_PRESET_RENAME_MAX_LEN = 32
 
-POWER_MENU_ITEMS = ["Cancel", "Halt", "Reboot"]
+POWER_MENU_ITEMS = ["Cancel", "Halt", "Restart Software", "Reboot"]
 POWER_CONFIRM_ITEMS = ["No", "Yes"]
+FLUID_ARDULE_SERVICE = "fluid_ardule.service"
+RESTART_SOFTWARE_MARKER = "/tmp/fluidardule_restart_software_pending"
 
 # Sound Edit is a volatile, non-saving performance edit page.
 # CC7 Volume is intentionally excluded because the hardware pot controls volume.
@@ -1412,7 +1414,9 @@ def current_ui_link_status() -> str:
     # intentionally able to accept UNO control events. Keep playback itself
     # READY; reserve BUSY for modal/system operations where input should not be
     # trusted or may be delayed.
-    if state.ui_mode == "power_menu" and state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT"}:
+    if state.ui_mode == "restart_wait":
+        return "BUSY"
+    if state.ui_mode == "power_menu" and state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE"}:
         return "BUSY"
     if state.usb_eject_confirm:
         return "BUSY"
@@ -1786,6 +1790,8 @@ class TFTDisplay:
             "modal_submessage": state.modal_submessage,
             "wifi_enabled": state.wifi_enabled,
             "wifi_current_ssid": state.wifi_current_ssid,
+            "header_version_label": self._display_script_version(),
+            "header_wifi_label": self._header_wifi_text(),
             "wifi_scan_results": tuple(state.wifi_scan_results),
         }
 
@@ -1877,9 +1883,17 @@ class TFTDisplay:
 
         # If any right-side value changed (for example RAW device name recovery),
         # redraw the whole main list area rather than only the selected row.
-        if self._main_values_changed(prev_snapshot):
+        header_changed = (
+            prev_snapshot.get("header_version_label") != self._display_script_version()
+            or prev_snapshot.get("header_wifi_label") != self._header_wifi_text()
+        )
+
+        if self._main_values_changed(prev_snapshot) or header_changed:
             image = self.prev_image.copy()
             draw = ImageDraw.Draw(image)
+            if header_changed:
+                self._draw_header(draw)
+                self._write_partial_image(image, (0, 0, self.width, 46))
             draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
             self._draw_main(draw)
             self._draw_footer(draw)
@@ -1989,6 +2003,8 @@ class TFTDisplay:
             self._draw_player(draw)
         elif state.ui_mode == "power_menu":
             self._draw_power_menu(draw)
+        elif state.ui_mode == "restart_wait":
+            self._draw_restart_wait(draw)
         elif state.ui_mode == "quick_menu":
             self._draw_quick_menu(draw)
         elif state.ui_mode == "sound_edit":
@@ -2003,9 +2019,92 @@ class TFTDisplay:
         state.last_render_time = time.time()
         state.dirty = False
 
+    def _display_script_version(self) -> str:
+        # Show only the compact prefix, e.g. "260530a" from
+        # "260530a_titlebar-wifi".  This keeps the title bar narrow enough
+        # for the two-row status area on the right.
+        return str(SCRIPT_VERSION).split("_", 1)[0]
+
+    def _header_wifi_text(self) -> str:
+        # Use cached Wi-Fi state here; _main_menu_value(Extension) and the
+        # Wi-Fi menu refresh it through wifi_status_label()/refresh_wifi_status().
+        # Avoid running shell commands directly from the header drawing path.
+        if not state.wifi_enabled:
+            return "Wi-Fi Off"
+        if state.wifi_current_ssid:
+            return state.wifi_current_ssid
+        return "No Network"
+
+    def _fit_text_to_width(self, draw, text: str, font, max_width: int) -> str:
+        text = str(text or "").strip()
+        if max_width <= 0 or not text:
+            return ""
+        if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
+            return text
+        ellipsis = "..."
+        if draw.textbbox((0, 0), ellipsis, font=font)[2] > max_width:
+            return ""
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            candidate = text[:mid].rstrip() + ellipsis
+            if draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo].rstrip() + ellipsis
+
     def _draw_header(self, draw):
-        draw.rectangle((0, 0, self.width, 44), fill=(22, 28, 40))
-        draw.text((12, 8), f"Fluid Ardule  {SCRIPT_VERSION}", font=self.font_title, fill=FG)
+        header_h = 44
+        draw.rectangle((0, 0, self.width, header_h), fill=(22, 28, 40))
+
+        title = "Fluid Ardule"
+        title_x = 12
+        title_bbox0 = draw.textbbox((0, 0), title, font=self.font_title)
+        title_h = title_bbox0[3] - title_bbox0[1]
+        # Vertically center the one-line title inside the title bar.
+        title_y = max(0, (header_h - title_h) // 2 - title_bbox0[1])
+        draw.text((title_x, title_y), title, font=self.font_title, fill=FG)
+
+        # Keep the right-side status block compact.  A fixed-width block at
+        # the far right prevents the title bar from looking too empty while
+        # still leaving a clear separation from the Fluid Ardule title.
+        status_margin_r = 12
+        status_w = min(156, max(120, self.width // 3))
+        right_x = self.width - status_margin_r - status_w
+        right_w = status_w
+        if right_x < title_x + 120:
+            return
+
+        build_label = "Build "
+        ssid_label = "SSID "
+        build_value = self._display_script_version()
+        ssid_value = self._header_wifi_text()
+
+        # Keep labels visible and trim only the variable values when the SSID
+        # is too long.  Draw labels dimmer than values for a cleaner status
+        # panel look.
+        build_label_w = draw.textbbox((0, 0), build_label, font=self.font_small)[2]
+        ssid_label_w = draw.textbbox((0, 0), ssid_label, font=self.font_small)[2]
+        build_value = self._fit_text_to_width(draw, build_value, self.font_small, right_w - build_label_w)
+        ssid_value = self._fit_text_to_width(draw, ssid_value, self.font_small, right_w - ssid_label_w)
+
+        build_full = build_label + build_value
+        ssid_full = ssid_label + ssid_value
+        b_bbox = draw.textbbox((0, 0), build_full, font=self.font_small)
+        s_bbox = draw.textbbox((0, 0), ssid_full, font=self.font_small)
+        b_h = b_bbox[3] - b_bbox[1]
+        s_h = s_bbox[3] - s_bbox[1]
+        row_gap = 5
+        block_h = b_h + row_gap + s_h
+        block_y = max(0, (header_h - block_h) // 2)
+        build_y = block_y - b_bbox[1]
+        ssid_y = block_y + b_h + row_gap - s_bbox[1]
+
+        draw.text((right_x, build_y), build_label, font=self.font_small, fill=DIM)
+        draw.text((right_x + build_label_w, build_y), build_value, font=self.font_small, fill=FG)
+        draw.text((right_x, ssid_y), ssid_label, font=self.font_small, fill=DIM)
+        draw.text((right_x + ssid_label_w, ssid_y), ssid_value, font=self.font_small, fill=FG)
 
     def _main_menu_value(self, idx: int) -> str:
         label = MAIN_MENU[idx] if 0 <= idx < len(MAIN_MENU) else ""
@@ -2495,6 +2594,33 @@ class TFTDisplay:
         draw.text((24, hint_y + 22), "SEL: A/B   SEL long: reset   R long: Quick", font=self.font_small, fill=DIM)
 
 
+    def _draw_restart_wait(self, draw):
+        # Dedicated full-screen wait page for Restart Software.
+        # Do not reuse _draw_power_menu(), because that keeps the Power Menu
+        # title/background visible and can look like the menu briefly returned.
+        title = "Restarting software..."
+        sub = "Please wait"
+        box_left = 32
+        box_top = 82
+        box_right = self.width - 32
+        box_bottom = self.height - 82
+        draw.rounded_rectangle((box_left, box_top, box_right, box_bottom), radius=16, fill=BOX_BG)
+        try:
+            tb = draw.textbbox((0, 0), title, font=self.font_title)
+            sb = draw.textbbox((0, 0), sub, font=self.font_body)
+            title_w = tb[2] - tb[0]
+            title_h = tb[3] - tb[1]
+            sub_w = sb[2] - sb[0]
+            sub_h = sb[3] - sb[1]
+        except Exception:
+            title_w, title_h = 280, 34
+            sub_w, sub_h = 120, 26
+        gap = 14
+        block_h = title_h + gap + sub_h
+        y = box_top + ((box_bottom - box_top - block_h) // 2)
+        draw.text(((self.width - title_w) // 2, y), title, font=self.font_title, fill=FG)
+        draw.text(((self.width - sub_w) // 2, y + title_h + gap), sub, font=self.font_body, fill=DIM)
+
     def _draw_power_title(self, draw):
         draw.text((20, 60), "Power", font=self.font_title, fill=ACCENT)
 
@@ -2526,6 +2652,10 @@ class TFTDisplay:
             draw.text((52, 84), "Rebooting...", font=self.font_title, fill=FG)
             draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
             return
+        if state.power_confirm_action == "EXEC_RESTART_SOFTWARE":
+            draw.text((52, 84), "Restarting software...", font=self.font_title, fill=FG)
+            draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
+            return
         if state.power_confirm_action:
             draw.text((52, 70), f"{state.power_confirm_action}?", font=self.font_title, fill=FG)
             draw.text((52, 108), "Are you sure?", font=self.font_body, fill=DIM)
@@ -2537,8 +2667,11 @@ class TFTDisplay:
             draw.text((52, 70), "Select action", font=self.font_body, fill=DIM)
             labels = POWER_MENU_ITEMS
             current_idx = state.power_menu_index
-            start_y = 108
             row_h = 40
+            rows_height = len(labels) * row_h
+            rows_top = 104
+            rows_bottom = self.height - 62
+            start_y = rows_top + max(0, (rows_bottom - rows_top - rows_height) // 2)
         for i, label in enumerate(labels):
             top = start_y + i * row_h
             if i == current_idx:
@@ -6733,6 +6866,52 @@ def execute_power_action(action: str | None = None) -> None:
             notify_uno_power_state(action)
             time.sleep(1.0)
             subprocess.Popen(["sudo", "systemctl", "reboot"])
+        elif action == "Restart Software":
+            # Show a dedicated wait page through the normal renderer, then hand
+            # the actual restart to a detached helper and terminate this process
+            # immediately.  This avoids one more main-loop render of Power Menu
+            # before systemd replaces the service.
+            state.ui_mode = "restart_wait"
+            state.power_confirm_action = None
+            state.power_confirm_index = 0
+            invalidate_full_display()
+            try:
+                display.prev_image = None
+                display.prev_snapshot = None
+            except Exception:
+                pass
+            mark_dirty("Restarting software...")
+            maybe_render(force=True)
+            time.sleep(0.35)
+
+            try:
+                Path(RESTART_SOFTWARE_MARKER).write_text(str(time.time()), encoding="utf-8")
+            except Exception:
+                pass
+
+            cmd = (
+                "sleep 0.2; "
+                f"sudo -n systemctl --no-block restart {FLUID_ARDULE_SERVICE}"
+            )
+            try:
+                subprocess.Popen(
+                    ["/bin/sh", "-c", cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception as exc:
+                state.ui_mode = "power_menu"
+                state.power_confirm_action = None
+                invalidate_full_display()
+                mark_dirty("Restart failed")
+                log(f"Restart Software launch failed: {exc}")
+                return
+
+            log("Restart Software requested; old process exits on wait screen")
+            time.sleep(0.05)
+            os._exit(0)
     except Exception as exc:
         state.power_confirm_action = None
         mark_dirty(f"Power action failed: {exc}")
@@ -6959,7 +7138,7 @@ def handle_button_event(btn_value: str) -> None:
         return
 
     if state.ui_mode == "power_menu":
-        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT"}:
+        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE"}:
             mark_dirty("Power action running")
             return
         if state.power_confirm_action:
@@ -7017,14 +7196,17 @@ def handle_button_event(btn_value: str) -> None:
             item = POWER_MENU_ITEMS[state.power_menu_index]
             if item == "Cancel":
                 cancel_power_menu()
-            elif item == "Halt":
-                # Halt is entered from a long-press-only power menu, so skip
-                # the extra Are-you-sure dialog and show a short feedback page.
-                execute_power_action("Halt")
+            elif item == "Restart Software":
+                # Restart only the Fluid Ardule systemd service, not the Raspberry Pi.
+                execute_power_action("Restart Software")
             elif item == "Reboot":
                 # Reboot uses the same single-step UX as Halt: show a short
                 # feedback page, notify UNO-1, then call systemd reboot.
                 execute_power_action("Reboot")
+            elif item == "Halt":
+                # Halt is entered from a long-press-only power menu, so skip
+                # the extra Are-you-sure dialog and show a short feedback page.
+                execute_power_action("Halt")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -7957,6 +8139,15 @@ def main() -> None:
     signal.signal(signal.SIGTERM, request_exit)
 
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    # If the previous instance requested Restart Software, ignore possible
+    # stale button/encoder events from the serial link during the fresh start.
+    try:
+        if Path(RESTART_SOFTWARE_MARKER).exists():
+            Path(RESTART_SOFTWARE_MARKER).unlink(missing_ok=True)
+            state.serial_input_ignore_until = time.time() + 3.0
+    except Exception:
+        pass
 
     # Keep full-screen redraw recovery active only during the vulnerable
     # boot-settling window. This expires quickly and does not change normal
