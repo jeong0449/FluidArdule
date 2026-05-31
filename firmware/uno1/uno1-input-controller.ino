@@ -48,7 +48,7 @@ const uint8_t PIN_LED_PLAY = 12;
 const uint8_t PIN_LED_MIDI = 11;
 
 // ---- Timing ----
-const unsigned long DEBOUNCE_MS = 45;
+const unsigned long DEBOUNCE_MS = 35;
 const unsigned long LONGPRESS_MS = 700;
 const unsigned long CAL_COMBO_HOLD_MS = 900;  // Encoder switch + SELECT hold to enter keypad calibration
 const unsigned long READY_REPEAT_MS = 3000;
