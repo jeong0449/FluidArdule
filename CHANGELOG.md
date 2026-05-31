@@ -3,6 +3,32 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+## [2026-05-03 (KST)]
+### UI
+
+- Home screen now displays Build version and Wi-Fi status.
+- Added SSID display with support for:
+  - Connected network
+  - No Network
+  - Wi-Fi Off
+- Refined title bar layout and alignment.
+
+### Power Menu
+
+- Added **Restart Software** command.
+- Reorganized Power Menu:
+
+  - Cancel
+  - Halt
+  - Restart Software
+  - Reboot
+
+### Recovery
+
+- Fluid Ardule software can now be restarted directly from the UI without rebooting Raspberry Pi.
+- Simplifies recovery from MIDI, audio, or UI-related software issues.
+
+---
 
 ## [2026-05-29 (KST)]
 
