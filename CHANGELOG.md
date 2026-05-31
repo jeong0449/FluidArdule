@@ -3,7 +3,7 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
-## [2026-05-03 (KST)]
+## [2026-05-30 (KST)]
 ### UI
 
 - Home screen now displays Build version and Wi-Fi status.
@@ -27,6 +27,9 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 - Fluid Ardule software can now be restarted directly from the UI without rebooting Raspberry Pi.
 - Simplifies recovery from MIDI, audio, or UI-related software issues.
+
+### Encoder improvement
+Reset encoder transition accumulator on direction reversal to improve first-click responsiveness.
 
 ---
 
