@@ -705,7 +705,7 @@ This allows the system to:
 Provides immediate visual feedback during boot.
 
 ```bash
-sudo nano /etc/systemd/system/fluidardule-splash.service
+sudo nano /etc/systemd/system/tft-splash.service
 ```
 
 ```ini
