@@ -3,6 +3,16 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+
+## [2026-06-01 (KST)] 
+
+- Fixed Software Restart from Power Menu.
+- Fixed startup volume regression (POT position now respected).
+- Added Internet Radio favorite toggle (RIGHT button).
+- Added ★ indicator for favorite stations.
+
+---
+
 ## [2026-05-30 (KST)]
 ### UI
 
