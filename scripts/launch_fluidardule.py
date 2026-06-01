@@ -8,6 +8,7 @@
 # =========================================================
 
 import os
+import sys
 import time
 import queue
 import signal
@@ -31,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260530n_restart-detached-exit"
+SCRIPT_VERSION = "260601e_radio-fav-star-prefix"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -172,8 +173,11 @@ FLUID_LOG_PATH = f"{LOG_DIR}/fluidsynth.log"
 PLAYER_LOG_PATH = f"{LOG_DIR}/player.log"
 YOSHIMI_LOG_PATH = f"{LOG_DIR}/yoshimi.log"
 AMIXER_CONTROL = "PCM"
-FIX_VOLUME_AT_100 = True
+# Do not force ALSA mixer to 100% at service start.
+# The first POT report from UNO-1, or the last saved pot-derived volume, owns startup volume.
+FIX_VOLUME_AT_100 = False
 POT_VOLUME_ENABLED = True
+VOLUME_STATE_PATH = "/tmp/fluidardule_last_volume_percent"
 DEVICE_POLL_INTERVAL_SEC = 3.0
 MIDI_RECONNECT_STABLE_SEC = 1.5
 SERIAL_HEARTBEAT_INTERVAL_SEC = 1.0
@@ -489,6 +493,7 @@ class RuntimeState:
 
     volume_percent: int = 100
     last_pot_raw: int = -1
+    initial_pot_volume_applied: bool = False
     last_led_pulse_time: float = 0.0
     last_pot_led_pulse_time: float = 0.0
     last_pot_led_percent: int = -1
@@ -660,6 +665,21 @@ def set_output_volume(percent: int, *, announce: bool = False) -> None:
             mark_dirty(f"Volume set failed: {exc}")
 
 
+def save_volume_state(percent: int) -> None:
+    try:
+        Path(VOLUME_STATE_PATH).write_text(str(max(0, min(100, int(percent)))), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_saved_volume_state(default: int = 60) -> int:
+    try:
+        value = int(Path(VOLUME_STATE_PATH).read_text(encoding="utf-8").strip())
+        return max(0, min(100, value))
+    except Exception:
+        return max(0, min(100, int(default)))
+
+
 def handle_pot_value(raw_value: str) -> None:
     if not POT_VOLUME_ENABLED:
         return
@@ -682,6 +702,17 @@ def handle_pot_value(raw_value: str) -> None:
 
     percent = int(round(raw * 100 / 1023))
 
+    # Startup ownership: the first POT report after service start defines the
+    # actual ALSA mixer level, regardless of the previous 100% fallback.
+    # This intentionally bypasses the normal threshold and soft-takeover path.
+    if not state.initial_pot_volume_applied:
+        state.initial_pot_volume_applied = True
+        state.pot_volume_captured = True
+        set_output_volume(percent, announce=True)
+        save_volume_state(percent)
+        maybe_pulse_pot_led(percent)
+        return
+
     # Soft takeover for volume mode. If the pot has been used as a parameter
     # controller, its physical angle may no longer match the current volume.
     # When returning to VOL mode, wait until the pot is moved near the existing
@@ -696,6 +727,7 @@ def handle_pot_value(raw_value: str) -> None:
     if abs(percent - state.volume_percent) < POT_VOLUME_PERCENT_THRESHOLD:
         return
     set_output_volume(percent, announce=True)
+    save_volume_state(percent)
     maybe_pulse_pot_led(percent)
 
 def normalize_path(path: str) -> str:
@@ -916,11 +948,21 @@ def toggle_radio_favorite_by_id(station_id: str | None, station_name: str | None
 
     Player mode does not necessarily have a valid radio_browser selection, so
     do not rely on current_radio_station() here.
+    This is used by the RIGHT/Favorite button while Internet radio is playing.
     """
     sid = str(station_id or "").strip()
     if not sid:
         mark_dirty("No station id")
         return
+
+    # Resolve a human-readable name only for status text.  Do not require the
+    # station list to be available; the station id is the authoritative key.
+    name = str(station_name or "").strip()
+    if not name:
+        station = find_radio_station_by_id(sid)
+        if station:
+            name = str(station.get("name", "")).strip()
+
     favorites = load_radio_favorites()
     if sid in favorites:
         favorites.remove(sid)
@@ -929,13 +971,18 @@ def toggle_radio_favorite_by_id(station_id: str | None, station_name: str | None
         favorites.add(sid)
         msg = "Favorite added"
     save_radio_favorites(favorites)
+
     # Keep the favorites view coherent if the user returns there immediately.
     if state.radio_view_mode == "favorites":
         old_index = state.radio_index
         state.radio_entries = load_radio_entries_for_view("favorites")
         state.radio_index = clamp_index(old_index, len(state.radio_entries))
+
     invalidate_full_display()
-    mark_dirty(msg)
+    if name:
+        mark_dirty(f"{msg}: {shorten_text(name, 18)}")
+    else:
+        mark_dirty(msg)
 
 
 def start_radio_station(station: dict) -> None:
@@ -2484,21 +2531,29 @@ class TFTDisplay:
         kind = "RADIO" if state.player_proc_kind == "radio" else (state.player_proc_kind.upper() if state.player_proc_kind else "-")
         draw.text((18, 44), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
 
-        draw.rounded_rectangle((12, 70, self.width - 12, 122), radius=12, fill=BOX_BG)
-        one_line_name = ellipsize_text(name, self.font_menu, self.width - 48)
-        draw.text((24, 83), one_line_name, font=self.font_menu, fill=FG)
-
-        draw.rounded_rectangle((12, 132, self.width - 12, 286), radius=12, fill=BOX_BG)
-
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
         if state.player_proc_kind == "radio":
             up_label = "-"
             down_label = "-"
+            try:
+                is_fav = bool(state.player_radio_station_id and state.player_radio_station_id in load_radio_favorites())
+            except Exception:
+                is_fav = False
+            # The favorite marker belongs to the station name, not to the
+            # hardware button label.  RIGHT always means "toggle favorite".
+            if is_fav and name:
+                name = "★ " + name
             right_label = "FAV"
         else:
             up_label = "PREV"
             down_label = "NEXT"
             right_label = "-"
+
+        draw.rounded_rectangle((12, 70, self.width - 12, 122), radius=12, fill=BOX_BG)
+        one_line_name = ellipsize_text(name, self.font_menu, self.width - 48)
+        draw.text((24, 83), one_line_name, font=self.font_menu, fill=FG)
+
+        draw.rounded_rectangle((12, 132, self.width - 12, 286), radius=12, fill=BOX_BG)
         if state.player_status == "Stopped":
             sel_label = "PLAY"
         else:
@@ -6867,10 +6922,13 @@ def execute_power_action(action: str | None = None) -> None:
             time.sleep(1.0)
             subprocess.Popen(["sudo", "systemctl", "reboot"])
         elif action == "Restart Software":
-            # Show a dedicated wait page through the normal renderer, then hand
-            # the actual restart to a detached helper and terminate this process
-            # immediately.  This avoids one more main-loop render of Power Menu
-            # before systemd replaces the service.
+            # Software restart should restart only this Python UI/runtime,
+            # not ask systemd to restart the unit from inside the same unit.
+            # Calling systemctl restart on the current service from this process
+            # can leave the TFT latched on the wait screen or create confusing
+            # stop/start timing.  os.execv() replaces the current Python process
+            # in-place, so there is no helper process, no duplicated UI process,
+            # and no chance to redraw the Power Menu between stop and start.
             state.ui_mode = "restart_wait"
             state.power_confirm_action = None
             state.power_confirm_index = 0
@@ -6882,36 +6940,47 @@ def execute_power_action(action: str | None = None) -> None:
                 pass
             mark_dirty("Restarting software...")
             maybe_render(force=True)
-            time.sleep(0.35)
+            time.sleep(0.25)
 
             try:
                 Path(RESTART_SOFTWARE_MARKER).write_text(str(time.time()), encoding="utf-8")
             except Exception:
                 pass
 
-            cmd = (
-                "sleep 0.2; "
-                f"sudo -n systemctl --no-block restart {FLUID_ARDULE_SERVICE}"
-            )
-            try:
-                subprocess.Popen(
-                    ["/bin/sh", "-c", cmd],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            except Exception as exc:
-                state.ui_mode = "power_menu"
-                state.power_confirm_action = None
-                invalidate_full_display()
-                mark_dirty("Restart failed")
-                log(f"Restart Software launch failed: {exc}")
-                return
+            log("Restart Software requested; exec-replacing current Python process")
 
-            log("Restart Software requested; old process exits on wait screen")
-            time.sleep(0.05)
-            os._exit(0)
+            # Clean up child processes before exec so the restarted instance
+            # does not compete with old fluidsynth/player/monitor processes.
+            try:
+                set_play_led("OFF")
+            except Exception:
+                pass
+            try:
+                stop_midi_activity_monitor()
+            except Exception:
+                pass
+            try:
+                stop_player_only()
+            except Exception:
+                pass
+            try:
+                stop_bridge()
+            except Exception:
+                pass
+            try:
+                stop_fluidsynth()
+            except Exception:
+                pass
+            try:
+                with serial_lock:
+                    if serial_handle is not None:
+                        serial_handle.close()
+            except Exception:
+                pass
+
+            python_exe = sys.executable or "/usr/bin/python3"
+            argv = [python_exe] + sys.argv
+            os.execv(python_exe, argv)
     except Exception as exc:
         state.power_confirm_action = None
         mark_dirty(f"Power action failed: {exc}")
@@ -7995,6 +8064,11 @@ def handle_serial_line(line: str) -> None:
     # immediately after USB serial reconnect. Treat that short window as a
     # boot-settling period so playback is not accidentally changed.
     if time.time() < state.serial_input_ignore_until and msg_type in {"BTN", "ENC", "POT", "A2", "A0", "ACCEL"}:
+        # During serial boot-settling, ignore controls that can trigger UI actions,
+        # but still accept the first POT value so startup volume follows the
+        # physical knob instead of staying at the old max-volume fallback.
+        if msg_type in ("POT", "A2"):
+            handle_pot_value(value)
         return
 
     if msg_type == "BTN":
@@ -8160,10 +8234,12 @@ def main() -> None:
     Path(USB_MOUNT_POINT).mkdir(parents=True, exist_ok=True)
     state.usb_mounted = is_mountpoint_active(USB_MOUNT_POINT)
 
-    if FIX_VOLUME_AT_100:
-        force_volume_100()
-    else:
-        state.volume_percent = 100
+    # Apply the last pot-derived volume immediately so the service never starts
+    # at full blast while waiting for the next serial POT report.  The first
+    # fresh POT report from UNO-1 will override this with the physical knob angle.
+    startup_volume = load_saved_volume_state(default=60)
+    state.volume_percent = startup_volume
+    set_output_volume(startup_volume, announce=False)
 
     refresh_dac_options(quiet=True)
     refresh_external_midi_state(quiet=True)
