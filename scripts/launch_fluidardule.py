@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260602b_footer-uno-volume-alt"
+SCRIPT_VERSION = "260602c_submenu-header-spacing"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -2307,12 +2307,12 @@ class TFTDisplay:
 
 
     def _draw_submenu_title(self, draw, title: str, info: str = ""):
-        draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
+        draw.text((16, 6), title, font=self.font_title, fill=ACCENT)
         if info:
             info = self._fit_text_to_width(draw, str(info), self.font_small, self.width - 240)
             bbox = draw.textbbox((0, 0), info, font=self.font_small)
             draw.text(
-                (self.width - 16 - (bbox[2] - bbox[0]), 18),
+                (self.width - 16 - (bbox[2] - bbox[0]), 16),
                 info,
                 font=self.font_small,
                 fill=ACCENT,
@@ -2405,7 +2405,7 @@ class TFTDisplay:
     def _draw_submenu_external_midi_pc_rows(self, draw, options):
         cat = gm_current_category_name()
         hint = "RIGHT: next category"
-        draw.text((18, 42), f"{cat}   {hint}", font=self.font_small, fill=DIM)
+        draw.text((18, 40), f"{cat}   {hint}", font=self.font_small, fill=DIM)
         # Clear and redraw a slightly lower list area so the category/hint line
         # is always visible above the eight GM programs.
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
@@ -2535,7 +2535,7 @@ class TFTDisplay:
 
     def _draw_file_source(self, draw):
         self._draw_submenu_title(draw, "Media Player", usb_status_text())
-        draw.text((18, 42), "Select source", font=self.font_small, fill=DIM)
+        draw.text((18, 40), "Select source", font=self.font_small, fill=DIM)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in get_file_source_entries()] or ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 40, self.height - 50)
@@ -2545,7 +2545,7 @@ class TFTDisplay:
         scope = "Fav" if state.radio_view_mode == "favorites" else "All"
         self._draw_submenu_title(draw, title, f"{scope}:{len(state.radio_entries)}")
         hint = "SELECT: enter/play  RIGHT: favorite  LEFT: back"
-        draw.text((18, 42), hint, font=self.font_small, fill=DIM)
+        draw.text((18, 40), hint, font=self.font_small, fill=DIM)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = radio_display_labels() if state.radio_entries else ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.radio_index, 70, 36, self.height - 50)
@@ -2555,7 +2555,7 @@ class TFTDisplay:
         path_text = state.browser_path
         if len(path_text) > 42:
             path_text = "..." + path_text[-39:]
-        draw.text((18, 42), path_text, font=self.font_small, fill=DIM)
+        draw.text((18, 40), path_text, font=self.font_small, fill=DIM)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in state.browser_entries] or ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 36, self.height - 50)
@@ -2564,7 +2564,7 @@ class TFTDisplay:
         self._draw_submenu_title(draw, "Now Playing", self._player_source_label())
         name = state.player_path if state.player_proc_kind == "radio" else (Path(state.player_path).name if state.player_path else "No file")
         kind = "RADIO" if state.player_proc_kind == "radio" else (state.player_proc_kind.upper() if state.player_proc_kind else "-")
-        draw.text((18, 44), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
+        draw.text((18, 42), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
 
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
         if state.player_proc_kind == "radio":
@@ -2621,11 +2621,11 @@ class TFTDisplay:
             draw.text((tx, ty), btn["label"], font=font, fill=FG)
 
     def _draw_sound_edit(self, draw):
-        draw.text((16, 10), "Sound Edit", font=self.font_title, fill=ACCENT)
+        draw.text((16, 6), "Sound Edit", font=self.font_title, fill=ACCENT)
         side = state.sound_edit_active_side if state.sound_edit_active_side in {"A", "B"} else "B"
         right_text = f"{side}  {state.sf_name}/{shorten_text(state.current_preset_name, 10)}"
         bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (bbox[2] - bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        draw.text((self.width - 16 - (bbox[2] - bbox[0]), 16), right_text, font=self.font_small, fill=ACCENT)
 
         selected_idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
         current = SOUND_EDIT_PARAMS[selected_idx]
@@ -2633,7 +2633,7 @@ class TFTDisplay:
         b_val = int(state.sound_edit_values.get(cc, current["default"]))
         a_val = int(state.sound_edit_a_values.get(cc, current["default"]))
         live_val = a_val if side == "A" else b_val
-        draw.text((18, 42), f"{current['name']}  CC{cc}  {side}:{live_val}", font=self.font_small, fill=DIM)
+        draw.text((18, 40), f"{current['name']}  CC{cc}  {side}:{live_val}", font=self.font_small, fill=DIM)
 
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
 
