@@ -4,6 +4,20 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
 
+## [2026-06-02 (KST)]
+
+### Changed
+- Refined title-bar context information across submenus for improved UI consistency.
+- Removed unrelated SoundFont labels from Media/File/Radio screens.
+- Added alternating footer display between UNO link status and current volume.
+- Volume value is now shown continuously while the potentiometer is being adjusted.
+
+### Notes
+- No changes to MIDI, FluidSynth, Yoshimi, playback, or serial protocol behavior.
+- UI-only update focused on status presentation and visual consistency.
+
+---
+
 ## [2026-06-01 (KST)] 
 
 - Fixed Software Restart from Power Menu.
