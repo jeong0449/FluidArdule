@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260601e_radio-fav-star-prefix"
+SCRIPT_VERSION = "260602b_footer-uno-volume-alt"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -355,6 +355,8 @@ ENC_NAV_REVERSAL_GUARD_SEC = 0.12
 POT_MODE_DEFAULT = "VOL"
 POT_MODE_FOOTER_HOLD_SEC = 1.2
 ACCEL_FOOTER_HOLD_SEC = 1.2
+FOOTER_ALT_INTERVAL_SEC = 2.0
+VOLUME_FOOTER_HOLD_SEC = 1.8
 # Soft takeover threshold for returning the physical pot to volume control.
 # When POT mode switches back from PARAM to VOL, the volume is not updated
 # until the physical pot position comes close to the current logical volume.
@@ -492,6 +494,8 @@ class RuntimeState:
     transient_footer_until: float = 0.0
 
     volume_percent: int = 100
+    last_volume_display_time: float = 0.0
+    last_footer_alt_slot: int = -1
     last_pot_raw: int = -1
     initial_pot_volume_applied: bool = False
     last_led_pulse_time: float = 0.0
@@ -658,8 +662,10 @@ def set_output_volume(percent: int, *, announce: bool = False) -> None:
         subprocess.run(["amixer", "sset", AMIXER_CONTROL, f"{percent}%"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         if percent != state.volume_percent:
             state.volume_percent = percent
-            if announce:
-                mark_dirty(f"Volume {percent}%")
+        if announce:
+            # Keep volume visible in the footer while the physical pot is being moved.
+            state.last_volume_display_time = time.time()
+            mark_dirty(f"Volume {percent}%")
     except Exception as exc:
         if announce:
             mark_dirty(f"Volume set failed: {exc}")
@@ -1833,6 +1839,10 @@ class TFTDisplay:
             "main_value_5": self._main_menu_value(5),
             "transient_footer_text": state.transient_footer_text,
             "transient_footer_until_active": time.time() < state.transient_footer_until,
+            "footer_alt_slot": self._footer_alt_slot(),
+            "volume_percent": state.volume_percent,
+            "last_volume_display_active": time.time() - state.last_volume_display_time < VOLUME_FOOTER_HOLD_SEC,
+            "uno_footer_text": self._uno_footer_text(),
             "modal_message": state.modal_message,
             "modal_submessage": state.modal_submessage,
             "wifi_enabled": state.wifi_enabled,
@@ -1845,8 +1855,15 @@ class TFTDisplay:
     def _footer_changed(self, prev: dict | None) -> bool:
         if prev is None:
             return True
-        keys = ("last_event", "cpu_load_text", "cpu_temp_text", "midi_display_text", "midi_connected", "usb_mounted", "transient_footer_text")
-        return any(prev.get(k) != getattr(state, k) for k in keys)
+        state_keys = ("last_event", "cpu_load_text", "cpu_temp_text", "midi_display_text", "midi_connected", "usb_mounted", "transient_footer_text", "volume_percent")
+        if any(prev.get(k) != getattr(state, k) for k in state_keys):
+            return True
+        current_snapshot_keys = {
+            "footer_alt_slot": self._footer_alt_slot(),
+            "last_volume_display_active": time.time() - state.last_volume_display_time < VOLUME_FOOTER_HOLD_SEC,
+            "uno_footer_text": self._uno_footer_text(),
+        }
+        return any(prev.get(k) != v for k, v in current_snapshot_keys.items())
 
     def _main_values_changed(self, prev: dict | None) -> bool:
         if prev is None:
@@ -2292,6 +2309,7 @@ class TFTDisplay:
     def _draw_submenu_title(self, draw, title: str, info: str = ""):
         draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
         if info:
+            info = self._fit_text_to_width(draw, str(info), self.font_small, self.width - 240)
             bbox = draw.textbbox((0, 0), info, font=self.font_small)
             draw.text(
                 (self.width - 16 - (bbox[2] - bbox[0]), 18),
@@ -2299,6 +2317,28 @@ class TFTDisplay:
                 font=self.font_small,
                 fill=ACCENT,
             )
+
+    def _browser_source_label(self) -> str:
+        path = str(state.browser_path or "")
+        try:
+            if is_under_root(path, USB_MOUNT_POINT):
+                return "USB"
+        except Exception:
+            pass
+        return "Local"
+
+    def _player_source_label(self) -> str:
+        if state.player_proc_kind == "radio":
+            return "Radio"
+        path = str(state.player_path or "")
+        try:
+            if path and is_under_root(path, USB_MOUNT_POINT):
+                return "USB"
+        except Exception:
+            pass
+        if path:
+            return "Local"
+        return ""
 
     def _draw_submenu_box(self, draw):
         draw.rounded_rectangle(
@@ -2452,13 +2492,27 @@ class TFTDisplay:
         title = title_map.get(state.submenu_key or "", "Menu")
         info = ""
 
-        if state.submenu_key in ("preset_category", "preset"):
+        if state.submenu_key == "soundfont":
+            info = state.sf_name
+        elif state.submenu_key in ("preset_category", "preset"):
             info = state.category_source_name if state.submenu_key == "preset_category" else state.preset_source_name
             if state.submenu_key == "preset" and state.category_entries:
                 cat = state.category_entries[clamp_index(state.category_index, len(state.category_entries))]
                 info = f"{info} / {cat}" if info else cat
+        elif state.submenu_key == "dac":
+            info = state.dac_name
+        elif state.submenu_key == "midi":
+            info = state.midi_display_text
+        elif state.submenu_key == "extension":
+            info = "Ext"
+        elif state.submenu_key == "external_midi_device":
+            info = external_midi_display_name()
+        elif state.submenu_key == "external_midi_out":
+            info = state.external_midi_out_mode.upper()
         elif state.submenu_key == "external_midi_pc":
             info = gm_current_category_name()
+        elif state.submenu_key in {"user_preset_load", "user_preset_save", "user_preset_manage", "user_preset_delete", "user_preset_rename", "user_preset_overwrite"}:
+            info = "User"
         elif state.submenu_key == "wifi":
             info = wifi_status_label(short=False)
 
@@ -2480,12 +2534,7 @@ class TFTDisplay:
                 self._draw_submenu_generic_rows(draw, options)
 
     def _draw_file_source(self, draw):
-        draw.text((16, 10), "Media Player", font=self.font_title, fill=ACCENT)
-        sf_text = state.sf_name
-        usb_text = usb_status_text()
-        right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
-        sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        self._draw_submenu_title(draw, "Media Player", usb_status_text())
         draw.text((18, 42), "Select source", font=self.font_small, fill=DIM)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in get_file_source_entries()] or ["(empty)"]
@@ -2493,12 +2542,8 @@ class TFTDisplay:
 
     def _draw_radio_browser(self, draw):
         title = "Radio Favorites" if state.radio_view_mode == "favorites" else "Internet Radio"
-        draw.text((16, 10), title, font=self.font_title, fill=ACCENT)
-        sf_text = state.sf_name
-        usb_text = usb_status_text()
-        right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
-        bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (bbox[2]-bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        scope = "Fav" if state.radio_view_mode == "favorites" else "All"
+        self._draw_submenu_title(draw, title, f"{scope}:{len(state.radio_entries)}")
         hint = "SELECT: enter/play  RIGHT: favorite  LEFT: back"
         draw.text((18, 42), hint, font=self.font_small, fill=DIM)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
@@ -2506,12 +2551,7 @@ class TFTDisplay:
         self._draw_scrolled_rows(draw, labels, state.radio_index, 70, 36, self.height - 50)
 
     def _draw_file_browser(self, draw):
-        draw.text((16, 10), "Media Player", font=self.font_title, fill=ACCENT)
-        sf_text = state.sf_name
-        usb_text = usb_status_text()
-        right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
-        sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        self._draw_submenu_title(draw, "Media Player", self._browser_source_label())
         path_text = state.browser_path
         if len(path_text) > 42:
             path_text = "..." + path_text[-39:]
@@ -2521,12 +2561,7 @@ class TFTDisplay:
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 36, self.height - 50)
 
     def _draw_player(self, draw):
-        draw.text((16, 10), "Now Playing", font=self.font_title, fill=ACCENT)
-        sf_text = state.sf_name
-        usb_text = usb_status_text()
-        right_text = f"{usb_text}  {sf_text}" if sf_text else usb_text
-        sf_bbox = draw.textbbox((0, 0), right_text, font=self.font_small)
-        draw.text((self.width - 16 - (sf_bbox[2]-sf_bbox[0]), 18), right_text, font=self.font_small, fill=ACCENT)
+        self._draw_submenu_title(draw, "Now Playing", self._player_source_label())
         name = state.player_path if state.player_proc_kind == "radio" else (Path(state.player_path).name if state.player_path else "No file")
         kind = "RADIO" if state.player_proc_kind == "radio" else (state.player_proc_kind.upper() if state.player_proc_kind else "-")
         draw.text((18, 44), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
@@ -2798,6 +2833,27 @@ class TFTDisplay:
         draw_centered_button(left_x1, left_y1, left_x2, left_y2, "LEFT", "Cancel")
         draw_centered_button(sel_x1, sel_y1, sel_x2, sel_y2, "SEL", "Eject")
 
+    def _footer_alt_slot(self, now: float | None = None) -> int:
+        if now is None:
+            now = time.time()
+        interval = max(0.5, float(FOOTER_ALT_INTERVAL_SEC))
+        return int(now // interval)
+
+    def _uno_footer_text(self) -> str:
+        with serial_lock:
+            connected = serial_handle is not None
+        return "UNO READY" if connected else "UNO ---"
+
+    def _volume_footer_text(self) -> str:
+        return f"VOL {int(state.volume_percent):02d}%"
+
+    def _normal_footer_left_text(self, now: float) -> str:
+        if now - state.last_volume_display_time < VOLUME_FOOTER_HOLD_SEC:
+            return self._volume_footer_text()
+        if self._footer_alt_slot(now) % 2 == 0:
+            return self._uno_footer_text()
+        return self._volume_footer_text()
+
     def _draw_footer(self, draw):
         draw.rectangle((0, self.height - 40, self.width, self.height), fill=(22, 28, 40))
         event = state.last_event[-20:] if state.last_event else "-"
@@ -2815,7 +2871,7 @@ class TFTDisplay:
 
         now = time.time()
         transient_active = bool(state.transient_footer_text) and now < state.transient_footer_until
-        left_text = state.transient_footer_text if transient_active else (footer_hint or event)
+        left_text = state.transient_footer_text if transient_active else (footer_hint or self._normal_footer_left_text(now))
         draw.text((12, self.height - 34), left_text, font=self.font_small, fill=ACCENT if transient_active else DIM)
 
         if not footer_hint and not transient_active:
@@ -8186,6 +8242,11 @@ def maybe_render(force: bool = False) -> None:
 
     if state.transient_footer_text and now >= state.transient_footer_until:
         state.transient_footer_text = ""
+        state.dirty = True
+
+    footer_slot = int(now // max(0.5, float(FOOTER_ALT_INTERVAL_SEC)))
+    if footer_slot != state.last_footer_alt_slot:
+        state.last_footer_alt_slot = footer_slot
         state.dirty = True
 
     if not state.dirty:
