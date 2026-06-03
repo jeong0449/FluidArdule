@@ -1,0 +1,431 @@
+{
+  "format": "fluid-ardule-combi-list",
+  "version": 1,
+  "engine": "fluidsynth",
+  "source_file": "FluidR3_GM.sf2",
+  "preset_index_file": "FluidR3_GM.presets.json",
+  "max_parts": 4,
+  "input_channel": 1,
+  "combinations": [
+    {
+      "id": "FC001",
+      "name": "Piano + Warm Pad",
+      "description": "Basic full-range piano layer with soft pad.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
+          "label": "Yamaha Grand Piano",
+          "bank": 0,
+          "program": 0,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
+          "label": "Warm Pad",
+          "bank": 0,
+          "program": 89,
+          "channel": 2,
+          "volume": 68,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC002",
+      "name": "Rhodes + Slow Strings",
+      "description": "Electric piano with gentle string support.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
+          "label": "Rhodes EP",
+          "bank": 0,
+          "program": 4,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:49:Slow-Strings",
+          "label": "Slow Strings",
+          "bank": 0,
+          "program": 49,
+          "channel": 2,
+          "volume": 62,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC003",
+      "name": "Grand + Strings + Choir",
+      "description": "Three-layer ballad ensemble.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
+          "label": "Yamaha Grand Piano",
+          "bank": 0,
+          "program": 0,
+          "channel": 1,
+          "volume": 100,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:48:Strings",
+          "label": "Strings",
+          "bank": 0,
+          "program": 48,
+          "channel": 2,
+          "volume": 70,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:52:Ahh-Choir",
+          "label": "Ahh Choir",
+          "bank": 0,
+          "program": 52,
+          "channel": 3,
+          "volume": 45,
+          "key_low": 48,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC004",
+      "name": "Big Layer Pad",
+      "description": "Four-layer cinematic pad stack.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:88:Fantasia",
+          "label": "Fantasia",
+          "bank": 0,
+          "program": 88,
+          "channel": 1,
+          "volume": 85,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
+          "label": "Warm Pad",
+          "bank": 0,
+          "program": 89,
+          "channel": 2,
+          "volume": 70,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:91:Space-Voice",
+          "label": "Space Voice",
+          "bank": 0,
+          "program": 91,
+          "channel": 3,
+          "volume": 55,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:94:Halo-Pad",
+          "label": "Halo Pad",
+          "bank": 0,
+          "program": 94,
+          "channel": 4,
+          "volume": 48,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC005",
+      "name": "Organ + Choir",
+      "description": "Drawbar organ with upper choir layer.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:16:DrawbarOrgan",
+          "label": "DrawbarOrgan",
+          "bank": 0,
+          "program": 16,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:52:Ahh-Choir",
+          "label": "Ahh Choir",
+          "bank": 0,
+          "program": 52,
+          "channel": 2,
+          "volume": 52,
+          "key_low": 60,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC006",
+      "name": "Rock Organ + Guitar",
+      "description": "Rock organ reinforced by overdrive guitar.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:18:Rock-Organ",
+          "label": "Rock Organ",
+          "bank": 0,
+          "program": 18,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:29:Overdrive-Guitar",
+          "label": "Overdrive Guitar",
+          "bank": 0,
+          "program": 29,
+          "channel": 2,
+          "volume": 62,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC007",
+      "name": "Bass / Piano Split",
+      "description": "Lower fingered bass and upper piano.",
+      "parts": [
+        {
+          "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
+          "label": "Fingered Bass",
+          "bank": 0,
+          "program": 33,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 47,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
+          "label": "Yamaha Grand Piano",
+          "bank": 0,
+          "program": 0,
+          "channel": 2,
+          "volume": 105,
+          "key_low": 48,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC008",
+      "name": "Bass / EP + Pad Split",
+      "description": "Lower bass with upper Rhodes and pad layer.",
+      "parts": [
+        {
+          "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
+          "label": "Fingered Bass",
+          "bank": 0,
+          "program": 33,
+          "channel": 1,
+          "volume": 105,
+          "key_low": 21,
+          "key_high": 47,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
+          "label": "Rhodes EP",
+          "bank": 0,
+          "program": 4,
+          "channel": 2,
+          "volume": 102,
+          "key_low": 48,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
+          "label": "Warm Pad",
+          "bank": 0,
+          "program": 89,
+          "channel": 3,
+          "volume": 60,
+          "key_low": 48,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC009",
+      "name": "Base Piano + Bass Split",
+      "description": "Full-range piano base with bass added only in the lower range.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
+          "label": "Yamaha Grand Piano",
+          "bank": 0,
+          "program": 0,
+          "channel": 1,
+          "volume": 96,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
+          "label": "Fingered Bass",
+          "bank": 0,
+          "program": 33,
+          "channel": 2,
+          "volume": 82,
+          "key_low": 21,
+          "key_high": 47,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    },
+    {
+      "id": "FC010",
+      "name": "Base EP + Brass Split",
+      "description": "Full-range Rhodes base with brass section on upper keys.",
+      "parts": [
+        {
+          "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
+          "label": "Rhodes EP",
+          "bank": 0,
+          "program": 4,
+          "channel": 1,
+          "volume": 96,
+          "key_low": 21,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:61:Brass-Section",
+          "label": "Brass Section",
+          "bank": 0,
+          "program": 61,
+          "channel": 2,
+          "volume": 72,
+          "key_low": 60,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        },
+        {
+          "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:62:Synth-Brass-1",
+          "label": "Synth Brass 1",
+          "bank": 0,
+          "program": 62,
+          "channel": 3,
+          "volume": 45,
+          "key_low": 60,
+          "key_high": 127,
+          "transpose": 0,
+          "mute": false,
+          "solo": false
+        }
+      ]
+    }
+  ]
+}
