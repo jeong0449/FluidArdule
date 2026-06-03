@@ -3,6 +3,56 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+## [2026-06-03 (KST)] — Implement Combi v0.1
+
+### Added
+
+- Added Combination (Combi) sound system
+- Added `~/sf2/user_combis.json`
+- Added `Sound → Combi` menu
+- Added Combi browser with Preview and Load workflow
+- Added Combi information screen after loading
+- Added active Combi display on Home screen
+
+### MIDI Routing
+
+- Added MIDI note duplication for layered sounds
+- Added keyboard split support using `key_low` / `key_high`
+- Added per-part transpose support
+- Added per-part volume support
+- Added MIDI channel routing engine for Combi playback
+
+### Controller Support
+
+- Added CC forwarding to Combi parts
+- Added Modulation Wheel forwarding
+- Added Sustain Pedal forwarding
+- Added Pitch Bend forwarding
+- Preserved CH10 drum pad operation during Combi playback
+
+### User Interface
+
+- Added Preview / Load button hints
+- Added Combi cancel and return flow
+- Added active Combi status display
+- Improved Combi list navigation and selection behavior
+- Added Combi summary screen after successful load
+
+### Internal Changes
+
+- Added Combi runtime state management
+- Added Combi JSON loading and validation
+- Improved FluidSynth restart and Combi initialization sequence
+- Fixed first-load initialization timing issues
+
+### Known Limitations
+
+- Mute/Solo not yet implemented
+- Combi editor not yet implemented
+- Combi save/rename not yet implemented
+- Long-term routing stability still under evaluation
+
+---
 
 ## [2026-06-02 (KST)]
 
