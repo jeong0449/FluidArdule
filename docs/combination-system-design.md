@@ -59,7 +59,7 @@ The current experimental implementation supports:
 - `~/sf2/user_combis.json`
 - 10 sample Combi definitions
 - FluidR3_GM.sf2-based Combi loading
-- up to 4 parts per Combi
+- up to 4 parts per Combi (experimental)
 - channel-based part assignment
 - Program Change and volume setup per part
 - CH1 keyboard input duplication to Combi part channels
@@ -72,6 +72,15 @@ The current experimental implementation supports:
 - Combi Preview / Load workflow
 - Combi Loaded information screen
 - Home screen display of the currently loaded Combi name
+
+## 2.1a Stability Notes
+
+Current testing suggests:
+
+- 2-part and 3-part layers are generally stable
+- 4-part layers remain experimental
+- Heavy 4-part layering may trigger MIDI routing or serial communication instability
+- Additional optimization is required before 4-part layers can be considered production-ready
 
 ## 2.2 Still Future Work
 
@@ -667,6 +676,7 @@ Combi Loaded
 ## 13.2 v0.2 Recommended
 
 - stabilize split behavior
+- improve 4-part layer stability
 - reduce serial write pressure during Combi routing
 - add Combi part view refinements
 - add mute/solo runtime controls
@@ -684,41 +694,7 @@ Combi Loaded
 
 ---
 
-# 14. Proposed Internal Module Separation
-
-The Combination system is now large enough to justify partial file separation.
-
-Recommended structure:
-
-```text
-launch_fluidardule.py
-fluidardule_combi.py
-```
-
-Suggested responsibilities:
-
-## launch_fluidardule.py
-
-- UI
-- rendering
-- button handling
-- menu flow
-- Home screen state display
-
-## fluidardule_combi.py
-
-- Combination JSON
-- validation
-- MIDI routing
-- key filtering
-- channel duplication
-- active note tracking
-- CH10 pass-through
-- Combination runtime state
-
----
-
-# 15. Runtime Stability Notes
+# 14. Runtime Stability Notes
 
 The Combi router increases Python-side MIDI processing load.
 
@@ -741,7 +717,7 @@ Recommended mitigation:
 
 ---
 
-# 16. Final Notes
+# 15. Final Notes
 
 The Fluid Ardule Combi system has moved from a future proposal to an experimental working feature.
 
