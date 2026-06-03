@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260603q_combi-split-routing"
+SCRIPT_VERSION = "260603w_home-six-row-render-fix"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -1967,6 +1967,7 @@ class TFTDisplay:
             prev_snapshot.get("header_version_label") != self._display_script_version()
             or prev_snapshot.get("header_wifi_label") != self._header_wifi_text()
         )
+        footer_changed = self._footer_changed(prev_snapshot)
 
         if self._main_values_changed(prev_snapshot) or header_changed:
             image = self.prev_image.copy()
@@ -1983,25 +1984,60 @@ class TFTDisplay:
             self.prev_snapshot = self._snapshot_state()
             return True
 
-        return self._render_list_incremental_common(
-            prev_snapshot=prev_snapshot,
-            prev_index=prev_index,
-            curr_index=state.menu_index,
-            items_len=len(MAIN_MENU),
-            top_y=56,
-            row_h=42,
-            bottom_y=self.height - 48,
-            list_bbox=(12, 52, self.width - 12, self.height - 48),
-            row_bbox_func=lambda vis: (20, 56 + vis * 42, self.width - 20, 56 + vis * 42 + 42),
-            redraw_current_view=lambda draw: (
-                draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
-                self._draw_main(draw)
-            ),
-        )
+        # The compact six-row Home layout uses tighter spacing than the older
+        # five-row layout.  Updating only the previous/current row can leave
+        # small stale rounded-rectangle fragments on the physical framebuffer,
+        # especially while the highlight moves quickly.  Home is small enough
+        # that redrawing the whole list area is safer and still inexpensive.
+        image = self.prev_image.copy()
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        self._draw_main(draw)
+        if footer_changed:
+            self._draw_footer(draw)
+        self._write_partial_image(image, (12, 52, self.width - 12, self.height - 48))
+        if footer_changed:
+            self._write_partial_image(image, (0, self.height - 40, self.width, self.height))
+        self.prev_image = image.copy()
+        self.prev_snapshot = self._snapshot_state()
+        return True
 
     def _render_submenu_incremental(self, prev_snapshot: dict) -> bool:
         if self.prev_image is None or prev_snapshot.get("submenu_key") != state.submenu_key:
             return False
+
+        # Combi list/detail screens use a custom local layout: the list box is
+        # shorter than the normal submenu box and a Preview/Load legend lives
+        # above the global footer.  The generic two-row partial updater assumes
+        # normal submenu geometry, which can leave stale highlight fragments or
+        # update the wrong rectangle while scrolling.  Redraw the full Combi
+        # submenu body instead; this is visually safer and still cheap on a
+        # 480x320 TFT.
+        if state.submenu_key in {"combi_load", "combi_detail"}:
+            footer_changed = self._footer_changed(prev_snapshot)
+            prev_index = prev_snapshot.get("submenu_index")
+            prev_preview = prev_snapshot.get("combi_preview_active")
+            prev_combi_name = prev_snapshot.get("current_combi_name")
+            if (
+                prev_index == state.submenu_index
+                and not footer_changed
+                and prev_preview == state.combi_preview_active
+                and prev_combi_name == state.current_combi_name
+            ):
+                return False
+
+            image = self.prev_image.copy()
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, self.width, self.height - 40), fill=BACKGROUND)
+            self._draw_submenu(draw)
+            self._write_partial_image(image, (0, 0, self.width, self.height - 40))
+            if footer_changed:
+                self._draw_footer(draw)
+                self._write_partial_image(image, (0, self.height - 40, self.width, self.height))
+            self.prev_image = image.copy()
+            self.prev_snapshot = self._snapshot_state()
+            return True
+
         options = get_submenu_options()
         prev_index = prev_snapshot.get("submenu_index")
         return self._render_list_incremental_common(
@@ -2286,9 +2322,12 @@ class TFTDisplay:
             draw.text((x, bottom_y - 24), "▼", font=self.font_small, fill=DIM)
 
     def _draw_main(self, draw):
+        # Home has exactly six top-level items.  Use a compact Home-only row
+        # layout so all items are visible without scrolling, while keeping the
+        # submenu/list screens at their existing, more relaxed spacing.
         y = 56
-        row_h = 42
-        row_margin = 4
+        row_h = 36
+        row_margin = 3
         list_bottom = self.height - 48
         draw.rounded_rectangle((12, y - 4, self.width - 12, list_bottom), radius=12, fill=BOX_BG)
 
@@ -3037,7 +3076,7 @@ def wrap_text(text: str, font, max_width: int) -> list[str]:
 def draw_left_vcentered_text(draw, x: int, y: int, h: int, text: str, font, fill):
     bbox = draw.textbbox((0, 0), text, font=font)
     th = bbox[3] - bbox[1]
-    ty = y + max(0, (h - th) // 2) - bbox[1] - 1
+    ty = y + max(0, (h - th) // 2) - bbox[1]
     draw.text((x, ty), text, font=font, fill=fill)
     return draw.textbbox((x, ty), text, font=font)
 
@@ -3047,7 +3086,7 @@ def draw_right_vcentered_text(draw, right_x: int, y: int, h: int, text: str, fon
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     tx = right_x - tw
-    ty = y + max(0, (h - th) // 2) - bbox[1] - 1
+    ty = y + max(0, (h - th) // 2) - bbox[1]
     draw.text((tx, ty), text, font=font, fill=fill)
     return draw.textbbox((tx, ty), text, font=font)
 
@@ -3055,7 +3094,7 @@ def draw_right_vcentered_text(draw, right_x: int, y: int, h: int, text: str, fon
 def draw_left_vcentered_text_list(draw, x: int, y: int, h: int, text: str, font, fill):
     bbox = draw.textbbox((0, 0), text, font=font)
     th = bbox[3] - bbox[1]
-    ty = y + max(0, (h - th) // 2) - bbox[1] - 1
+    ty = y + max(0, (h - th) // 2) - bbox[1]
     draw.text((x, ty), text, font=font, fill=fill)
     return draw.textbbox((x, ty), text, font=font)
 
@@ -5126,7 +5165,18 @@ def enter_combi_load_menu(return_mode: str | None = None) -> None:
     state.ui_mode = "submenu"
     state.submenu_key = "combi_load"
     state.submenu_return_mode = return_mode or "main"
-    state.submenu_index = clamp_index(state.submenu_index, len(state.combi_entries))
+
+    # Combi browser must not inherit submenu_index from Home/Sound menu.
+    # Prefer the currently loaded Combi when available; otherwise start at 0.
+    target_index = 0
+    current_name = str(state.current_combi_name or "").strip()
+    if current_name:
+        for i, item in enumerate(state.combi_entries):
+            if str(item.get("name") or "").strip() == current_name:
+                target_index = i
+                break
+    state.submenu_index = clamp_index(target_index, len(state.combi_entries))
+
     invalidate_full_display()
     mark_dirty(f"Combi: {len(state.combi_entries)} saved")
 
