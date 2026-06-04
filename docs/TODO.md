@@ -42,3 +42,42 @@ Allow the rotary encoder to navigate visible menu items directly.
 Current Fluid Ardule navigation relies primarily on the 5-button keypad for menu traversal. However, many hardware synthesizers allow users to browse visible menu items directly using a rotary encoder.
 
 Providing optional encoder-based navigation could improve usability while preserving compatibility with the existing keypad-driven interface.
+
+---
+
+## Low Priority
+
+### Media Player Startup Latency
+
+Media playback currently launches a new mpv process for each playback request.
+
+Current sequence:
+
+1. Stop existing player
+2. Stop FluidSynth
+3. Launch mpv
+4. Initialize decoder/audio device
+5. Begin playback
+
+This can introduce noticeable startup latency on Raspberry Pi 3B.
+
+#### Possible Improvements
+
+- Keep mpv running in idle mode
+- Control playback via IPC (`loadfile`)
+- Reduce FluidSynth shutdown/startup overhead
+- Add timing instrumentation to identify bottlenecks
+
+#### Expected Benefits
+
+- Faster media playback startup
+- Improved responsiveness
+- Better user experience when browsing media files
+
+#### Notes
+
+Current behavior is fully functional and stable.
+
+This is considered a performance optimization rather than a bug fix.
+
+Implementation should be deferred until higher-priority usability and stability issues are resolved.
