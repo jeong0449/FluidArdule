@@ -43,6 +43,22 @@ Current Fluid Ardule navigation relies primarily on the 5-button keypad for menu
 
 Providing optional encoder-based navigation could improve usability while preserving compatibility with the existing keypad-driven interface.
 
+### Preserve Media Playback Context
+
+When returning to Media Player after stopping playback, restore the last file or directory instead of starting from the browser root.
+
+#### Potential Benefits
+
+- Faster SoundFont comparison workflow
+- Reduced navigation effort
+- More natural return behavior after playback
+
+#### Notes
+
+Particularly useful when repeatedly auditioning the same MIDI file with different SoundFonts.
+
+Current behavior remains functional and predictable.
+
 ---
 
 ## Low Priority
