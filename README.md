@@ -6,9 +6,8 @@ A modular DIY hardware workstation that combines Raspberry Pi–based audio synt
 
 Designed to behave like a dedicated musical instrument rather than a general-purpose computer, Fluid Ardule provides a self-contained environment for SoundFont synthesis, MIDI playback, media playback, Internet radio, and external MIDI module integration.
 
-<p align="center">
-  <img src="docs/images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="900">
-</p>
+<img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
+
 
 ---
 
