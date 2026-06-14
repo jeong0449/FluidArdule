@@ -1,8 +1,14 @@
 # Fluid Ardule
 
-**Turn a Raspberry Pi and Arduino into a powerful standalone MIDI sound module.**
+**Turn a Raspberry Pi and Arduino into a powerful standalone MIDI sound module and media workstation.**
 
-A modular DIY MIDI sound module combining Raspberry Pi synthesis with Arduino-based hardware control.
+A modular DIY hardware workstation that combines Raspberry Pi–based audio synthesis with Arduino-powered hardware control.
+
+Designed to behave like a dedicated musical instrument rather than a general-purpose computer, Fluid Ardule provides a self-contained environment for SoundFont synthesis, MIDI playback, media playback, Internet radio, and external MIDI module integration.
+
+<p align="center">
+  <img src="docs/images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="900">
+</p>
 
 ---
 
