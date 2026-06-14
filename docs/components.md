@@ -24,7 +24,7 @@ A0
  ├─ Button 3 ─ 5.1kΩ ─ GND
  ├─ Button 4 ─ 20kΩ ─ GND
  └─ Button 5 ─ 47kΩ ─ GND
-````
+```
 
 Each button produces a unique ADC value that can be distinguished by the firmware.
 
@@ -35,7 +35,7 @@ Each button produces a unique ADC value that can be distinguished by the firmwar
 >
 > A key improvement is the firmware's self-calibration feature. During calibration, the actual ADC values are measured and stored in EEPROM, allowing the system to compensate for resistor tolerances, ADC variation, wiring differences, and long-term drift.
 >
->In practice, the self-calibration mechanism proved more important than the exact resistor values themselves and significantly improved long-term reliability.
+> In practice, the self-calibration mechanism proved more important than the exact resistor values themselves and significantly improved long-term reliability.
 
 ### PCM5102A DAC Note
 
