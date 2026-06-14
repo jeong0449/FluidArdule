@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260603w_home-six-row-render-fix"
+SCRIPT_VERSION = "260614"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -248,7 +248,7 @@ MAIN_MENU = [
 ]
 
 QUICK_MENU_ITEMS = [
-    "Resume",
+    "Return",
     "Now Playing",
     "Home",
     "Sound",
@@ -2923,8 +2923,8 @@ class TFTDisplay:
         ctx = quick_resume_label()
         labels = []
         for item in QUICK_MENU_ITEMS:
-            if item == "Resume" and ctx:
-                labels.append((f"Resume  [{ctx}]", False))
+            if item == "Return" and ctx:
+                labels.append((f"Return  [{ctx}]", False))
             else:
                 labels.append((item, False))
         draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
@@ -7870,7 +7870,7 @@ def enter_now_playing() -> None:
 
 def quick_menu_select() -> None:
     item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
-    if item == "Resume":
+    if item == "Return":
         restore_quick_snapshot()
         return
     if item == "Now Playing":
