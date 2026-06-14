@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260614b"
+SCRIPT_VERSION = "260614c"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -3133,8 +3133,10 @@ def file_player_active() -> bool:
 
 def media_player_home_label() -> str:
     if file_player_active() and state.player_path:
-        status = "PAUSE" if state.player_paused or state.player_status == "Paused" else "PLAY"
-        return f"{status} {Path(state.player_path).name}"
+        name = Path(state.player_path).name
+        if state.player_paused or state.player_status == "Paused":
+            return f"({name})"
+        return name
     return "Browse"
 
 
