@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260614"
+SCRIPT_VERSION = "260614b"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -2225,6 +2225,8 @@ class TFTDisplay:
     def _main_menu_value(self, idx: int) -> str:
         label = MAIN_MENU[idx] if 0 <= idx < len(MAIN_MENU) else ""
         if label == "Sound":
+            if file_player_active():
+                return "Media active"
             # A loaded Combi is the current performance state.  Show it before
             # the underlying SoundFont/Preset so Home does not misleadingly
             # display the pre-combi single preset.
@@ -2239,7 +2241,7 @@ class TFTDisplay:
                 return "*" + shorten_text(current_name, 18)
             return f"{state.sf_name}/{state.current_preset_name}"
         if label == "Media Player":
-            return Path(state.player_path).name if state.player_path else "Browse"
+            return media_player_home_label()
         if label == "Controls":
             return "Sound Edit"
         if label == "MIDI Mode":
@@ -2337,17 +2339,18 @@ class TFTDisplay:
             top = y + visible_row * row_h
             label = MAIN_MENU[idx]
             value = self._main_menu_value(idx)
+            sound_blocked = label == "Sound" and file_player_active()
             box_top = top + row_margin
             box_bottom = top + row_h - row_margin
 
             if idx == state.menu_index:
                 draw.rounded_rectangle((20, box_top, self.width - 20, box_bottom), radius=8, fill=SELECT_BG)
-                fill = FG
-                value_fill = FG
+                fill = DIM if sound_blocked else FG
+                value_fill = DIM if sound_blocked else FG
                 prefix = "▶ "
             else:
                 fill = DIM
-                value_fill = ACCENT if value else DIM
+                value_fill = DIM if sound_blocked else (ACCENT if value else DIM)
                 prefix = "  "
 
             label_text = f"{prefix}{label}"
@@ -3126,6 +3129,13 @@ def clear_modal_message() -> None:
 
 def file_player_active() -> bool:
     return state.player_status in {"Playing", "Paused"} or (player_proc is not None and player_proc.poll() is None)
+
+
+def media_player_home_label() -> str:
+    if file_player_active() and state.player_path:
+        status = "PAUSE" if state.player_paused or state.player_status == "Paused" else "PLAY"
+        return f"{status} {Path(state.player_path).name}"
+    return "Browse"
 
 
 def block_sound_change_while_playing() -> bool:
@@ -7710,10 +7720,15 @@ def apply_current_submenu_selection() -> None:
 def handle_main_select() -> None:
     label = MAIN_MENU[clamp_index(state.menu_index, len(MAIN_MENU))]
     if label == "Sound":
+        if block_sound_change_while_playing():
+            return
         preload_sound_source_count_cache()
         enter_submenu("soundfont")
     elif label == "Media Player":
-        enter_file_browser()
+        if file_player_active() and state.player_path:
+            enter_now_playing()
+        else:
+            enter_file_browser()
     elif label == "Controls":
         enter_sound_edit()
     elif label == "MIDI Mode":
