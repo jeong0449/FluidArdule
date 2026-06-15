@@ -4,9 +4,29 @@
 
 ## High Priority
 
-### Encoder navigation magnitude
+### Encoder reliability and missed detents
 
-UNO reports ENC:+/-1..3 correctly, but Python UI navigation does not always appear to consume the full reported movement.
+Current production firmware uses polling-based Gray-code encoder decoding.
+
+#### Observed behavior
+
+- Encoder occasionally misses detents (approximately once every 3–5 clicks).
+- Reproduced across multiple encoder units.
+- Encoder activity LED occasionally fails to trigger on a physical detent.
+- ENC:+/-1..3 acceleration logic appears functional, but missed detents may occur before events are reported to the Python UI.
+
+#### Investigation
+
+- Production firmware has never used ISR-based encoder decoding.
+- ISR-based encoder handling exists in hardware test firmware and may be a candidate for migration.
+- Current implementation resets accumulated transitions when an illegal Gray-code transition is detected, potentially discarding a partial detent.
+- Missed detents may therefore originate in the UNO firmware before encoder events reach the Python UI.
+
+#### Planned Actions
+
+- Evaluate migration of ISR-based encoder decoding into production firmware.
+- Compare reliability against the current polling implementation.
+- Determine whether navigation magnitude issues originate in UNO firmware, Python UI event handling, or both.
 
 Status: Investigating
 
