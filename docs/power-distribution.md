@@ -35,7 +35,7 @@ while VBUS is supplied directly from the system's Mean Well LRS-50-5 5V power su
 
 ### USB Peripheral Power Injection Adapter
 
-![USB Peripheral Power Injection Adapter](images/2026-06-15-usb-power-injection-adapter.png)
+![USB Peripheral Power Injection Adapter](../images/2026-06-15-usb-power-injection-adapter.png)
 
 **Upper:** Electrical concept of the adapter. VBUS from the Raspberry Pi USB port is disconnected, while D+, D−, and GND remain connected. A regulated 5V supply from the system Mean Well LRS-50-5 SMPS is injected directly into the USB peripheral side.
 
