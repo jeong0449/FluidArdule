@@ -181,6 +181,25 @@ Hardware assembly can be inferred from the system overview and components docume
 
 ---
 
+## Documentation
+
+Additional technical notes are available:
+
+- [System Architecture](architecture.md)
+- [Components List](docs/components.md)
+- [Installation Guide](docs/installation.md)
+- [Combination System Design](docs/combination-system-design.md)
+- [Power Distribution and Undervoltage Troubleshooting](docs/power-distribution.md)
+
+Topics include:
+
+- Raspberry Pi 3B power distribution
+- USB Peripheral Power Injection Adapter
+- Undervoltage diagnostics (`vcgencmd get_throttled`)
+- Hardware reliability improvements
+
+---
+
 ## Related Projects
 
 - https://github.com/jeong0449/NanoArdule
