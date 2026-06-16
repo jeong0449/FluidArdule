@@ -3,6 +3,35 @@
 All notable changes to the Fluid Ardule project will be documented in this file.
 
 ---
+# Changelog
+
+## [2026-06-16 (KST)]
+
+### Improved Responsiveness
+
+This release significantly improves the responsiveness of Fluid Ardule through coordinated enhancements to both the UNO-1 controller firmware and the Raspberry Pi UI.
+
+#### UNO-1 Firmware
+
+- Replaced the polling-based rotary encoder with an interrupt-driven (ISR) implementation.
+- Eliminated missed encoder steps during rapid rotation.
+- Tuned encoder transition scaling for more consistent encoder behavior.
+- Reduced button debounce time for faster response.
+
+#### Raspberry Pi UI
+
+- Menu navigation now preserves the full encoder delta (`ENC:+/-N`).
+- Removed the legacy encoder navigation debounce filter.
+- Improved high-speed menu scrolling without losing encoder movement.
+- Optimized menu navigation responsiveness while maintaining TFT render throttling for audio stability.
+
+#### Result
+
+- Fast encoder rotation now scrolls multiple menu items naturally.
+- Full-screen menu scrolling is smooth and reliable without observable missed steps.
+- Overall controller and UI responsiveness have been significantly improved while preserving stable MIDI and audio performance.
+
+---
 ## [2026-06-03 (KST)] — Implement Combi v0.1
 
 ### Added
