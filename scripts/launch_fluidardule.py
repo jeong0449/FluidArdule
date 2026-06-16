@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260614c"
+SCRIPT_VERSION = "260616c"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -213,7 +213,7 @@ MODIFIED_VALUE = (255, 220, 90)
 # Frequent screen updates can interfere with real-time audio on Raspberry Pi,
 # causing jitter or glitches during MIDI playback.
 # Increasing this value improves audio stability at the cost of UI responsiveness.
-RENDER_MIN_INTERVAL = 0.15
+RENDER_MIN_INTERVAL = 0.10
 # During early boot, the framebuffer can be overwritten by late-starting
 # splash/console components after the Python UI has already drawn Home.
 # Force occasional full redraws only during this short boot window so the
@@ -335,7 +335,7 @@ SOUND_EDIT_MAX = 127
 SOUND_EDIT_STEP = 1
 # UNO-1 firmware owns low-level encoder acceleration and reports its profile via ACCEL.
 # Python interprets encoder input differently depending on context:
-#   - menu navigation: use direction only, always move one item per detent event
+#   - menu/list navigation: use the signed ENC magnitude from UNO as row delta
 #   - Sound Edit value editing: use the signed ENC magnitude from UNO and scale it
 #     non-linearly according to the current UNO acceleration profile
 SOUND_EDIT_SEND_ALL_CHANNELS = True
@@ -9210,6 +9210,152 @@ def handle_serial_line(line: str) -> None:
 
 
 
+
+def _soundfont_nav_status(index: int) -> str:
+    """Return the footer/status text for the highlighted Sound Source row."""
+    if index < len(SOUNDFONTS):
+        total, drums = soundfont_preset_counts_cached(index)
+        sf_name = source_name_for_index(index)
+        return f"{sf_name}: {total} presets, {drums} drums" if total else sf_name
+    if index == len(SOUNDFONTS):
+        return f"User Preset: {user_preset_count_cached()} saved"
+    if index == len(SOUNDFONTS) + 1:
+        return f"Combi: {user_combi_count_cached()} saved"
+    return "Refresh current sound"
+
+
+def _move_index_by_delta(current: int, delta: int, length: int) -> tuple[int, bool]:
+    """Clamp an index movement and report whether it actually moved."""
+    if length <= 0:
+        return 0, False
+    new_index = max(0, min(length - 1, int(current) + int(delta)))
+    return new_index, (new_index != int(current))
+
+
+def handle_encoder_navigation_step(step: int) -> bool:
+    """Apply ENC:+/-N as an N-row navigation move where it is safe.
+
+    This intentionally updates the target selection once, rather than calling
+    handle_button_event("UP"/"DOWN") repeatedly.  It keeps one LED pulse and
+    one render while preserving the old edge messages and special preview paths.
+    Returns True when the encoder event was consumed.
+    """
+    if step == 0:
+        return True
+
+    # While a file or radio stream is actually playing, keep the old safety rule:
+    # do not let accidental encoder motion jump tracks or stations.
+    if state.ui_mode == "player" and state.player_status == "Playing":
+        mark_dirty("Encoder ignored while playing")
+        return True
+
+    # Player screen when stopped has side-effectful UP/DOWN actions; keep that
+    # path conservative and let the existing button handler decide one action.
+    if state.ui_mode == "player":
+        handle_button_event("DOWN" if step > 0 else "UP")
+        return True
+
+    pulse_button_activity()
+    direction = "DOWN" if step > 0 else "UP"
+    edge_msg = "Last item" if step > 0 else "First item"
+
+    if state.ui_mode == "quick_menu":
+        if QUICK_MENU_ITEMS:
+            state.quick_menu_index = (state.quick_menu_index + step) % len(QUICK_MENU_ITEMS)
+        mark_dirty(None)
+        return True
+
+    if state.ui_mode == "radio_browser":
+        labels_len = len(radio_display_labels())
+        new_index, moved = _move_index_by_delta(state.radio_index, step, labels_len)
+        state.radio_index = new_index
+        mark_dirty(None if moved else ("Last station" if step > 0 else "First station"))
+        return True
+
+    if state.ui_mode == "power_menu":
+        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE"}:
+            mark_dirty("Power action running")
+            return True
+        if state.power_confirm_action:
+            new_index, moved = _move_index_by_delta(state.power_confirm_index, step, len(POWER_CONFIRM_ITEMS))
+            state.power_confirm_index = new_index
+            mark_dirty(None if moved else edge_msg)
+            return True
+        new_index, moved = _move_index_by_delta(state.power_menu_index, step, len(POWER_MENU_ITEMS))
+        state.power_menu_index = new_index
+        mark_dirty(None if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "file_source":
+        entries = get_file_source_entries()
+        new_index, moved = _move_index_by_delta(state.browser_index, step, len(entries))
+        state.browser_index = new_index
+        mark_dirty(None if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "file_browser":
+        new_index, moved = _move_index_by_delta(state.browser_index, step, len(state.browser_entries))
+        state.browser_index = new_index
+        mark_dirty(None if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "external_midi_pc":
+        move_external_midi_pc_selection(step)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        state.submenu_index = new_index
+        mark_dirty(_soundfont_nav_status(new_index) if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "preset_category":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        state.submenu_index = new_index
+        state.category_index = new_index
+        if moved and state.category_entries:
+            mark_dirty(state.category_entries[state.category_index])
+        else:
+            mark_dirty("Category" if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "combi_load":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        state.submenu_index = new_index
+        mark_dirty("Combi browse" if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "preset":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        if moved:
+            preview_preset_at_index(new_index)
+        else:
+            mark_dirty(edge_msg)
+        return True
+
+    if state.ui_mode == "main":
+        new_index, moved = _move_index_by_delta(state.menu_index, step, len(MAIN_MENU))
+        state.menu_index = new_index
+        mark_dirty(None if moved else edge_msg)
+        return True
+
+    # Generic submenu-like screens without special preview side effects.
+    if state.ui_mode == "submenu":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        state.submenu_index = new_index
+        mark_dirty(None if moved else edge_msg)
+        return True
+
+    # Unknown context: preserve previous direction-only behavior.
+    handle_button_event(direction)
+    return True
+
+
 def handle_encoder_value(value: str) -> None:
     global last_enc_time
 
@@ -9222,47 +9368,24 @@ def handle_encoder_value(value: str) -> None:
         return
 
     if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
+        # Character editing remains deliberately fine-grained.
         rename_char_delta(1 if step > 0 else -1)
         last_enc_time = now
         return
 
     # In Sound Edit, do not apply the global 20 ms navigation debounce.
     # UNO-1 already sends accelerated ENC steps, so use the raw signed value.
-    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
-        if btn == "SEL_LP":
-            pulse_button_activity(); cancel_user_preset_rename(); return
-        if btn == "SEL":
-            pulse_button_activity(); save_user_preset_rename(); return
-        if btn == "LEFT":
-            pulse_button_activity(); move_rename_cursor(-1); return
-        if btn == "RIGHT":
-            pulse_button_activity(); move_rename_cursor(+1); return
-        if btn == "UP":
-            pulse_button_activity(); insert_rename_space(); return
-        if btn == "DOWN":
-            pulse_button_activity(); delete_rename_char(); return
-        mark_dirty(f"BTN ignored: {btn}")
-        return
-
     if state.ui_mode == "sound_edit":
         adjust_sound_edit_value(step)
         last_enc_time = now
         return
 
-    if now - last_enc_time < 0.02:   # 20ms debounce for navigation modes
-        return
+    # Do not time-debounce navigation ENC lines here.
+    # UNO-1/ISR already debounces and coalesces encoder motion into ENC:+/-N.
+    # Dropping fast consecutive serial lines makes menu navigation feel slower
+    # than Sound Edit/Controller, which intentionally consumes every raw ENC step.
     last_enc_time = now
 
-    # Encoder rotation is mapped to UP/DOWN navigation. While a file is playing,
-    # ignore it explicitly so a reconnect glitch or accidental turn cannot jump tracks.
-    if state.ui_mode == "player" and state.player_status == "Playing":
-        mark_dirty("Encoder ignored while playing")
-        return
-
-    # For menu/navigation contexts, ignore UNO acceleration magnitude and use
-    # only the direction. This prevents fast encoder turns from skipping menu
-    # items unpredictably; repeated detent events still allow quick scrolling.
-    #
     # Slow mechanical rotary motion can occasionally produce one spurious
     # opposite-direction event near a detent. Ignore only a short opposite
     # pulse after a recently accepted navigation step; deliberate direction
@@ -9277,8 +9400,7 @@ def handle_encoder_value(value: str) -> None:
 
     state.last_nav_enc_dir = nav_dir
     state.last_nav_enc_time = now
-    event_name = "DOWN" if nav_dir > 0 else "UP"
-    handle_button_event(event_name)
+    handle_encoder_navigation_step(step)
 
 
 def maybe_render(force: bool = False) -> None:
