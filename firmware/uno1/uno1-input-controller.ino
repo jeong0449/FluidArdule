@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 
 // Fluid Ardule UNO-1 input firmware
-// 20260531 encoder reversal reset version - tolerant release detection + ENC/SELECT release guard
+// 20260616 encoder ISR version - interrupt-driven quadrature capture + tolerant release detection
 //
 // Uno -> Pi protocol:
 //   UNO_READY
@@ -48,7 +48,7 @@ const uint8_t PIN_LED_PLAY = 12;
 const uint8_t PIN_LED_MIDI = 11;
 
 // ---- Timing ----
-const unsigned long DEBOUNCE_MS = 45;
+const unsigned long DEBOUNCE_MS = 20;
 const unsigned long LONGPRESS_MS = 700;
 const unsigned long CAL_COMBO_HOLD_MS = 900;  // Encoder switch + SELECT hold to enter keypad calibration
 const unsigned long READY_REPEAT_MS = 3000;
@@ -81,7 +81,7 @@ uint16_t keypadCenter[5] = {60, 195, 355, 560, 805};
 // Keypad filtering.
 // Odd sample count allows a true median, which rejects single-sample spikes better
 // than a simple average on a resistor-ladder keypad.
-const uint8_t KEYPAD_ADC_SAMPLES = 7;
+const uint8_t KEYPAD_ADC_SAMPLES = 5;
 
 // EEPROM layout for keypad calibration.
 const uint16_t CAL_MAGIC = 0xFA10;
@@ -171,8 +171,16 @@ unsigned long keyPressedMs = 0;
 bool keyLongSent = false;
 
 // ---- Encoder state ----
-int lastEncA = HIGH;
-int lastEncB = HIGH;
+// Rotation is captured in ISRs on D2/D3 so loop-time work such as LCD refresh,
+// A0 keypad median filtering, Serial RX, or calibration UI cannot miss short
+// quadrature transitions. The main loop consumes whole detents and keeps the
+// existing ENC:+/-N protocol and acceleration behavior.
+volatile uint8_t encIsrLastEncoded = 0;
+volatile int8_t encIsrTransitionAccum = 0;
+volatile int8_t encIsrStepAccum = 0;
+volatile bool encIsrReady = false;
+const int8_t ENC_TRANSITIONS_PER_STEP = 4;  // Keep previous UI feel. Use 4 if encoder becomes too sensitive.
+
 int lastEncSw = HIGH;
 bool encSwStable = HIGH;
 unsigned long encSwChangedMs = 0;
@@ -1191,95 +1199,114 @@ void updateKeypad() {
   }
 }
 
-void updateEncoder() {
-  int a = digitalRead(PIN_ENC_A);
-  int b = digitalRead(PIN_ENC_B);
-  unsigned long now = millis();
+void encoderIsrUpdate() {
+  uint8_t encoded = (digitalRead(PIN_ENC_A) == HIGH ? 0x02 : 0x00) |
+                    (digitalRead(PIN_ENC_B) == HIGH ? 0x01 : 0x00);
 
-  // Encoder rotation only: use a valid-transition quadrature decoder instead
-  // of a single-edge direction guess. This rejects illegal/bouncy A/B jumps
-  // that can otherwise produce a one-step reverse glitch.
-  //
-  // Keep the same UI feel as the previous both-edge version by emitting one
-  // ENC step after two valid quadrature transitions. If a specific encoder
-  // feels too sensitive, change ENC_TRANSITIONS_PER_STEP from 2 to 4.
-  static bool encDecoderInit = false;
-  static uint8_t lastEncoded = 0;
-  static int8_t encTransitionAccum = 0;
-  const int8_t ENC_TRANSITIONS_PER_STEP = 2;
-
-  uint8_t encoded = ((a == HIGH) ? 0x02 : 0x00) | ((b == HIGH) ? 0x01 : 0x00);
-
-  if (!encDecoderInit) {
-    lastEncoded = encoded;
-    encDecoderInit = true;
-  } else if (encoded != lastEncoded) {
-    uint8_t transition = (lastEncoded << 2) | encoded;
-    int8_t delta = 0;
-
-    // Valid quadrature transitions only. Illegal two-bit jumps are ignored.
-    switch (transition) {
-      case 0b0001:
-      case 0b0111:
-      case 0b1110:
-      case 0b1000:
-        delta = -1;
-        break;
-      case 0b0010:
-      case 0b1011:
-      case 0b1101:
-      case 0b0100:
-        delta = +1;
-        break;
-      default:
-        delta = 0;
-        break;
-    }
-
-    if (delta != 0) {
-      // If the user reverses the encoder direction before a full step has
-      // been emitted, discard the unfinished movement from the previous
-      // direction.  Otherwise the first click after reversal can be consumed
-      // merely cancelling encTransitionAccum, which feels unlike a commercial
-      // synth/workstation encoder.  Keep ENC_TRANSITIONS_PER_STEP at 2 so the
-      // decoder still rejects most bounce-induced reverse glitches.
-      if (encTransitionAccum != 0 &&
-          ((delta > 0 && encTransitionAccum < 0) ||
-           (delta < 0 && encTransitionAccum > 0))) {
-        encTransitionAccum = 0;
-      }
-
-      encTransitionAccum += delta;
-
-      if (encTransitionAccum >= ENC_TRANSITIONS_PER_STEP || encTransitionAccum <= -ENC_TRANSITIONS_PER_STEP) {
-        int direction = (encTransitionAccum > 0) ? +1 : -1;
-        encTransitionAccum = 0;
-
-        holdInputLed();
-
-        if (keypadCalMode) {
-          // Ignore encoder rotation during keypad calibration.
-        } else if (accelSettingMode) {
-          setAccelDraftDelta(direction);
-        } else {
-          unsigned long dt = (lastEncStepMs == 0) ? 9999UL : (now - lastEncStepMs);
-          int mult = calcAccelMultiplier(dt, accelProfile);
-          int step = direction * mult;
-          sendEncStep(step);
-          showEncoderEvent(step);
-          lastEncStepMs = now;
-        }
-      }
-    } else {
-      // Resync after an illegal transition without producing a step.
-      encTransitionAccum = 0;
-    }
-
-    lastEncoded = encoded;
+  if (!encIsrReady) {
+    encIsrLastEncoded = encoded;
+    encIsrReady = true;
+    return;
   }
 
-  lastEncA = a;
-  lastEncB = b;
+  if (encoded == encIsrLastEncoded) return;
+
+  uint8_t transition = (encIsrLastEncoded << 2) | encoded;
+  int8_t delta = 0;
+
+  // Same valid-transition table as the former polling decoder.
+  switch (transition) {
+    case 0b0001:
+    case 0b0111:
+    case 0b1110:
+    case 0b1000:
+      delta = -1;
+      break;
+    case 0b0010:
+    case 0b1011:
+    case 0b1101:
+    case 0b0100:
+      delta = +1;
+      break;
+    default:
+      delta = 0;
+      break;
+  }
+
+  if (delta != 0) {
+    // Direction reversal before a complete detent should not consume the first
+    // click after reversal. Discard the unfinished partial step, as before.
+    if (encIsrTransitionAccum != 0 &&
+        ((delta > 0 && encIsrTransitionAccum < 0) ||
+         (delta < 0 && encIsrTransitionAccum > 0))) {
+      encIsrTransitionAccum = 0;
+    }
+
+    encIsrTransitionAccum += delta;
+
+    if (encIsrTransitionAccum >= ENC_TRANSITIONS_PER_STEP) {
+      encIsrTransitionAccum = 0;
+      if (encIsrStepAccum < 100) encIsrStepAccum++;
+    } else if (encIsrTransitionAccum <= -ENC_TRANSITIONS_PER_STEP) {
+      encIsrTransitionAccum = 0;
+      if (encIsrStepAccum > -100) encIsrStepAccum--;
+    }
+  } else {
+    // Illegal two-bit jumps are treated as bounce/noise and resynced.
+    encIsrTransitionAccum = 0;
+  }
+
+  encIsrLastEncoded = encoded;
+}
+
+void encoderIsrA() {
+  encoderIsrUpdate();
+}
+
+void encoderIsrB() {
+  encoderIsrUpdate();
+}
+
+void processEncoderDirection(int direction, unsigned long now) {
+  holdInputLed();
+
+  if (keypadCalMode) {
+    // Ignore encoder rotation during keypad calibration.
+  } else if (accelSettingMode) {
+    setAccelDraftDelta(direction);
+  } else {
+    unsigned long dt = (lastEncStepMs == 0) ? 9999UL : (now - lastEncStepMs);
+    int mult = calcAccelMultiplier(dt, accelProfile);
+    int step = direction * mult;
+    sendEncStep(step);
+    showEncoderEvent(step);
+    lastEncStepMs = now;
+  }
+}
+
+void consumeEncoderIsrSteps(unsigned long now) {
+  int8_t pending;
+
+  noInterrupts();
+  pending = encIsrStepAccum;
+  encIsrStepAccum = 0;
+  interrupts();
+
+  while (pending > 0) {
+    processEncoderDirection(+1, now);
+    pending--;
+  }
+
+  while (pending < 0) {
+    processEncoderDirection(-1, now);
+    pending++;
+  }
+}
+
+void updateEncoder() {
+  unsigned long now = millis();
+
+  consumeEncoderIsrSteps(now);
 
   int sw = digitalRead(PIN_ENC_SW);
   if (sw != lastEncSw) {
@@ -1539,6 +1566,16 @@ void setup() {
   pinMode(PIN_LED_LINK, OUTPUT);
   pinMode(PIN_LED_PLAY, OUTPUT);
   pinMode(PIN_LED_MIDI, OUTPUT);
+
+  // Initialize quadrature state before enabling interrupts. On UNO, D2/D3
+  // map to interrupt 0/1, so both A and B edges are captured immediately.
+  encIsrLastEncoded = (digitalRead(PIN_ENC_A) == HIGH ? 0x02 : 0x00) |
+                      (digitalRead(PIN_ENC_B) == HIGH ? 0x01 : 0x00);
+  encIsrTransitionAccum = 0;
+  encIsrStepAccum = 0;
+  encIsrReady = true;
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_A), encoderIsrA, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_B), encoderIsrB, CHANGE);
 
   digitalWrite(PIN_LED_LINK, LOW);
   digitalWrite(PIN_LED_PLAY, LOW);
