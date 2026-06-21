@@ -83,7 +83,33 @@ Reduce unnecessary background polling while keeping hardware information current
 
 MIDI keyboard connection status remains the only intentional background exception because it directly affects live performance.
 
-------------------------------------------------------------------------
+### Runtime FluidSynth Settings
+
+Allow selected FluidSynth parameters to be adjusted at runtime without restarting the audio engine.
+
+#### Initial Implementation
+
+- Polyphony (64 / 96 / 128 / 160 / 192)
+
+#### Future Expansion
+
+- Reverb on/off
+- Chorus on/off
+- Gain
+- Reverb level
+- Chorus depth
+
+#### Implementation Notes
+
+- Use the existing FluidSynth stdin interface (`set` commands).
+- Apply changes immediately without restarting FluidSynth.
+- Preserve settings across Combi changes whenever possible.
+
+#### Rationale
+
+Different SoundFonts and Combi configurations require different CPU resources. Runtime adjustment allows users to balance maximum polyphony and playback stability during performance without interrupting the audio engine.
+
+---
 
 ## Low Priority
 
