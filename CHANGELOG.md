@@ -2,8 +2,51 @@
 
 All notable changes to the Fluid Ardule project will be documented in this file.
 
+Entries are grouped by development date (KST), which may differ from the corresponding Git commit date.
+
 ---
 # Changelog
+
+## 2026-06-20
+
+### Event-Driven UI Architecture
+
+This release fundamentally redesigns the Fluid Ardule rendering model.
+
+The TFT display is no longer refreshed continuously. Instead, the UI is updated only when user interaction or specific hardware events require it, significantly reducing CPU utilization while improving real-time audio stability.
+
+#### Rendering
+
+- Replaced periodic TFT redraws with an event-driven rendering model.
+- Eliminated unnecessary background screen updates during normal operation.
+- Introduced manual system status refresh using **UP long press**.
+- System information (CPU load, temperature, DAC, Wi-Fi, etc.) is now refreshed on demand.
+- Live MIDI connection status remains the only continuously monitored background exception.
+
+#### Performance
+
+- Greatly reduced Python CPU utilization during playback and live performance.
+- Reduced audio glitches caused by excessive framebuffer updates.
+- Improved Yoshimi playback stability.
+- Improved overall Combi playback stability through lower UI overhead.
+
+#### User Interface
+
+- Improved Sound Source navigation consistency by clarifying the roles of **SELECT** and **RIGHT**.
+- Added boundary notifications when reaching the first or last media file.
+- Unified transient popup appearance using the existing centered modal style.
+- Improved Media Player button label alignment and Resume button appearance.
+
+#### Utilities
+
+- Added `capture_fb1.py`, a framebuffer screenshot utility for documentation, debugging, and manual creation.
+
+#### Reliability
+
+- Documented the Yoshimi zero-byte configuration file issue and recovery procedure.
+- Improved graceful shutdown handling for Yoshimi.
+
+----
 
 ## [2026-06-16 (KST)]
 
