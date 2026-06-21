@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260620n"
+SCRIPT_VERSION = "260621j"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -57,7 +57,7 @@ SOUNDFONTS = [
 
 YOSHIMI_EXECUTABLE = "yoshimi"
 YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
-YOSHIMI_PREVIEW_DEBOUNCE_SEC = 1
+YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.15
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -106,7 +106,7 @@ EXTERNAL_MIDI_OUT_MODES = [
     ("off", "Off"),
     ("mirror", "Mirror"),
 ]
-EXTERNAL_MIDI_PC_PREVIEW_DEBOUNCE_SEC = 0.25
+EXTERNAL_MIDI_PC_PREVIEW_DEBOUNCE_SEC = 0.15
 
 # General MIDI program names. Displayed as 001-128, sent as MIDI PC 0-127.
 GM_PROGRAM_NAMES = [
@@ -289,6 +289,10 @@ USB_LABEL = "USB"
 USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
 USER_COMBI_PATH = "/home/pi/sf2/user_combis.json"
 COMBI_INPUT_CHANNEL = 1
+COMBI_PREVIEW_FOOTER_HOLD_SEC = 1.5
+USER_PRESET_PREVIEW_ON_HIGHLIGHT = True
+# Delay User Preset preview while scrolling so only the final highlighted item loads.
+USER_PRESET_PREVIEW_DEBOUNCE_SEC = 0.15
 
 RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
 RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
@@ -298,6 +302,9 @@ WPA_SUPPLICANT_CONF = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
 WPA_SUPPLICANT_CONF_FALLBACK = "/etc/wpa_supplicant/wpa_supplicant.conf"
 WIFI_SELECTED_PRIORITY = 50
 WIFI_OTHER_PRIORITY = 10
+# Cache Wi-Fi status/config reads to avoid repeated sudo cat during UI redraws.
+WIFI_STATUS_CACHE_SEC = 10.0
+WIFI_KNOWN_SSIDS_CACHE_SEC = 180.0
 
 
 DEFAULT_RADIO_STATIONS = [
@@ -537,6 +544,8 @@ class RuntimeState:
 
     user_preset_entries: list[dict] = field(default_factory=list)
     user_preset_target_index: int = 0
+    pending_user_preset_preview_index: int | None = None
+    pending_user_preset_preview_due: float = 0.0
     user_preset_rename_text: str = ""
     user_preset_rename_cursor: int = 0
     current_user_preset_name: str | None = None
@@ -586,6 +595,9 @@ midi_activity_signature = ""
 midi_activity_thread_handle = None
 combi_router_proc = None
 combi_router_thread_handle = None
+_wifi_status_cache_until = 0.0
+_wifi_known_ssids_cache_until = 0.0
+_wifi_known_ssids_cache: list[str] = []
 
 
 
@@ -693,7 +705,7 @@ def refresh_status_once(event: str = "Status refreshed") -> None:
     state.cpu_temp_text = get_cpu_temp_text()
     periodic_device_poll(force=True)
     periodic_usb_poll(force=True)
-    refresh_wifi_status()
+    refresh_wifi_status(force=True)
     refresh_midi_display_text()
     mark_dirty(event)
     show_timed_modal_message(event, hold_sec=0.8, subtext=" ")
@@ -1143,8 +1155,19 @@ def read_wifi_conf_text(path: str) -> str:
         return ""
 
 
-def parse_wpa_supplicant_networks(conf_path: str | None = None) -> list[str]:
-    """Return SSIDs listed in the active wpa_supplicant config."""
+def parse_wpa_supplicant_networks(conf_path: str | None = None, *, force: bool = False) -> list[str]:
+    """Return SSIDs listed in the active wpa_supplicant config.
+
+    The config is root-protected on this image, so a read may fall back to
+    sudo cat.  Cache the common no-argument path because UI redraws can ask
+    for Wi-Fi labels frequently, and configured SSIDs rarely change during
+    normal performance.  Explicit Wi-Fi actions pass force=True.
+    """
+    global _wifi_known_ssids_cache_until, _wifi_known_ssids_cache
+    now = time.time()
+    if conf_path is None and not force and now < _wifi_known_ssids_cache_until:
+        return list(_wifi_known_ssids_cache)
+
     paths = [conf_path] if conf_path else wifi_conf_paths()
     text = ""
     for path in paths:
@@ -1152,6 +1175,9 @@ def parse_wpa_supplicant_networks(conf_path: str | None = None) -> list[str]:
         if text:
             break
     if not text:
+        if conf_path is None:
+            _wifi_known_ssids_cache = []
+            _wifi_known_ssids_cache_until = now + WIFI_KNOWN_SSIDS_CACHE_SEC
         return []
 
     ssids: list[str] = []
@@ -1162,6 +1188,10 @@ def parse_wpa_supplicant_networks(conf_path: str | None = None) -> list[str]:
         ssid = bytes(m.group(1), "utf-8").decode("unicode_escape", errors="ignore")
         if ssid and ssid not in ssids:
             ssids.append(ssid)
+
+    if conf_path is None:
+        _wifi_known_ssids_cache = list(ssids)
+        _wifi_known_ssids_cache_until = now + WIFI_KNOWN_SSIDS_CACHE_SEC
     return ssids
 
 
@@ -1181,10 +1211,16 @@ def wifi_current_ssid() -> str:
     return ""
 
 
-def refresh_wifi_status() -> None:
+def refresh_wifi_status(*, force: bool = False) -> None:
+    """Refresh Wi-Fi status with a short cache for UI redraw safety."""
+    global _wifi_status_cache_until
+    now = time.time()
+    if not force and now < _wifi_status_cache_until:
+        return
     state.wifi_enabled = wifi_is_enabled()
     state.wifi_current_ssid = wifi_current_ssid() if state.wifi_enabled else ""
-    state.wifi_known_ssids = parse_wpa_supplicant_networks()
+    state.wifi_known_ssids = parse_wpa_supplicant_networks(force=force)
+    _wifi_status_cache_until = now + WIFI_STATUS_CACHE_SEC
 
 
 def wifi_status_label(*, short: bool = False) -> str:
@@ -1218,7 +1254,7 @@ def set_wifi_enabled(enabled: bool) -> bool:
         restart_wifi_services()
     else:
         run_cmd(["sudo", "-n", "rfkill", "block", "wifi"])
-    refresh_wifi_status()
+    refresh_wifi_status(force=True)
     return state.wifi_enabled == enabled
 
 
@@ -1228,11 +1264,11 @@ def scan_wifi_ssids() -> list[str]:
     Prefer iw/iwlist because this project should not depend on wpa_cli control
     sockets; automatic OS connection already works through systemd.
     """
-    known = parse_wpa_supplicant_networks()
+    known = parse_wpa_supplicant_networks(force=True)
     state.wifi_known_ssids = known
     if not wifi_is_enabled():
         state.wifi_scan_results = []
-        refresh_wifi_status()
+        refresh_wifi_status(force=True)
         return []
 
     detected: set[str] = set()
@@ -1255,7 +1291,7 @@ def scan_wifi_ssids() -> list[str]:
 
     visible_known = [ssid for ssid in known if ssid in detected]
     state.wifi_scan_results = visible_known
-    refresh_wifi_status()
+    refresh_wifi_status(force=True)
     return visible_known
 
 
@@ -1320,6 +1356,10 @@ def set_wifi_priority_for_ssid(ssid: str) -> bool:
             continue
         if write_text_with_sudo(path, new_text):
             ok_any = True
+            # Config changed; force the next read to see the new priorities.
+            global _wifi_known_ssids_cache_until, _wifi_status_cache_until
+            _wifi_known_ssids_cache_until = 0.0
+            _wifi_status_cache_until = 0.0
     return ok_any
 
 
@@ -1327,11 +1367,11 @@ def wait_for_wifi_connection(ssid: str, timeout_sec: float = 15.0) -> bool:
     """Wait until the selected SSID becomes the active association."""
     deadline = time.time() + float(timeout_sec)
     while time.time() < deadline:
-        refresh_wifi_status()
+        refresh_wifi_status(force=True)
         if state.wifi_current_ssid == ssid:
             return True
         time.sleep(0.75)
-    refresh_wifi_status()
+    refresh_wifi_status(force=True)
     return state.wifi_current_ssid == ssid
 
 
@@ -1345,7 +1385,7 @@ def connect_wifi_ssid(ssid: str) -> bool:
     ssid = str(ssid or "").strip()
     if not ssid:
         return False
-    if ssid not in parse_wpa_supplicant_networks():
+    if ssid not in parse_wpa_supplicant_networks(force=True):
         mark_dirty("Wi-Fi network not configured")
         return False
 
@@ -1353,14 +1393,14 @@ def connect_wifi_ssid(ssid: str) -> bool:
     # If the selected SSID is already connected, do not rewrite priority or
     # restart Wi-Fi services. A service restart can briefly disturb USB/serial
     # timing on the Raspberry Pi and may make UNO-1 appear disconnected.
-    refresh_wifi_status()
+    refresh_wifi_status(force=True)
     if state.wifi_enabled and state.wifi_current_ssid == ssid:
         mark_dirty(f"Already connected: {ssid}")
         return True
 
     if not wifi_is_enabled():
         set_wifi_enabled(True)
-        refresh_wifi_status()
+        refresh_wifi_status(force=True)
         if state.wifi_enabled and state.wifi_current_ssid == ssid:
             mark_dirty(f"Already connected: {ssid}")
             return True
@@ -2548,13 +2588,13 @@ class TFTDisplay:
                 if total:
                     value = str(total)
                     if total > 1:
-                        value += " > Press Right" if idx == state.submenu_index else " >"
+                        value += " Presets" if idx == state.submenu_index else " >"
                     value_fill = ACCENT if idx != state.submenu_index else FG
                     draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
             elif idx == len(SOUNDFONTS):
                 count = user_preset_count_cached()
                 if count:
-                    value = f"{count} > Press Right" if idx == state.submenu_index else f"{count} >"
+                    value = f"{count} Presets" if idx == state.submenu_index else f"{count} >"
                 else:
                     value = "0"
                 value_fill = ACCENT if idx != state.submenu_index else FG
@@ -2562,7 +2602,7 @@ class TFTDisplay:
             elif idx == len(SOUNDFONTS) + 1:
                 count = user_combi_count_cached()
                 if count:
-                    value = f"{count} > Press Right" if idx == state.submenu_index else f"{count} >"
+                    value = f"{count} Combis" if idx == state.submenu_index else f"{count} >"
                 else:
                     value = "0"
                 value_fill = ACCENT if idx != state.submenu_index else FG
@@ -2593,16 +2633,16 @@ class TFTDisplay:
         )
 
     def _draw_user_preset_load_rows(self, draw, options):
-        # Leave a small in-list hint area above the normal footer.  The footer
-        # continues to show status/MIDI information, while this local hint
-        # teaches the context-specific long-press action for User Presets.
+        # User Preset has a compact, local-only layout so five preset rows fit
+        # above the Manage hint without changing the common list renderer used
+        # by SoundFont, DAC, MIDI, Wi-Fi, Browser, Radio, etc.
         hint_y = self.height - 82
         self._draw_scrolled_rows(
             draw,
             options,
             state.submenu_index,
             56,
-            36,
+            34,
             hint_y - 4,
             show_current_marks=False,
         )
@@ -3066,11 +3106,11 @@ class TFTDisplay:
         if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
             try:
                 if state.submenu_index < len(SOUNDFONTS):
-                    total, _drums = soundfont_preset_counts_cached(state.submenu_index)
-                    if total > 1:
-                        footer_hint = "SEL=Load  > Presets"
+                    # Show the Sound Source operation hint immediately on entry,
+                    # even before preset-count cache/preload has completed.
+                    footer_hint = "SEL: Select   ▶: Presets"
                 else:
-                    footer_hint = "SEL=Load  > User"
+                    footer_hint = "SEL: Select   ▶: User"
             except Exception:
                 pass
 
@@ -4373,7 +4413,8 @@ def preload_sound_source_count_cache() -> None:
 
     The Sound Source menu shows preset counts, which are useful but can make
     the first entry feel slow if JSON files are read on demand.  Preload them
-    after startup so entering Sound Source normally uses already-filled cache.
+    in a background worker and make the renderer return temporary zero counts
+    while the worker is still running, so entering Sound Source does not block.
     """
     if state.sound_source_cache_preload_started:
         return
@@ -4381,8 +4422,9 @@ def preload_sound_source_count_cache() -> None:
 
     def worker() -> None:
         try:
-            # Give the initial UI/audio startup a short head start.
-            time.sleep(0.5)
+            # Give the initial UI/audio startup only a tiny head start.
+            # The worker is background-only, so Sound Source entry should not block.
+            time.sleep(0.1)
             for i in range(len(SOUNDFONTS)):
                 if not state.running:
                     return
@@ -5027,6 +5069,7 @@ def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
         "-o", "audio.periods=4",
         "-o", f"synth.gain={FLUID_GAIN}",
         "-o", "synth.cpu-cores=1",
+        "-o", "synth.polyphony=96",
         "-o", "synth.reverb.active=1",
         "-o", "synth.reverb.room-size=0.48",
         "-o", "synth.reverb.damp=0.22",
@@ -5612,10 +5655,13 @@ def stop_combi_router() -> None:
             pass
     state.combi_router_signature = ""
     combi_router_thread_handle = None
+_wifi_status_cache_until = 0.0
+_wifi_known_ssids_cache_until = 0.0
+_wifi_known_ssids_cache: list[str] = []
 
 
 def start_combi_router() -> bool:
-    global combi_router_thread_handle
+    global combi_router_thread_handle, combi_router_proc
     if not state.combi_active or not state.combi_parts:
         return False
     if state.current_engine != "fluidsynth":
@@ -5644,6 +5690,17 @@ def start_combi_router() -> bool:
     dst = find_fluidsynth_port()
     if dst:
         state.fluid_dst_port = dst
+    signature = f"{src}|{state.current_combi_name}|{len(state.combi_parts)}"
+    if (
+        combi_router_proc is not None
+        and combi_router_proc.poll() is None
+        and state.combi_router_signature == signature
+        and combi_router_thread_handle is not None
+        and combi_router_thread_handle.is_alive()
+    ):
+        state.midi_connected = True
+        refresh_midi_display_text()
+        return True
     _disconnect_all_midi_routes_to_fluidsynth()
     stop_combi_router()
     combi_router_thread_handle = threading.Thread(target=_combi_router_thread, daemon=True)
@@ -5737,12 +5794,21 @@ def apply_default_combi() -> None:
 
 
 def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) -> None:
+    t0 = time.perf_counter()
     if block_sound_change_while_playing():
         return
     combi = normalize_combi(item)
     if not combi:
         mark_dirty("Invalid combi")
         return
+
+    # Stop the previous Combi router as early as possible.  Otherwise the old
+    # router thread may see state.combi_active=True while SoundFont/MIDI mode is
+    # being changed and may restart aseqdump once or twice during the new load.
+    # The new router is started once at the end after all channel setup is done.
+    stop_combi_router()
+    state.combi_active = False
+
     # Combi always runs on FluidSynth.  If the current engine is Yoshimi, do
     # not reject the request; switch to the Combi-required SF2 below.
     if state.current_engine != "fluidsynth":
@@ -5751,6 +5817,7 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
     required_sf2 = Path(str(combi.get("sf2") or "")).name
     if not ensure_combi_soundfont_loaded(required_sf2):
         return
+    t_sf = time.perf_counter()
 
     # Important ordering fix:
     # In usb_direct_raw mode FluidSynth owns the raw MIDI device directly.
@@ -5769,8 +5836,8 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
             return
     else:
         reconnect_midi_to_fluidsynth(force_draw=False)
+    t_midi = time.perf_counter()
 
-    stop_combi_router()
     clear_current_user_preset_state()
     reset_sound_edit_to_defaults()
     state.current_combi_name = str(combi.get("name") or "Combi")
@@ -5799,8 +5866,19 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
             except Exception:
                 pass
 
+    t_setup = time.perf_counter()
     state.combi_active = True
     router_ok = start_combi_router()
+    t_router = time.perf_counter()
+    log(
+        "Combi apply timing: "
+        f"total={(t_router - t0) * 1000:.0f} ms "
+        f"sf={(t_sf - t0) * 1000:.0f} ms "
+        f"midi={(t_midi - t_sf) * 1000:.0f} ms "
+        f"setup={(t_setup - t_midi) * 1000:.0f} ms "
+        f"router={(t_router - t_setup) * 1000:.0f} ms "
+        f"parts={len(state.combi_parts)} preview={bool(preview)}"
+    )
     label = shorten_text(state.current_combi_name, 20)
     state.combi_preview_active = bool(preview)
     if leave_after:
@@ -5809,7 +5887,14 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         # configuration, so show the active parts/layers immediately.
         enter_combi_detail_screen(f"Combi loaded: {label}" if router_ok else (f"Combi set: {label}" if ok else "Combi setup queued"))
     else:
-        mark_dirty(f"Preview: {label}" if router_ok else f"Preview setup: {label}")
+        # Stay on the Combi list after R/Preview, but make the successful
+        # preview much more visible than the subtle "*" mark alone.
+        # This reuses the existing transient footer mechanism, so the normal
+        # footer automatically returns after a short hold time.
+        if router_ok:
+            show_footer_message(f"Preview loaded: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
+        else:
+            show_footer_message(f"Preview setup: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
 
 
 def preview_combi_at_index(index: int) -> None:
@@ -6925,7 +7010,11 @@ def enter_user_preset_load_menu(return_mode: str | None = None) -> None:
     state.submenu_return_mode = return_mode or "main"
     state.submenu_index = 0
     invalidate_full_display()
-    mark_dirty("User Preset")
+    # Keep User Preset behavior consistent with SF2 preset browsing:
+    # the first highlighted row should sound immediately, not only after
+    # the cursor is moved once.  This is intentionally a preview, so the
+    # user remains on the User Preset screen.
+    preview_user_preset_at_index(0)
 
 
 def save_current_user_preset_as_new() -> None:
@@ -7162,7 +7251,7 @@ def find_source_index_for_user_preset(item: dict) -> int | None:
     return None
 
 
-def apply_user_preset(item: dict) -> None:
+def apply_user_preset(item: dict, *, leave_after: bool = True, preview: bool = False) -> None:
     if block_sound_change_while_playing():
         return
     if not item:
@@ -7210,7 +7299,58 @@ def apply_user_preset(item: dict) -> None:
     state.current_user_preset_name = str(item.get("name") or name).strip() or name
     state.current_user_preset_kind = "edited" if user_preset_is_edited(item) else "bookmark"
     clear_modal_message()
-    leave_submenu(f"User Preset: {shorten_text(str(item.get('name', name)), 16)}")
+    label = shorten_text(str(item.get('name', name)), 16)
+    if leave_after:
+        leave_submenu(f"User Preset: {label}")
+    else:
+        mark_dirty(f"Preview: {label}" if preview else f"User Preset: {label}")
+
+
+
+def preview_user_preset_at_index(index: int) -> None:
+    """Queue highlighted User Preset preview without leaving the browser.
+
+    User Presets may restart engines and reapply Sound Edit values, so repeated
+    immediate loads during fast UP/DOWN scrolling feel sluggish.  Match the
+    debounced preview style used by heavier preset sources: move the highlight
+    now, then load only after the cursor has stopped briefly.
+    """
+    if not USER_PRESET_PREVIEW_ON_HIGHLIGHT:
+        return
+    presets = state.user_preset_entries or load_user_presets()
+    if not presets:
+        mark_dirty("No user presets")
+        return
+    idx = clamp_index(index, len(presets))
+    state.user_preset_entries = presets
+    state.submenu_index = idx
+    state.pending_user_preset_preview_index = idx
+    state.pending_user_preset_preview_due = time.time() + USER_PRESET_PREVIEW_DEBOUNCE_SEC
+    mark_dirty(f"Preview queued: {shorten_text(str(presets[idx].get('name', 'User Preset')), 18)}")
+
+
+def process_pending_user_preset_preview() -> None:
+    if state.pending_user_preset_preview_index is None:
+        return
+    if state.ui_mode != "submenu" or state.submenu_key != "user_preset_load":
+        state.pending_user_preset_preview_index = None
+        state.pending_user_preset_preview_due = 0.0
+        return
+    if time.time() < state.pending_user_preset_preview_due:
+        return
+    presets = state.user_preset_entries or load_user_presets()
+    if not presets:
+        state.pending_user_preset_preview_index = None
+        state.pending_user_preset_preview_due = 0.0
+        mark_dirty("No user presets")
+        return
+    idx = clamp_index(state.pending_user_preset_preview_index, len(presets))
+    state.pending_user_preset_preview_index = None
+    state.pending_user_preset_preview_due = 0.0
+    if idx != state.submenu_index:
+        return
+    state.user_preset_entries = presets
+    apply_user_preset(presets[idx], leave_after=False, preview=True)
 
 
 def find_current_user_preset_item() -> dict | None:
@@ -7363,6 +7503,8 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
 def leave_submenu(event: str = "Back") -> None:
     state.pending_yoshimi_preview_index = None
     state.pending_yoshimi_preview_due = 0.0
+    state.pending_user_preset_preview_index = None
+    state.pending_user_preset_preview_due = 0.0
     target = state.submenu_return_mode or "main"
     if state.submenu_key == "soundfont":
         state.pending_resume_after_sf_apply = False
@@ -7785,6 +7927,12 @@ def apply_current_submenu_selection() -> None:
         save_user_preset_rename()
         return
     if key == "user_preset_load":
+        # SELECT confirms the currently highlighted row. If its debounced
+        # preview is still pending, apply it immediately rather than waiting
+        # for the timer or loading a stale previous preview.
+        if state.pending_user_preset_preview_index is not None:
+            state.pending_user_preset_preview_due = 0.0
+            process_pending_user_preset_preview()
         presets = load_user_presets()
         if not presets:
             leave_submenu("No user presets")
@@ -8630,6 +8778,33 @@ def handle_button_event(btn_value: str) -> None:
             state.pending_external_midi_pc_index = None
             state.pending_external_midi_pc_due = 0.0
             return_to_extension_submenu("External PC canceled", index=2)
+            return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_load":
+        options = get_submenu_options()
+        if btn == "UP":
+            pulse_button_activity()
+            if state.submenu_index > 0:
+                preview_user_preset_at_index(state.submenu_index - 1)
+            else:
+                mark_dirty("First item")
+            return
+        if btn == "DOWN":
+            pulse_button_activity()
+            if state.submenu_index < len(options) - 1:
+                preview_user_preset_at_index(state.submenu_index + 1)
+            else:
+                mark_dirty("Last item")
+            return
+        if btn == "SEL":
+            pulse_button_activity()
+            apply_current_submenu_selection()
+            return
+        if btn == "LEFT":
+            pulse_button_activity()
+            leave_submenu("Canceled")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -9744,6 +9919,7 @@ def main() -> None:
             periodic_serial_ui_status()
             poll_player_state()
             process_pending_yoshimi_preview()
+            process_pending_user_preset_preview()
             process_pending_external_midi_pc_preview()
             if midi_status_changed:
                 maybe_render(force=True)
