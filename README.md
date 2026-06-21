@@ -126,9 +126,6 @@ Observed results:
 > - Firmware upload may require temporarily disconnecting the capacitor, removing the UNO-1 shield, manually pressing RESET, or reconnecting USB power.
 > - The capacitor is intended as a startup stabilization measure and is not required for normal Arduino operation.
 
-
-
-
 ---
 
 ## External MIDI Integration
@@ -147,26 +144,34 @@ but also as a flexible MIDI routing and control station for external hardware mo
 
 ---
 
-## Performance Notes
+## Design Philosophy
 
-### Real-time Safe UI Rendering
+### Event-Driven User Interface
 
-To ensure stable real-time MIDI performance, TFT rendering is designed to minimize interference with audio processing.
+Fluid Ardule is built around an event-driven user interface rather than a continuously refreshed graphical interface.
 
-- User-triggered updates (buttons, encoder) are rendered immediately
-- Background screen updates are rate-limited (`RENDER_MIN_INTERVAL`)
+The TFT display is updated only when user interaction or specific hardware events require it. Most system information is refreshed on demand instead of through periodic background polling.
 
-This prevents frequent framebuffer updates from disrupting FluidSynth timing,
-especially on resource-constrained systems like Raspberry Pi 3.
+This design significantly reduces CPU utilization while improving real-time audio stability, particularly during live performance and Yoshimi playback.
+
+Background activity is intentionally minimized. Device-specific information is refreshed when the corresponding menu is entered or when the user explicitly requests a refresh. Live MIDI connection status remains the only continuous background exception because it directly affects instrument usability.
+
+### Real-Time Safe Rendering
+
+Fluid Ardule prioritizes audio performance over display updates.
+
+Whenever possible, rendering work is deferred until it is actually needed, allowing the synthesis engine to receive maximum CPU time during playback and live performance.
 
 As a result:
 
-- Audio glitches during live MIDI playback are significantly reduced
-- Both `alsa_raw` and `alsa_seq` modes benefit from improved stability
-- UI remains responsive when user interaction occurs
+- Python CPU utilization is significantly reduced during normal operation.
+- Audio glitches caused by excessive UI rendering are greatly reduced.
+- Both `alsa_raw` and `alsa_seq` modes benefit from improved stability.
+- The user interface remains responsive while avoiding unnecessary framebuffer updates.
 
-This approach aligns with dedicated hardware synthesizers, where display updates are deprioritized during active performance.
-The UI subsystem is also designed to tolerate temporary controller-side instability and allow recovery without requiring SSH access whenever possible.
+This rendering model follows the philosophy of dedicated hardware synthesizers, where display updates are considered secondary to deterministic real-time audio processing.
+
+The UI subsystem is also designed to tolerate temporary controller-side instability and recover gracefully without requiring SSH access whenever possible.
 
 ---
 
