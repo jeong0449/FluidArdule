@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260616c"
+SCRIPT_VERSION = "260620n"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -57,7 +57,7 @@ SOUNDFONTS = [
 
 YOSHIMI_EXECUTABLE = "yoshimi"
 YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
-YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.35
+YOSHIMI_PREVIEW_DEBOUNCE_SEC = 1
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -214,6 +214,11 @@ MODIFIED_VALUE = (255, 220, 90)
 # causing jitter or glitches during MIDI playback.
 # Increasing this value improves audio stability at the cost of UI responsiveness.
 RENDER_MIN_INTERVAL = 0.10
+# Diagnostic result 2026-06-20: continuous TFT rendering on Raspberry Pi 3B
+# can disturb Yoshimi real-time audio. Keep normal UI responsiveness for
+# FluidSynth/media, but throttle background redraws while Yoshimi is active.
+YOSHIMI_RENDER_MIN_INTERVAL = 1.00
+COMBI_RENDER_MIN_INTERVAL = 1.00
 # During early boot, the framebuffer can be overwritten by late-starting
 # splash/console components after the Python UI has already drawn Home.
 # Force occasional full redraws only during this short boot window so the
@@ -249,8 +254,8 @@ MAIN_MENU = [
 
 QUICK_MENU_ITEMS = [
     "Return",
-    "Now Playing",
     "Home",
+    "Now Playing",
     "Sound",
     "USB Eject",
     "Save User Preset",
@@ -433,6 +438,7 @@ class RuntimeState:
     dirty: bool = True
     force_full_redraw_until: float = 0.0
     last_forced_full_redraw_time: float = 0.0
+    last_yoshimi_render_time: float = 0.0
 
     ui_mode: str = "main"      # main / submenu / file_source / file_browser / player
     menu_index: int = 0
@@ -524,6 +530,8 @@ class RuntimeState:
     player_origin_dir: str | None = None
     player_return_mode: str | None = None  # file_browser / radio_browser
     player_radio_station_id: str | None = None
+    player_notice_text: str = ""
+    player_notice_until: float = 0.0
 
     pending_resume_after_sf_apply: bool = False
 
@@ -543,6 +551,7 @@ class RuntimeState:
     combi_browse_snapshot: dict | None = None
     modal_message: str = ""
     modal_submessage: str = ""
+    modal_until: float = 0.0
 
     # Lightweight UI caches. Sound Source rendering should not repeatedly read
     # preset JSON files on every draw; cache counts and invalidate only when the
@@ -607,6 +616,13 @@ def show_footer_message(text: str, hold_sec: float = 1.2) -> None:
     mark_dirty(text)
 
 
+def show_player_notice(text: str, hold_sec: float = 1.5) -> None:
+    """Temporarily show a centered notice on the Now Playing screen."""
+    state.player_notice_text = str(text or "")
+    state.player_notice_until = time.time() + float(hold_sec)
+    mark_dirty(state.player_notice_text)
+
+
 def clamp_index(index: int, length: int) -> int:
     if length <= 0:
         return 0
@@ -662,6 +678,25 @@ def periodic_system_status_poll() -> None:
         state.cpu_load_text = new_load
         state.cpu_temp_text = new_temp
         state.dirty = True
+
+
+def refresh_status_once(event: str = "Status refreshed") -> None:
+    """Refresh slow-changing system/device status only on explicit user request.
+
+    Fluid Ardule is now event-driven: normal button/encoder/POT events redraw the
+    current screen, but they do not poll slow status values. UP long-press calls
+    this function to update Load/Temp, MIDI/DAC/USB/Wi-Fi state, then redraw once.
+    A short timed modal confirms the manual refresh using the existing popup style.
+    """
+    state.last_system_status_poll_time = time.time()
+    state.cpu_load_text = get_cpu_load_text()
+    state.cpu_temp_text = get_cpu_temp_text()
+    periodic_device_poll(force=True)
+    periodic_usb_poll(force=True)
+    refresh_wifi_status()
+    refresh_midi_display_text()
+    mark_dirty(event)
+    show_timed_modal_message(event, hold_sec=0.8, subtext=" ")
 
 
 def force_volume_100() -> None:
@@ -1855,11 +1890,14 @@ class TFTDisplay:
             "main_value_5": self._main_menu_value(5),
             "transient_footer_text": state.transient_footer_text,
             "transient_footer_until_active": time.time() < state.transient_footer_until,
+            "player_notice_text": state.player_notice_text,
+            "player_notice_until_active": time.time() < state.player_notice_until,
             "footer_alt_slot": self._footer_alt_slot(),
             "volume_percent": state.volume_percent,
             "last_volume_display_active": time.time() - state.last_volume_display_time < VOLUME_FOOTER_HOLD_SEC,
             "uno_footer_text": self._uno_footer_text(),
             "modal_message": state.modal_message,
+            "modal_until_active": time.time() < state.modal_until,
             "modal_submessage": state.modal_submessage,
             "wifi_enabled": state.wifi_enabled,
             "wifi_current_ssid": state.wifi_current_ssid,
@@ -2753,6 +2791,19 @@ class TFTDisplay:
             {"name": "SEL",   "label": sel_label,  "x": 350, "y": 156, "w": 108, "h": 62},
         ]
 
+        notice_active = bool(state.player_notice_text) and time.time() < state.player_notice_until
+        if notice_active:
+            notice = ellipsize_text(state.player_notice_text, self.font_body, self.width - 96)
+            nb = draw.textbbox((0, 0), notice, font=self.font_body)
+            nw = nb[2] - nb[0]
+            nh = nb[3] - nb[1]
+            nx1 = max(24, (self.width - nw) // 2 - 22)
+            ny1 = 232
+            nx2 = min(self.width - 24, (self.width + nw) // 2 + 22)
+            ny2 = ny1 + nh + 24
+            draw.rounded_rectangle((nx1, ny1, nx2, ny2), radius=10, fill=SELECT_BG)
+            draw.text(((self.width - nw) // 2, ny1 + 10), notice, font=self.font_body, fill=FG)
+
         for btn in buttons:
             x = btn["x"]
             y = btn["y"]
@@ -2760,10 +2811,18 @@ class TFTDisplay:
             h = btn["h"]
             fill = base_fill
             draw.rounded_rectangle((x, y, x + w, y + h), radius=10, fill=fill)
-            font = self.font_small if len(btn["label"]) >= 6 else self.font_body
+            # Use the normal button font whenever it fits.  This keeps RESUME
+            # visually consistent with PLAY/PAUSE while still allowing a safe
+            # fallback for unusually long labels.
+            font = self.font_body
             bbox = draw.textbbox((0, 0), btn["label"], font=font)
-            tx = x + (w - (bbox[2] - bbox[0])) / 2
-            ty = y + (h - (bbox[3] - bbox[1])) / 2 - 2
+            if (bbox[2] - bbox[0]) > (w - 10):
+                font = self.font_small
+                bbox = draw.textbbox((0, 0), btn["label"], font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            tx = x + (w - text_w) / 2 - bbox[0]
+            ty = y + (h - text_h) / 2 - bbox[1]
             draw.text((tx, ty), btn["label"], font=font, fill=FG)
 
     def _draw_sound_edit(self, draw):
@@ -3009,9 +3068,9 @@ class TFTDisplay:
                 if state.submenu_index < len(SOUNDFONTS):
                     total, _drums = soundfont_preset_counts_cached(state.submenu_index)
                     if total > 1:
-                        footer_hint = "Press > for presets"
+                        footer_hint = "SEL=Load  > Presets"
                 else:
-                    footer_hint = "Press > for user presets"
+                    footer_hint = "SEL=Load  > User"
             except Exception:
                 pass
 
@@ -3111,6 +3170,7 @@ def invalidate_full_display() -> None:
 def show_modal_message(text: str = "Loading...", subtext: str = "Please wait") -> None:
     state.modal_message = text
     state.modal_submessage = subtext
+    state.modal_until = 0.0
     invalidate_full_display()
     mark_dirty(text)
     try:
@@ -3123,9 +3183,17 @@ def clear_modal_message() -> None:
     if state.modal_message or state.modal_submessage:
         state.modal_message = ""
         state.modal_submessage = ""
+        state.modal_until = 0.0
         invalidate_full_display()
         state.dirty = True
 
+
+
+
+def show_timed_modal_message(text: str, hold_sec: float = 0.8, subtext: str = " ") -> None:
+    """Show the existing centered modal style briefly, then auto-clear."""
+    show_modal_message(text, subtext)
+    state.modal_until = time.time() + float(hold_sec)
 
 def file_player_active() -> bool:
     return state.player_status in {"Playing", "Paused"} or (player_proc is not None and player_proc.poll() is None)
@@ -4743,10 +4811,10 @@ def play_adjacent(delta: int) -> None:
 
     # Do not wrap around at the beginning/end of the folder.
     if next_pos < 0:
-        mark_dirty("First file")
+        show_timed_modal_message("Beginning of list", 0.8)
         return
     if next_pos >= len(playable):
-        mark_dirty("Last file")
+        show_timed_modal_message("End of list", 0.8)
         return
 
     next_idx = playable[next_pos]
@@ -4818,7 +4886,12 @@ def stop_fluidsynth() -> None:
     try:
         if fluid_proc.poll() is None:
             os.killpg(os.getpgid(fluid_proc.pid), signal.SIGTERM)
-            time.sleep(0.5)
+            # Yoshimi writes user configuration during normal shutdown. Give it
+            # a little more time before SIGKILL to reduce the risk of a truncated
+            # ~/.config/yoshimi/config/yoshimi.config file.
+            deadline = time.time() + (2.0 if state.current_engine == "yoshimi" else 0.5)
+            while fluid_proc.poll() is None and time.time() < deadline:
+                time.sleep(0.05)
             if fluid_proc.poll() is None:
                 os.killpg(os.getpgid(fluid_proc.pid), signal.SIGKILL)
                 time.sleep(0.2)
@@ -4859,9 +4932,19 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     stop_fluidsynth()
 
     # Clean up any stale Yoshimi instance left by an earlier failed test run.
-    # This keeps ALSA ports unambiguous for aconnect.
+    # This keeps ALSA ports unambiguous for aconnect. Prefer graceful TERM,
+    # then use KILL only for processes that refuse to exit.
     run_cmd(["pkill", "-TERM", "-x", "yoshimi"])
-    time.sleep(0.2)
+    stale_deadline = time.time() + 2.0
+    while time.time() < stale_deadline:
+        code, out = run_cmd(["pgrep", "-x", "yoshimi"])
+        if code != 0 or not out.strip():
+            break
+        time.sleep(0.05)
+    code, out = run_cmd(["pgrep", "-x", "yoshimi"])
+    if code == 0 and out.strip():
+        run_cmd(["pkill", "-KILL", "-x", "yoshimi"])
+        time.sleep(0.2)
 
     os.makedirs(LOG_DIR, exist_ok=True)
     if yoshimi_log_handle:
@@ -5660,9 +5743,10 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
     if not combi:
         mark_dirty("Invalid combi")
         return
+    # Combi always runs on FluidSynth.  If the current engine is Yoshimi, do
+    # not reject the request; switch to the Combi-required SF2 below.
     if state.current_engine != "fluidsynth":
-        mark_dirty("Combi needs FluidSynth")
-        return
+        log(f"Combi requested while {state.current_engine}; switching to FluidSynth")
 
     required_sf2 = Path(str(combi.get("sf2") or "")).name
     if not ensure_combi_soundfont_loaded(required_sf2):
@@ -8184,6 +8268,10 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             quick_menu_select()
             return
+        if btn == "UP_LP":
+            pulse_button_activity()
+            refresh_status_once()
+            return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -8194,10 +8282,11 @@ def handle_button_event(btn_value: str) -> None:
         toggle_pot_mode()
         return
 
-    # UP_LP is intentionally left unused globally.
+    # UP long refreshes slow-changing status values on demand.
+    # Normal UI events redraw only; they do not poll Load/Temp/MIDI/DAC/USB/Wi-Fi.
     if btn == "UP_LP":
         pulse_button_activity()
-        mark_dirty("UP long unused")
+        refresh_status_once()
         return
 
     if state.ui_mode == "radio_browser":
@@ -8598,7 +8687,10 @@ def handle_button_event(btn_value: str) -> None:
             if state.submenu_index == len(SOUNDFONTS):
                 enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
             elif state.submenu_index == len(SOUNDFONTS) + 1:
-                enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
+                # Combi is selected with SELECT.  Do not duplicate the SELECT
+                # action on RIGHT here; keeping RIGHT distinct makes the Sound
+                # Source screen easier to learn.
+                mark_dirty("SEL=Combi")
             elif state.submenu_index == len(SOUNDFONTS) + 2:
                 refresh_current_sound()
             else:
@@ -8694,9 +8786,13 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             return_to_sound_submenu("Back to Sound")
             return
-        if btn in {"SEL", "RIGHT"}:
+        if btn == "SEL":
             pulse_button_activity()
             enter_combi_load_menu(return_mode="sound")
+            return
+        if btn == "RIGHT":
+            pulse_button_activity()
+            mark_dirty("SEL=Combi")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -8793,7 +8889,7 @@ def handle_button_event(btn_value: str) -> None:
 
     if btn == "UP_LP":
         pulse_button_activity()
-        mark_dirty("UP long unavailable here")
+        refresh_status_once()
         return
 
     mark_dirty(f"BTN ignored: {btn}")
@@ -8859,7 +8955,12 @@ def serial_reader() -> None:
                 state.serial_input_ignore_until = time.time() + SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC
                 time.sleep(SERIAL_OUTPUT_HOLDOFF_AFTER_OPEN_SEC)
                 try:
-                    ser.reset_input_buffer()
+                    # Do not reset the input buffer here. UNO-1 may have already
+                    # reported the physical POT position during its boot window;
+                    # clearing RX at this point makes startup fall back to the
+                    # saved volume until the knob is moved. The first reset in
+                    # open_serial() is enough to discard stale data from the
+                    # previous session.
                     ser.reset_output_buffer()
                 except Exception:
                     pass
@@ -8932,9 +9033,9 @@ def periodic_bridge_watchdog() -> None:
             mark_dirty("Bridge stopped")
 
 
-def periodic_device_poll() -> None:
+def periodic_device_poll(force: bool = False) -> None:
     now = time.time()
-    if now - state.last_device_poll_time < DEVICE_POLL_INTERVAL_SEC:
+    if (not force) and now - state.last_device_poll_time < DEVICE_POLL_INTERVAL_SEC:
         return
     state.last_device_poll_time = now
     dac_changed = refresh_dac_options(quiet=True)
@@ -9047,9 +9148,93 @@ def periodic_device_poll() -> None:
 
 
 
-def periodic_usb_poll() -> None:
+
+def periodic_midi_status_poll(force: bool = False) -> bool:
+    """Poll only live MIDI input status as the single background UI exception.
+
+    Most status values (Load/Temp/DAC/USB/Wi-Fi) are refreshed only by user
+    action, especially UP long-press. MIDI input availability is performance
+    critical, so keyboard attach/detach is allowed to trigger one immediate
+    redraw without reintroducing broad background status polling.
+    """
     now = time.time()
-    if now - state.last_usb_poll_time < USB_STATUS_POLL_INTERVAL_SEC:
+    if (not force) and now - state.last_device_poll_time < DEVICE_POLL_INTERVAL_SEC:
+        return False
+    state.last_device_poll_time = now
+
+    old_display = state.midi_display_text
+    old_connected = state.midi_connected
+    old_src_port = state.midi_src_port
+    old_src_name = state.midi_src_name
+    old_selected_alsa = state.selected_alsa_input
+    old_external_present = state.external_midi_present
+
+    if state.midi_mode == "usb_direct_raw":
+        prev_raw_port = state.midi_src_port
+        selected_port, selected_name = choose_raw_midi_input()
+        state.midi_src_name = selected_name or "No raw MIDI"
+        state.midi_src_port = selected_port or "-"
+        state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
+        refresh_midi_display_text()
+
+        # If a RAW keyboard appears while FluidSynth owns the engine, rebuild so
+        # alsa_raw can bind to the newly available device. This preserves the
+        # previous behavior without polling unrelated device/status data.
+        if fluid_proc is not None and fluid_proc.poll() is None and selected_port and prev_raw_port in {"-", "", None}:
+            restart_engine(state.sf_index, state.dac_index)
+            restore_current_preset_after_engine_restart()
+            selected_port, selected_name = choose_raw_midi_input()
+            state.midi_src_name = selected_name or "No raw MIDI"
+            state.midi_src_port = selected_port or "-"
+            state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
+            refresh_midi_display_text()
+
+    elif state.midi_mode == "uno2_bridge_seq":
+        state.bridge_running = state.bridge_proc is not None and state.bridge_proc.poll() is None
+        state.midi_connected = state.bridge_running and (fluid_proc is not None and fluid_proc.poll() is None)
+        refresh_midi_display_text()
+
+    elif state.midi_mode == "external_midi_seq":
+        refresh_external_midi_state(quiet=True)
+        selected_port, selected_name = choose_external_midi_seq_input()
+        state.midi_src_name = selected_name or "No External MIDI"
+        state.midi_src_port = selected_port or "-"
+        state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
+        refresh_midi_display_text()
+        if selected_port and (old_src_port != selected_port or not old_connected):
+            connect_external_midi_to_fluidsynth()
+
+    else:
+        selected_port, selected_name = choose_alsa_seq_input()
+        state.selected_alsa_input = selected_port
+        state.selected_alsa_input_name = selected_name
+        state.midi_src_name = selected_name or "alsa sequencer"
+        state.midi_src_port = selected_port or "-"
+        state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
+        refresh_midi_display_text()
+
+        if selected_port and (old_selected_alsa != selected_port or not old_connected):
+            if state.combi_active:
+                _disconnect_direct_midi_route()
+            else:
+                connect_selected_alsa_to_fluidsynth()
+
+    changed = (
+        state.midi_display_text != old_display
+        or state.midi_connected != old_connected
+        or state.midi_src_port != old_src_port
+        or state.midi_src_name != old_src_name
+        or state.selected_alsa_input != old_selected_alsa
+        or state.external_midi_present != old_external_present
+    )
+    if changed:
+        mark_dirty(f"MIDI {state.midi_display_text}" if state.midi_connected else "MIDI disconnected")
+    return changed
+
+
+def periodic_usb_poll(force: bool = False) -> None:
+    now = time.time()
+    if (not force) and now - state.last_usb_poll_time < USB_STATUS_POLL_INTERVAL_SEC:
         return
     state.last_usb_poll_time = now
 
@@ -9403,37 +9588,50 @@ def handle_encoder_value(value: str) -> None:
     handle_encoder_navigation_step(step)
 
 
+def performance_render_limited() -> bool:
+    """Background TFT redraws are disabled during normal runtime.
+
+    Fluid Ardule behaves more like a hardware instrument than a desktop UI:
+    the screen should update immediately for user/UNO events, but it should not
+    continuously redraw itself in the background.  This keeps Python/TFT load
+    low and improves Yoshimi/Combi real-time audio stability on Raspberry Pi 3B.
+    """
+    return True
+
+
 def maybe_render(force: bool = False) -> None:
     now = time.time()
-
-    # Early-boot recovery: if another boot-time component overwrites /dev/fb1
-    # after the Home screen has been drawn, partial redraw alone can leave a
-    # mixed screen. For a short window after startup, request a full redraw at
-    # a slow fixed interval. Outside this window, normal partial redraw behavior
-    # and render-rate limiting are unchanged.
-    if now < state.force_full_redraw_until:
-        if now - state.last_forced_full_redraw_time >= BOOT_FULL_REDRAW_INTERVAL_SEC:
-            state.last_forced_full_redraw_time = now
-            invalidate_full_display()
-            state.dirty = True
+    expired_transient = False
 
     if state.transient_footer_text and now >= state.transient_footer_until:
         state.transient_footer_text = ""
         state.dirty = True
+        expired_transient = True
 
-    footer_slot = int(now // max(0.5, float(FOOTER_ALT_INTERVAL_SEC)))
-    if footer_slot != state.last_footer_alt_slot:
-        state.last_footer_alt_slot = footer_slot
+    if state.modal_until and now >= state.modal_until:
+        clear_modal_message()
+        expired_transient = True
+
+    if state.player_notice_text and now >= state.player_notice_until:
+        state.player_notice_text = ""
         state.dirty = True
+        expired_transient = True
 
     if not state.dirty:
         return
+
     if force:
         display.render()
         return
-    if now - state.last_render_time < RENDER_MIN_INTERVAL:
+
+    # No periodic/background redraws.  The only non-user-triggered redraw left
+    # is a one-shot cleanup for short-lived popup/notice messages, so they do
+    # not remain stuck on the TFT.
+    if expired_transient:
+        display.render()
         return
-    display.render()
+
+    return
 
 
 def request_exit(signum=None, frame=None) -> None:
@@ -9503,8 +9701,7 @@ def main() -> None:
     else:
         mark_dirty("Audio engine start failed")
 
-    periodic_system_status_poll()
-    mark_dirty("Ready")
+    refresh_status_once("Ready")
     preload_sound_source_count_cache()
     maybe_render(force=True)
 
@@ -9538,16 +9735,20 @@ def main() -> None:
                 maybe_render(force=True)
                 continue
 
-            periodic_device_poll()
-            periodic_usb_poll()
+            # Event-driven UI: slow status/device polling is performed only by UP long.
+            # Exception: live MIDI input status is performance-critical, so keyboard
+            # attach/detach may trigger one immediate redraw.
             periodic_bridge_watchdog()
-            periodic_system_status_poll()
+            midi_status_changed = periodic_midi_status_poll()
             periodic_serial_heartbeat()
             periodic_serial_ui_status()
             poll_player_state()
             process_pending_yoshimi_preview()
             process_pending_external_midi_pc_preview()
-            maybe_render()
+            if midi_status_changed:
+                maybe_render(force=True)
+            else:
+                maybe_render()
     finally:
         stop_player_only()
         stop_midi_activity_monitor()
