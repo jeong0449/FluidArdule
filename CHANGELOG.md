@@ -7,6 +7,20 @@ Entries are grouped by development date (KST), which may differ from the corresp
 ---
 # Changelog
 
+## 2026-06-21
+
+### Improved Preset and Combi Workflow
+
+- Added delayed preview for User Presets to avoid repeated loading while scrolling.
+- Improved Sound Source and User Preset footer wording.
+- Expanded User Preset list display to five rows.
+- Added Combi preview feedback in the footer.
+- Added Wi-Fi status/config caching to reduce repeated system calls.
+- Added Combi apply timing logs.
+- Clarified Combi as a performance-oriented workspace rather than a simple preset selection screen.
+- Recommended FluidSynth polyphony limiting for stable multi-layer Combi playback.
+---
+
 ## 2026-06-20
 
 ### Event-Driven UI Architecture
