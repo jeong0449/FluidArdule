@@ -37,6 +37,37 @@ Future work:
 
 Status: Implemented (core functionality completed)
 
+### Context-Based Device Refresh
+
+Replace remaining periodic device polling with context-based refresh.
+
+#### Concept
+
+Only refresh hardware status when the corresponding UI is entered.
+
+Examples:
+
+- DAC menu → refresh DAC list
+- MIDI Mode → refresh MIDI devices
+- File Browser → refresh USB status
+- Wi-Fi menu → refresh Wi-Fi status
+- UP long press → refresh all system status
+
+#### Goal
+
+Reduce unnecessary background polling while keeping hardware information current when it becomes relevant to the user.
+
+#### Benefits
+
+- Lower CPU usage
+- Improved audio stability
+- Cleaner event-driven architecture
+- Better separation between UI navigation and hardware discovery
+
+#### Notes
+
+MIDI keyboard connection status remains the only intentional background exception because it directly affects live performance.
+
 ------------------------------------------------------------------------
 
 ## Low Priority
