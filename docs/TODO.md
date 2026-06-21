@@ -4,6 +4,21 @@
 
 ## High Priority
 
+### Stabilize Combi Playback
+
+Improve reliability of Combi loading and live playback.
+
+Focus areas:
+
+- Ensure first Combi load works without requiring a second attempt.
+- Verify Yoshimi → Combi transition.
+- Verify RAW MIDI → ALSA MIDI transition.
+- Prevent stuck notes during Combi switching.
+- Confirm stable note routing for layer and split configurations.
+- Test long-running playback with multiple active parts.
+
+Status: In progress
+
 ### Fine-tune encoder acceleration
 
 The encoder responsiveness has been significantly improved by the
