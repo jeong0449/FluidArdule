@@ -10,27 +10,18 @@ Improve reliability of Combi loading and live playback.
 
 Focus areas:
 
-- Ensure first Combi load works without requiring a second attempt.
-- Verify Yoshimi → Combi transition.
-- Verify RAW MIDI → ALSA MIDI transition.
-- Prevent stuck notes during Combi switching.
-- Confirm stable note routing for layer and split configurations.
-- Test long-running playback with multiple active parts.
+-   Verify Yoshimi → Combi transition.
+-   Prevent stuck notes during Combi switching.
+-   Confirm stable note routing for layer and split configurations.
+-   Test long-running playback with multiple active parts.
 
 Status: In progress
 
-### Fine-tune encoder acceleration
-
-The encoder responsiveness has been significantly improved by the
-ISR-based firmware and the Python UI update. Current behavior is
-suitable for daily use.
-
-Future work:
+### Fine-tune Encoder Acceleration
 
 -   Fine-tune acceleration profiles (P1/P2/P3).
--   Evaluate encoder transition scaling for different encoder hardware.
--   Minimize occasional one-step overshoot during rapid rotation while
-    preserving the current responsiveness.
+-   Evaluate encoder transition scaling.
+-   Minimize occasional one-step overshoot.
 
 Status: Ongoing optimization
 
@@ -40,109 +31,70 @@ Status: Ongoing optimization
 
 ### Encoder-Based UI Navigation
 
-The encoder is now capable of navigating menu items directly using the
-full reported encoder delta (`ENC:+/-N`).
+Status: Core implementation completed.
 
-Future work:
-
--   Evaluate whether encoder navigation should become the primary UI
-    method.
--   Keep keypad navigation available for compatibility.
+-   Evaluate encoder navigation as the primary UI method.
+-   Keep keypad navigation for compatibility.
 -   Consider context-dependent long-press shortcuts.
-
-Status: Implemented (core functionality completed)
 
 ### Context-Based Device Refresh
 
-Replace remaining periodic device polling with context-based refresh.
+Remaining targets:
 
-#### Concept
+-   DAC menu
+-   MIDI Mode
+-   File Browser
+-   UP long press refresh
 
-Only refresh hardware status when the corresponding UI is entered.
+Notes:
 
-Examples:
-
-- DAC menu → refresh DAC list
-- MIDI Mode → refresh MIDI devices
-- File Browser → refresh USB status
-- Wi-Fi menu → refresh Wi-Fi status
-- UP long press → refresh all system status
-
-#### Goal
-
-Reduce unnecessary background polling while keeping hardware information current when it becomes relevant to the user.
-
-#### Benefits
-
-- Lower CPU usage
-- Improved audio stability
-- Cleaner event-driven architecture
-- Better separation between UI navigation and hardware discovery
-
-#### Notes
-
-MIDI keyboard connection status remains the only intentional background exception because it directly affects live performance.
+-   Wi-Fi now uses cached context-based refresh.
+-   MIDI keyboard monitoring remains a background task.
 
 ### Runtime FluidSynth Settings
 
-Allow selected FluidSynth parameters to be adjusted at runtime without restarting the audio engine.
+-   Runtime Polyphony (64 / 96 / 128 / 160 / 192)
+-   Future: Reverb, Chorus, Gain
+-   Use FluidSynth stdin `set` commands.
+-   Current default polyphony: 96.
 
-#### Initial Implementation
+### Performance-Oriented Combi Workflow
 
-- Polyphony (64 / 96 / 128 / 160 / 192)
+-   Improve active Combi indication.
+-   Keep users within the Combi screen.
+-   Prepare for layer mute/solo.
+-   Separate SoundFont loading feedback from Combi preview.
 
-#### Future Expansion
-
-- Reverb on/off
-- Chorus on/off
-- Gain
-- Reverb level
-- Chorus depth
-
-#### Implementation Notes
-
-- Use the existing FluidSynth stdin interface (`set` commands).
-- Apply changes immediately without restarting FluidSynth.
-- Preserve settings across Combi changes whenever possible.
-
-#### Rationale
-
-Different SoundFonts and Combi configurations require different CPU resources. Runtime adjustment allows users to balance maximum polyphony and playback stability during performance without interrupting the audio engine.
-
----
+------------------------------------------------------------------------
 
 ## Low Priority
 
 ### UI Rendering Optimization
 
-Current TFT rendering performance is satisfactory on Raspberry Pi 3B.
+-   Reduce redraw area.
+-   Investigate Pi 4/5 optimizations.
 
-Possible future improvements:
-
--   Reduce redraw area further using multiple dirty rectangles.
--   Investigate adaptive render timing on faster Raspberry Pi hardware.
--   Evaluate platform-specific rendering optimizations for Raspberry Pi
-    4/5.
-
-Status: Future enhancement
+Status: Future enhancement.
 
 ------------------------------------------------------------------------
 
 ## Recently Completed
 
-### 2026-06-16 --- Responsiveness Improvement
+### 2026-06-21
 
-Completed:
+-   Delayed User Preset preview.
+-   Five-line User Preset list.
+-   Improved footer wording.
+-   Combi preview feedback.
+-   Combi timing logs.
+-   Wi-Fi configuration caching.
+-   Sound cache improvements.
+-   Stabilized first Combi preview/load.
+-   Verified RAW MIDI → ALSA MIDI transition.
+-   Default FluidSynth polyphony set to 96.
 
--   Migrated rotary encoder handling to ISR in UNO-1 firmware.
--   Eliminated observable encoder step loss during rapid rotation.
--   Reduced button debounce latency.
--   Preserved full encoder delta (`ENC:+/-N`) in Python menu navigation.
--   Removed the legacy encoder navigation debounce filter.
--   Achieved smooth full-screen menu scrolling with significantly
-    improved controller responsiveness.
+### 2026-06-16
 
-See also:
-
--   CHANGELOG.md
--   Responsiveness_Tuning.md
+-   ISR encoder firmware.
+-   Full encoder delta navigation.
+-   Faster menu responsiveness.
