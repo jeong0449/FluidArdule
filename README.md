@@ -150,11 +150,17 @@ but also as a flexible MIDI routing and control station for external hardware mo
 
 Fluid Ardule is built around an event-driven user interface rather than a continuously refreshed graphical interface.
 
-The TFT display is updated only when user interaction or specific hardware events require it. Most system information is refreshed on demand instead of through periodic background polling.
+The TFT display is updated only when user interaction or meaningful hardware events require it. Expensive system information is refreshed on demand, while lightweight background monitoring is used selectively for hardware events that directly affect usability, such as USB media insertion and live MIDI connectivity.
 
 This design significantly reduces CPU utilization while improving real-time audio stability, particularly during live performance and Yoshimi playback.
 
-Background activity is intentionally minimized. Device-specific information is refreshed when the corresponding menu is entered or when the user explicitly requests a refresh. Live MIDI connection status remains the only continuous background exception because it directly affects instrument usability.
+### Performance Without Sacrificing Usability
+
+Performance optimization should never compromise the experience of using a musical instrument.
+
+Fluid Ardule minimizes background activity wherever possible, but preserves lightweight monitoring for hardware events that users naturally expect to work immediately. Heavy system polling is avoided, while inexpensive state checks are allowed when they improve responsiveness without affecting audio performance.
+
+Likewise, physical controls should behave like those of dedicated hardware instruments. Features such as soft takeover prevent abrupt parameter changes when hardware positions and internal states differ, allowing smooth and predictable interaction during live performance.
 
 ### Real-Time Safe Rendering
 
