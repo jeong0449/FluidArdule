@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260627f"
+SCRIPT_VERSION = "260627h"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -299,7 +299,7 @@ COMBI_INPUT_CHANNEL = 1
 COMBI_PREVIEW_FOOTER_HOLD_SEC = 1.5
 USER_PRESET_PREVIEW_ON_HIGHLIGHT = True
 # Delay User Preset preview while scrolling so only the final highlighted item loads.
-USER_PRESET_PREVIEW_DEBOUNCE_SEC = 0.15
+USER_PRESET_PREVIEW_DEBOUNCE_SEC = 0.45
 
 RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
 RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
@@ -9739,6 +9739,15 @@ def handle_encoder_navigation_step(step: int) -> bool:
         new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
         state.submenu_index = new_index
         mark_dirty("Combi browse" if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_load":
+        options = get_submenu_options()
+        new_index, moved = _move_index_by_delta(state.submenu_index, step, len(options))
+        if moved:
+            preview_user_preset_at_index(new_index)
+        else:
+            mark_dirty(edge_msg)
         return True
 
     if state.ui_mode == "submenu" and state.submenu_key == "preset":
