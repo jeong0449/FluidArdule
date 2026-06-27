@@ -7,6 +7,19 @@ Entries are grouped by development date (KST), which may differ from the corresp
 ---
 # Changelog
 
+## 2026-06-27
+
+### Improved
+
+- Restored USB storage plug-and-play detection while preserving the event-driven rendering architecture. USB mount status is now monitored independently of manual status refresh, providing responsive hot-plug behavior with negligible CPU overhead.
+
+- Refined startup volume handling for safer and more predictable operation.
+  - Startup output now begins at a fixed default level (85%).
+  - Physical volume control uses soft takeover (±3%) to prevent abrupt level changes when the potentiometer position differs from the startup volume.
+  - When the potentiometer reaches the pickup range, a centered **"Volume Active"** popup confirms that hardware volume control has been synchronized.
+ 
+---
+
 ## 2026-06-21
 
 ### Improved Preset and Combi Workflow
