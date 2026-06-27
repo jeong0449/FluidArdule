@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260627d"
+SCRIPT_VERSION = "260627f"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -3137,12 +3137,17 @@ class TFTDisplay:
         footer_hint = None
         if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
             try:
+                # Keep Sound Source hints consistent:
+                #   SELECT applies a leaf/default action.
+                #   RIGHT enters a browser/submenu when one exists.
                 if state.submenu_index < len(SOUNDFONTS):
-                    # Show the Sound Source operation hint immediately on entry,
-                    # even before preset-count cache/preload has completed.
-                    footer_hint = "SEL: Select   ▶: Presets"
-                else:
-                    footer_hint = "SEL: Select   ▶: User"
+                    footer_hint = "SEL: Default   ▶: Presets"
+                elif state.submenu_index == len(SOUNDFONTS):
+                    footer_hint = "SEL: Default   ▶: User"
+                elif state.submenu_index == len(SOUNDFONTS) + 1:
+                    footer_hint = "SEL: Hint   ▶: Combi"
+                elif state.submenu_index == len(SOUNDFONTS) + 2:
+                    footer_hint = "SEL/▶: Reload"
             except Exception:
                 pass
 
@@ -5346,6 +5351,7 @@ def enter_combi_load_menu(return_mode: str | None = None) -> None:
                 target_index = i
                 break
     state.submenu_index = clamp_index(target_index, len(state.combi_entries))
+    begin_combi_browse_session()
 
     invalidate_full_display()
     mark_dirty(f"Combi: {len(state.combi_entries)} saved")
@@ -7699,21 +7705,22 @@ def apply_current_submenu_selection() -> None:
         if state.submenu_index == len(SOUNDFONTS):
             # Keep the same convention as other Sound Sources:
             # SELECT recalls a default item, RIGHT enters the full preset list.
+            show_timed_modal_message("Loading Default", hold_sec=0.8, subtext="User Preset")
             apply_default_user_preset()
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
             return
         if state.submenu_index == len(SOUNDFONTS) + 1:
-            # Combi is not a leaf sound source.  SELECT should open the Combi
-            # list, matching the user's expectation and avoiding the "nothing
-            # happened" feeling when no default/first combi is obvious.
-            enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
+            # Combi has no safe default sound.  Keep SELECT as an explicit hint,
+            # and use RIGHT consistently as the browse/enter action.
+            show_timed_modal_message("Use RIGHT", hold_sec=0.9, subtext="Open Combi List")
             return
         if state.submenu_index == len(SOUNDFONTS) + 2:
             refresh_current_sound()
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
             return
+        show_timed_modal_message("Loading Default", hold_sec=0.8, subtext=source_name_for_index(state.submenu_index))
         apply_soundfont_with_default_preset(state.submenu_index)
         leave_submenu("SoundFont applied")
         if resume_after_apply:
@@ -8085,7 +8092,18 @@ def quick_resume_label() -> str:
     return str(mode)
 
 
+def combi_workflow_active() -> bool:
+    return state.ui_mode == "submenu" and state.submenu_key in {"combi_load", "combi_detail"}
+
+
+def warn_combi_quick_blocked() -> None:
+    show_timed_modal_message("Combi Mode Active", hold_sec=0.8, subtext="Use LEFT to exit")
+
+
 def enter_quick_menu() -> None:
+    if combi_workflow_active():
+        warn_combi_quick_blocked()
+        return
     if state.ui_mode not in {"quick_menu", "power_menu"} and not state.usb_eject_confirm:
         state.quick_resume_snapshot = make_quick_snapshot()
     state.ui_mode = "quick_menu"
@@ -8404,6 +8422,11 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "SEL":
             pulse_button_activity(); toggle_sound_edit_ab(); return
         mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    if btn == "RIGHT_LP" and combi_workflow_active():
+        pulse_button_activity()
+        warn_combi_quick_blocked()
         return
 
     if btn == "RIGHT_LP" and state.ui_mode != "power_menu":
@@ -8894,10 +8917,7 @@ def handle_button_event(btn_value: str) -> None:
             if state.submenu_index == len(SOUNDFONTS):
                 enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
             elif state.submenu_index == len(SOUNDFONTS) + 1:
-                # Combi is selected with SELECT.  Do not duplicate the SELECT
-                # action on RIGHT here; keeping RIGHT distinct makes the Sound
-                # Source screen easier to learn.
-                mark_dirty("SEL=Combi")
+                enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
             elif state.submenu_index == len(SOUNDFONTS) + 2:
                 refresh_current_sound()
             else:
@@ -8991,7 +9011,7 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "submenu" and state.submenu_key == "combi_detail":
         if btn == "LEFT":
             pulse_button_activity()
-            return_to_sound_submenu("Back to Sound")
+            enter_combi_load_menu(return_mode="sound")
             return
         if btn == "SEL":
             pulse_button_activity()
