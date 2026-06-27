@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260621j"
+SCRIPT_VERSION = "260627d"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -178,6 +178,13 @@ AMIXER_CONTROL = "PCM"
 FIX_VOLUME_AT_100 = False
 POT_VOLUME_ENABLED = True
 VOLUME_STATE_PATH = "/tmp/fluidardule_last_volume_percent"
+DEFAULT_STARTUP_VOLUME_PERCENT = 85
+# At startup the saved/default volume is only a temporary safety value.
+# The physical POT position should own the real startup volume as soon as
+# UNO-1 is ready.  Some firmware builds report POT only on movement, so the
+# Pi asks for a short POT snapshot window after serial connection.
+POT_STARTUP_SNAPSHOT_REQUEST_SEC = 5.0
+POT_STARTUP_SNAPSHOT_REQUEST_INTERVAL_SEC = 0.5
 DEVICE_POLL_INTERVAL_SEC = 3.0
 MIDI_RECONNECT_STABLE_SEC = 1.5
 SERIAL_HEARTBEAT_INTERVAL_SEC = 1.0
@@ -517,6 +524,8 @@ class RuntimeState:
     last_footer_alt_slot: int = -1
     last_pot_raw: int = -1
     initial_pot_volume_applied: bool = False
+    pot_startup_request_until: float = 0.0
+    last_pot_startup_request_time: float = 0.0
     last_led_pulse_time: float = 0.0
     last_pot_led_pulse_time: float = 0.0
     last_pot_led_percent: int = -1
@@ -771,16 +780,14 @@ def handle_pot_value(raw_value: str) -> None:
 
     percent = int(round(raw * 100 / 1023))
 
-    # Startup ownership: the first POT report after service start defines the
-    # actual ALSA mixer level, regardless of the previous 100% fallback.
-    # This intentionally bypasses the normal threshold and soft-takeover path.
+    # Startup volume policy 260627c:
+    # Start from a fixed safe line-level value, then use soft takeover.
+    # Do not let the first POT report jump the volume to an unrelated physical
+    # knob position.  Volume resumes only after the pot enters the pickup range.
     if not state.initial_pot_volume_applied:
         state.initial_pot_volume_applied = True
-        state.pot_volume_captured = True
-        set_output_volume(percent, announce=True)
-        save_volume_state(percent)
-        maybe_pulse_pot_led(percent)
-        return
+        state.pot_startup_request_until = 0.0
+        state.pot_volume_captured = False
 
     # Soft takeover for volume mode. If the pot has been used as a parameter
     # controller, its physical angle may no longer match the current volume.
@@ -789,6 +796,7 @@ def handle_pot_value(raw_value: str) -> None:
     if not state.pot_volume_captured:
         if abs(percent - state.volume_percent) <= POT_VOLUME_PICKUP_THRESHOLD:
             state.pot_volume_captured = True
+            show_timed_modal_message("Volume Active", hold_sec=0.8, subtext="Knob synchronized")
         else:
             maybe_pulse_pot_led(percent)
             return
@@ -1584,6 +1592,30 @@ def send_ui_status(status: str, *, force: bool = False) -> bool:
 
 def periodic_serial_ui_status() -> None:
     send_ui_status(current_ui_link_status())
+
+
+def request_startup_pot_snapshot_window() -> None:
+    """Ask UNO-1 to report the physical POT position soon after serial opens.
+
+    This keeps startup volume owned by the knob, not by the saved/default
+    fallback.  Older UNO firmware may ignore REQ:POT; in that case this is
+    harmless, and normal POT movement still works.
+    """
+    now = time.time()
+    state.pot_startup_request_until = now + POT_STARTUP_SNAPSHOT_REQUEST_SEC
+    state.last_pot_startup_request_time = 0.0
+
+
+def periodic_startup_pot_snapshot_request() -> None:
+    if state.initial_pot_volume_applied:
+        return
+    now = time.time()
+    if now > state.pot_startup_request_until:
+        return
+    if now - state.last_pot_startup_request_time < POT_STARTUP_SNAPSHOT_REQUEST_INTERVAL_SEC:
+        return
+    state.last_pot_startup_request_time = now
+    send_serial_line("REQ:POT")
 
 
 def ack_uno_event(kind: str) -> None:
@@ -9142,6 +9174,7 @@ def serial_reader() -> None:
 
                 with serial_lock:
                     serial_handle = ser
+                request_startup_pot_snapshot_window()
                 send_serial_line("HELLO")
                 time.sleep(0.05)
                 send_serial_line("HB")
@@ -9845,11 +9878,16 @@ def main() -> None:
     Path(USB_MOUNT_POINT).mkdir(parents=True, exist_ok=True)
     state.usb_mounted = is_mountpoint_active(USB_MOUNT_POINT)
 
-    # Apply the last pot-derived volume immediately so the service never starts
-    # at full blast while waiting for the next serial POT report.  The first
-    # fresh POT report from UNO-1 will override this with the physical knob angle.
-    startup_volume = load_saved_volume_state(default=60)
+    # Startup volume policy 260627c:
+    # Use a fixed safe line-level value.  Do not restore the last saved value,
+    # because the physical POT may have been moved while Fluid Ardule was off.
+    # The POT controls volume only after soft takeover captures the current
+    # logical volume, preventing sudden jumps on the first knob movement.
+    startup_volume = DEFAULT_STARTUP_VOLUME_PERCENT
     state.volume_percent = startup_volume
+    state.initial_pot_volume_applied = True
+    state.pot_volume_captured = False
+    state.pot_startup_request_until = 0.0
     set_output_volume(startup_volume, announce=False)
 
     refresh_dac_options(quiet=True)
@@ -9910,13 +9948,15 @@ def main() -> None:
                 maybe_render(force=True)
                 continue
 
-            # Event-driven UI: slow status/device polling is performed only by UP long.
-            # Exception: live MIDI input status is performance-critical, so keyboard
-            # attach/detach may trigger one immediate redraw.
+            # Event-driven UI: keep slow/heavy status/device polling on UP long.
+            # Exceptions: live MIDI input and USB mount status are performance-critical
+            # for plug-and-play feel, and trigger redraw only when their state changes.
             periodic_bridge_watchdog()
             midi_status_changed = periodic_midi_status_poll()
+            periodic_usb_poll()
             periodic_serial_heartbeat()
             periodic_serial_ui_status()
+            periodic_startup_pot_snapshot_request()
             poll_player_state()
             process_pending_yoshimi_preview()
             process_pending_user_preset_preview()
