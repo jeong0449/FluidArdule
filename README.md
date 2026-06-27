@@ -6,8 +6,9 @@ A modular DIY hardware workstation that combines Raspberry Pi–based audio synt
 
 Designed to behave like a dedicated musical instrument rather than a general-purpose computer, Fluid Ardule provides a self-contained environment for SoundFont and virtual analog synthesis (Yoshimi), MIDI playback, media playback, Internet radio, and external MIDI module integration.
 
-<img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
+As of June 2026, the project has evolved into a mature Python application exceeding 10,000 lines of code.
 
+<img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
 
 ---
 
