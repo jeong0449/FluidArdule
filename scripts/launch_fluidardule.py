@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260627h"
+SCRIPT_VERSION = "260628f"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -1999,11 +1999,37 @@ class TFTDisplay:
         return current != previous
 
 
-    def _list_window_state(self, index: int, items_len: int, top_y: int, row_h: int, bottom_y: int):
+    def _list_uses_page_windows(self) -> bool:
+        """Use page-style windows for content browsing lists.
+
+        Sound/program/file browsing feels better as discrete pages: when the
+        cursor crosses the visible boundary, the next page opens with the
+        highlighted item at the top.  Keep ordinary setting/navigation menus
+        on the previous continuous-scroll model.
+        """
+        if state.ui_mode in {"file_browser", "radio_browser"}:
+            return True
+        if state.ui_mode == "submenu" and state.submenu_key in {
+            "preset",
+            "preset_category",
+            "user_preset_load",
+            "combi_load",
+            "external_midi_pc",
+        }:
+            return True
+        return False
+
+    def _list_window_state(self, index: int, items_len: int, top_y: int, row_h: int, bottom_y: int, *, page_windows: bool | None = None):
         max_rows = max(1, (bottom_y - top_y) // row_h)
         if items_len <= 0:
             return 0, max_rows, 0
-        start_idx = max(0, index - max_rows + 1) if index >= max_rows else 0
+        index = max(0, min(items_len - 1, int(index)))
+        if page_windows is None:
+            page_windows = self._list_uses_page_windows()
+        if page_windows:
+            start_idx = (index // max_rows) * max_rows
+        else:
+            start_idx = max(0, index - max_rows + 1) if index >= max_rows else 0
         if index < start_idx or index >= min(items_len, start_idx + max_rows):
             visible_row = None
         else:
@@ -2374,8 +2400,7 @@ class TFTDisplay:
             return
         if items_len <= 0:
             return
-        max_rows = max(1, (bottom_y - top_y) // row_h)
-        start_idx = max(0, current_idx - max_rows + 1) if current_idx >= max_rows else 0
+        start_idx, max_rows, _visible_row = self._list_window_state(current_idx, items_len, top_y, row_h, bottom_y)
         end_idx = min(items_len, start_idx + max_rows)
         x = self.width - 18
         if start_idx > 0:
@@ -2383,10 +2408,41 @@ class TFTDisplay:
         if end_idx < items_len:
             draw.text((x, bottom_y - 24), "▼", font=self.font_small, fill=DIM)
 
+    def _row_symbol_for_current_context(self, idx: int) -> str:
+        """Return a stable row glyph: submenu rows use ▶, leaf/action rows use •.
+
+        The highlighted row is already indicated by the selection background, so
+        the glyph should describe the row's behavior rather than the cursor.
+        """
+        if state.ui_mode == "main":
+            return "▶"
+        if state.ui_mode == "file_source":
+            return "▶"
+        if state.ui_mode == "file_browser":
+            try:
+                item = state.browser_entries[idx]
+                return "▶" if item.get("type") == "dir" else "•"
+            except Exception:
+                return "•"
+        if state.ui_mode == "radio_browser":
+            return "▶" if state.radio_view_mode == "all" and idx == 0 else "•"
+        if state.ui_mode != "submenu":
+            return "•"
+
+        key = state.submenu_key
+        if key == "soundfont":
+            return "▶" if idx <= len(SOUNDFONTS) + 1 else "•"
+        if key in {"preset_category", "extension", "controls", "external_midi_device"}:
+            return "▶"
+        if key == "user_preset_save":
+            return "•" if idx == 0 else "▶"
+        if key == "user_preset_manage":
+            return "▶" if idx in {0, 2} else "•"
+        return "•"
+
     def _draw_scrolled_rows(self, draw, labels, current_idx, top_y, row_h, bottom_y, show_current_marks=False):
-        max_rows = max(1, (bottom_y - top_y) // row_h)
         total_count = len(labels)
-        start_idx = max(0, current_idx - max_rows + 1) if current_idx >= max_rows else 0
+        start_idx, max_rows, _visible_row = self._list_window_state(current_idx, total_count, top_y, row_h, bottom_y)
         end_idx = min(len(labels), start_idx + max_rows)
         row_margin = 3
         for visible_row, idx in enumerate(range(start_idx, end_idx)):
@@ -2408,10 +2464,12 @@ class TFTDisplay:
                     fill=SELECT_BG,
                 )
                 fill = FG
-                prefix = "▶ "
             else:
                 fill = FG if (show_current_marks and is_current) else DIM
-                prefix = "  "
+            # Keep row-type glyphs quiet: show them only on the highlighted row.
+            # Non-highlighted rows remain visually calm while the current row still
+            # tells whether SELECT executes a leaf or RIGHT enters a child list.
+            prefix = f"{self._row_symbol_for_current_context(idx)} " if idx == current_idx else "  "
             suffix = " *" if (show_current_marks and is_current) else ""
             row_text = f"{prefix}{index_prefix}{text}{suffix}"
             draw_left_vcentered_text_list(draw, 28, top, row_h, row_text, self.font_body, fill)
@@ -2457,13 +2515,14 @@ class TFTDisplay:
                 draw.rounded_rectangle((20, box_top, self.width - 20, box_bottom), radius=8, fill=SELECT_BG)
                 fill = DIM if sound_blocked else FG
                 value_fill = DIM if sound_blocked else FG
-                prefix = "▶ "
             else:
                 fill = DIM
                 value_fill = DIM if sound_blocked else (ACCENT if value else DIM)
-                prefix = "  "
 
-            label_text = f"{prefix}{label}"
+            # Home remains a calm launcher: show the enter glyph only on the
+            # highlighted row instead of repeating it on every line.
+            label_prefix = "▶ " if idx == state.menu_index else "  "
+            label_text = f"{label_prefix}{label}"
             label_bbox = draw_left_vcentered_text(draw, 28, top, row_h, label_text, self.font_menu, fill)
 
             if value:
@@ -2596,8 +2655,14 @@ class TFTDisplay:
         )
 
     def _draw_submenu_soundfont_rows(self, draw, options):
-        visible_rows = max(1, (self.height - 50 - 56) // 38)
-        start_idx = max(0, state.submenu_index - visible_rows + 1) if state.submenu_index >= visible_rows else 0
+        start_idx, visible_rows, _visible_row = self._list_window_state(
+            state.submenu_index,
+            len(options),
+            56,
+            38,
+            self.height - 50,
+            page_windows=False,
+        )
 
         for visible_row, idx in enumerate(range(start_idx, min(len(options), start_idx + visible_rows))):
             top = 56 + visible_row * 38
@@ -2606,11 +2671,14 @@ class TFTDisplay:
             if idx == state.submenu_index:
                 draw.rounded_rectangle((20, top, self.width - 20, top + 32), radius=8, fill=SELECT_BG)
                 fill = FG
-                prefix = "▶ "
             else:
                 fill = FG if is_current else DIM
-                prefix = "  "
 
+            # Keep Sound Source visually calm as well: show the row-type glyph
+            # only on the highlighted row.  Non-highlighted rows should not all
+            # display triangles, because this screen is frequently used during
+            # performance and the full glyph column is visually noisy.
+            prefix = f"{self._row_symbol_for_current_context(idx)} " if idx == state.submenu_index else "  "
             suffix = " *" if is_current else ""
             row_text = f"{prefix}{text}{suffix}"
             draw_left_vcentered_text_list(draw, 28, top, 38, row_text, self.font_body, fill)
@@ -3147,7 +3215,7 @@ class TFTDisplay:
                 elif state.submenu_index == len(SOUNDFONTS) + 1:
                     footer_hint = "SEL: Hint   ▶: Combi"
                 elif state.submenu_index == len(SOUNDFONTS) + 2:
-                    footer_hint = "SEL/▶: Reload"
+                    footer_hint = "SEL: Reload"
             except Exception:
                 pass
 
@@ -7711,8 +7779,8 @@ def apply_current_submenu_selection() -> None:
                 resume_selected_browser_file_after_sf_change()
             return
         if state.submenu_index == len(SOUNDFONTS) + 1:
-            # Combi has no safe default sound.  Keep SELECT as an explicit hint,
-            # and use RIGHT consistently as the browse/enter action.
+            # Combi has no safe default sound.  SELECT gives an explicit hint;
+            # RIGHT is used here only to distinguish browse/enter from default apply.
             show_timed_modal_message("Use RIGHT", hold_sec=0.9, subtext="Open Combi List")
             return
         if state.submenu_index == len(SOUNDFONTS) + 2:
@@ -8524,7 +8592,7 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "RIGHT":
             pulse_button_activity()
             if radio_index_is_favorites_entry():
-                enter_radio_browser("favorites")
+                mark_dirty("SEL=Favorites")
             else:
                 toggle_current_radio_favorite()
             return
@@ -8919,7 +8987,7 @@ def handle_button_event(btn_value: str) -> None:
             elif state.submenu_index == len(SOUNDFONTS) + 1:
                 enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
             elif state.submenu_index == len(SOUNDFONTS) + 2:
-                refresh_current_sound()
+                mark_dirty("SEL=Reload")
             else:
                 enter_preset_submenu(state.submenu_index)
             return
@@ -8954,9 +9022,13 @@ def handle_button_event(btn_value: str) -> None:
             else:
                 mark_dirty("Last item")
             return
-        if btn in {"SEL", "RIGHT"}:
+        if btn == "SEL":
             pulse_button_activity()
             enter_preset_list_from_category(state.submenu_index)
+            return
+        if btn == "RIGHT":
+            pulse_button_activity()
+            mark_dirty("SEL=Enter")
             return
         if btn == "LEFT":
             pulse_button_activity()
@@ -9050,7 +9122,12 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "LEFT":
             pulse_button_activity()
-            cancel_preset_preview_and_restore()
+            # 260628b: Leaving a preset list should only move one UI level up.
+            # Keep the last previewed sound active instead of restoring the
+            # pre-browse sound.  This is especially important for Yoshimi,
+            # where returning to the category list should not suddenly switch
+            # back to the previous FluidSynth piano.
+            commit_current_preview()
             return_to_category_submenu()
             return
         mark_dirty(f"BTN ignored: {btn}")
@@ -9108,10 +9185,7 @@ def handle_button_event(btn_value: str) -> None:
 
     if btn == "RIGHT":
         pulse_button_activity()
-        if state.ui_mode == "main":
-            handle_main_select()
-        else:
-            mark_dirty("RIGHT unused")
+        mark_dirty("RIGHT unused")
         return
 
     if btn == "UP_LP":
