@@ -7,6 +7,16 @@ Entries are grouped by development date (KST), which may differ from the corresp
 ---
 # Changelog
 
+## 2026-06-28
+
+### Changed
+
+- Refined preset browsing behavior with page-based navigation for selection lists.
+- Preserved the last previewed sound when returning to preset categories.
+- Simplified button behavior by making SELECT the primary action button while reserving RIGHT for special navigation cases.
+- Reduced visual clutter by displaying navigation markers only on the highlighted item.
+- Improved User Preset preview responsiveness and consistency.
+
 ## 2026-06-27
 
 ### Improved
