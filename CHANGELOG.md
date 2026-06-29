@@ -7,6 +7,34 @@ Entries are grouped by development date (KST), which may differ from the corresp
 ---
 # Changelog
 
+## 2026-06-29
+
+### Stability
+
+- Improved Yoshimi ⇄ FluidSynth lifecycle handling.
+- Added additional cleanup before returning from Yoshimi to FluidSynth.
+- Repeated engine switching tests showed stable operation without reproducing the previous delayed-note / Note-Off playback issue.
+- Investigated Yoshimi live instrument switching without process restart. The experimental approach was not adopted because it did not reliably update the running instrument.
+
+### User Interface
+
+- Changed User Preset **Manage** shortcut from **DOWN long press** to **LEFT long press**.
+- Restored **DOWN long press** as a global action.
+- Changed list incremental redraw to refresh the entire list region instead of only the affected rows, reducing highlight artifacts on the TFT display.
+
+### Controls
+
+- **DOWN long press** now performs **Refresh Current Sound** instead of MIDI Panic.
+- **MIDI Panic** moved to the top of the Quick Menu as an emergency recovery function.
+- Kept encoder long press assigned to encoder acceleration selection.
+
+### Notes
+
+- Yoshimi preview currently restarts the engine when moving between instruments.
+- A process-persistent Yoshimi implementation remains a future research topic.
+
+---
+
 ## 2026-06-28
 
 ### Changed
