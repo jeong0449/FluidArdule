@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260628f"
+SCRIPT_VERSION = "260629f"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -260,6 +260,7 @@ MAIN_MENU = [
 ]
 
 QUICK_MENU_ITEMS = [
+    "MIDI Panic",
     "Return",
     "Home",
     "Now Playing",
@@ -2073,13 +2074,13 @@ class TFTDisplay:
         draw = ImageDraw.Draw(image)
         redraw_current_view(draw)
 
-        boxes = []
-        if prev_index is None or prev_start != curr_start:
-            boxes.append(list_bbox)
-        else:
-            rows = {v for v in (prev_vis, curr_vis) if v is not None}
-            for vis in rows:
-                boxes.append(row_bbox_func(vis))
+        # 260629e:
+        # Redraw the whole list box for list-style incremental updates.
+        # Updating only the previous/current rows was fast, but on the physical
+        # SPI TFT it could leave small stale fragments around rounded highlight
+        # rectangles or long text.  This is still cheaper than a full-screen
+        # redraw and keeps engine/MIDI behavior untouched.
+        boxes = [list_bbox]
 
         if footer_changed:
             self._draw_footer(draw)
@@ -2747,7 +2748,7 @@ class TFTDisplay:
             show_current_marks=False,
         )
         draw.line((24, hint_y - 6, self.width - 24, hint_y - 6), fill=(42, 48, 62), width=1)
-        draw.text((28, hint_y), "Hold DOWN: Manage", font=self.font_small, fill=DIM)
+        draw.text((28, hint_y), "Hold LEFT: Manage", font=self.font_small, fill=DIM)
 
     def _draw_user_preset_rename(self, draw):
         self._draw_submenu_title(draw, "Rename Preset")
@@ -5050,6 +5051,37 @@ def stop_fluidsynth() -> None:
     state.midi_connected = False
 
 
+def ensure_yoshimi_stopped(reason: str = "") -> None:
+    """State-driven cleanup for stale Yoshimi processes.
+
+    FluidSynth normally owns the RAW MIDI device directly, while Yoshimi is
+    reached through ALSA sequencer ports.  Before returning to FluidSynth, make
+    sure a previous Yoshimi process has actually disappeared so ALSA/MIDI state
+    cannot remain half-transitioned.  This is intentionally narrow: it only
+    targets the Yoshimi executable and does not restart Fluid Ardule itself.
+    """
+    code, out = run_cmd(["pgrep", "-x", "yoshimi"])
+    if code != 0 or not out.strip():
+        return
+
+    suffix = f" ({reason})" if reason else ""
+    log(f"stale Yoshimi detected{suffix}: {out.strip()}")
+    run_cmd(["pkill", "-TERM", "-x", "yoshimi"])
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        code, out = run_cmd(["pgrep", "-x", "yoshimi"])
+        if code != 0 or not out.strip():
+            log(f"stale Yoshimi cleared{suffix}")
+            return
+        time.sleep(0.05)
+
+    code, out = run_cmd(["pgrep", "-x", "yoshimi"])
+    if code == 0 and out.strip():
+        log(f"stale Yoshimi still alive; sending SIGKILL{suffix}: {out.strip()}")
+        run_cmd(["pkill", "-KILL", "-x", "yoshimi"])
+
+
 def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     """Start Yoshimi headlessly and load one .xiz instrument at launch.
 
@@ -5079,19 +5111,8 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     stop_fluidsynth()
 
     # Clean up any stale Yoshimi instance left by an earlier failed test run.
-    # This keeps ALSA ports unambiguous for aconnect. Prefer graceful TERM,
-    # then use KILL only for processes that refuse to exit.
-    run_cmd(["pkill", "-TERM", "-x", "yoshimi"])
-    stale_deadline = time.time() + 2.0
-    while time.time() < stale_deadline:
-        code, out = run_cmd(["pgrep", "-x", "yoshimi"])
-        if code != 0 or not out.strip():
-            break
-        time.sleep(0.05)
-    code, out = run_cmd(["pgrep", "-x", "yoshimi"])
-    if code == 0 and out.strip():
-        run_cmd(["pkill", "-KILL", "-x", "yoshimi"])
-        time.sleep(0.2)
+    # This keeps ALSA ports unambiguous for aconnect.
+    ensure_yoshimi_stopped("before Yoshimi start")
 
     os.makedirs(LOG_DIR, exist_ok=True)
     if yoshimi_log_handle:
@@ -5157,6 +5178,7 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
 def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
     global fluid_proc
     stop_fluidsynth()
+    ensure_yoshimi_stopped("before FluidSynth start")
     log_handle = open_fluid_log()
     midi_driver = midi_mode_to_driver(state.midi_mode)
     selected_port = None
@@ -6034,10 +6056,10 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
             mark_dirty("Yoshimi path missing")
             log(f"Yoshimi apply rejected: empty path for {state.current_preset_name}")
             return
-        state.current_engine = "yoshimi"
-        state.current_instrument_path = path
         ok = start_yoshimi_instrument(path, state.audio_device)
         if ok:
+            state.current_engine = "yoshimi"
+            state.current_instrument_path = path
             mark_dirty(f"Yoshimi -> {state.current_preset_name}")
         return
 
@@ -8237,6 +8259,9 @@ def enter_now_playing() -> None:
 
 def quick_menu_select() -> None:
     item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
+    if item == "MIDI Panic":
+        midi_panic()
+        return
     if item == "Return":
         restore_quick_snapshot()
         return
@@ -8507,15 +8532,16 @@ def handle_button_event(btn_value: str) -> None:
         enter_power_menu()
         return
 
-    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_load" and btn == "DOWN_LP":
+    if state.ui_mode == "submenu" and state.submenu_key == "user_preset_load" and btn == "LEFT_LP":
         pulse_button_activity()
         enter_user_preset_manage_menu()
         return
 
-    # Panic remains the only direct emergency long-press action.
+    # DOWN long is a soft sound refresh.  MIDI Panic remains available
+    # from the top of the Quick Menu for true emergency stuck-note cases.
     if btn == "DOWN_LP" and state.ui_mode != "power_menu":
         pulse_button_activity()
-        midi_panic()
+        refresh_current_sound()
         return
 
     if state.ui_mode == "quick_menu":
