@@ -5,7 +5,6 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 Entries are grouped by development date (KST), which may differ from the corresponding Git commit date.
 
 ---
-# Changelog
 
 ## 2026-06-29
 
