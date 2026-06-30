@@ -1,12 +1,12 @@
 # Fluid Ardule
 
-**Turn a Raspberry Pi and Arduino into a powerful standalone MIDI sound module and media workstation.**
+**Turn a Raspberry Pi and Arduino into a standalone MIDI sound module and music workstation.**
 
-A modular DIY hardware workstation that combines Raspberry Pi–based audio synthesis with Arduino-powered hardware control.
+Fluid Ardule is a modular DIY music workstation that combines Raspberry Pi–based audio synthesis with Arduino-powered hardware control.
 
-Designed to behave like a dedicated musical instrument rather than a general-purpose computer, Fluid Ardule provides a self-contained environment for SoundFont and virtual analog synthesis (Yoshimi), MIDI playback, media playback, Internet radio, and external MIDI module integration.
+Designed to behave like a dedicated musical instrument rather than a general-purpose Linux computer, Fluid Ardule provides a self-contained environment for **FluidSynth**, **Yoshimi**, MIDI playback, media playback, Internet radio, and external MIDI module integration. Its event-driven architecture emphasizes responsive operation, low CPU usage, and reliable live performance.
 
-As of June 2026, the project has evolved into a mature Python application exceeding 10,000 lines of code.
+As of June 2026, the project has evolved into a mature Python application exceeding **10,000 lines of code**, with an increasing focus on reliability, seamless engine switching, and a hardware-oriented user experience.
 
 <img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
 
@@ -14,27 +14,29 @@ As of June 2026, the project has evolved into a mature Python application exceed
 
 ## What does it do?
 
-- Act as a standalone MIDI sound module with instant playability — connect a keyboard and play immediately
-- Support multiple sound engines including FluidSynth and Yoshimi
-- Browse and load SoundFont presets by category
-- Save and recall user-defined presets across different sound engines
-- Control synthesis and playback parameters via dedicated hardware UI (UNO-1)
-- Self-calibrating 5-button analog keypad with EEPROM-persisted ADC center values
-  - Calibration mode is accessible even when keypad navigation becomes unreliable
-  - ENC + SELECT long press enters keypad calibration mode
-- Accept MIDI input from USB or DIN (DIN I/O via UNO-2 MIDI bridge)
-- Play MIDI files using FluidSynth
+- Operate as a standalone MIDI sound module — simply connect a MIDI keyboard and play
+- Support multiple synthesis engines, including **FluidSynth** (SoundFonts) and **Yoshimi**
+- Browse and load SoundFont and Yoshimi presets by category
+- Save and recall persistent User Presets across multiple synthesis engines
+- Support workstation-style **Combi** performance using layering and keyboard split
+- Control synthesis and playback through a dedicated Arduino-based hardware interface (UNO-1)
+- Automatically calibrate the 5-button analog keypad with EEPROM-persisted ADC center values
+  - Calibration remains accessible even if keypad navigation becomes unreliable
+  - **ENC + SELECT** long press enters calibration mode
+- Accept MIDI input from USB or DIN (DIN I/O via the UNO-2 MIDI bridge)
+- Play Standard MIDI Files through FluidSynth
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
-- Output audio via I2S DAC or USB DAC
-- Mirror internal MIDI performance (live input and MIDI file playback) to external MIDI devices via USB MIDI interfaces
-- Support external MIDI modules such as Roland SC-D70 over USB, including port-aware selection (e.g., Part A / Part B / MIDI)
-- Dynamically display only connected MIDI devices (device-driven UI)
-- Provide a hardware-oriented standalone instrument workflow with quick-access menus, MIDI panic, and persistent user presets
+- Output audio through either an I2S DAC or a USB DAC
+- Mirror internal MIDI performance (live playing and MIDI file playback) to external MIDI devices
+- Support external MIDI modules such as the Roland SC-D70 with port-aware routing (Part A / Part B / MIDI)
+- Dynamically display only connected MIDI devices using a device-driven user interface
+- Provide a hardware-oriented workflow with quick-access menus, persistent User Presets, sound refresh, MIDI Panic, and context-aware navigation
 
-> 🚧 Advanced performance features such as layering, combination patches, keyboard split, deeper preset editing, and performance memory management are planned for future development.
+> **Project status**
 >
-> See also: [`docs/combination-system-design.md`](docs/combination-system-design.md)
-> — a proposed workstation-style Combination architecture based on User Presets, layering, and keyboard split.
+> Fluid Ardule is under active development. Current work focuses on improving live performance, engine transition reliability, Combi workflow, and seamless integration between FluidSynth and Yoshimi.
+>
+> See also: [`docs/combination-system-design.md`](docs/combination-system-design.md) — a proposed workstation-style Combination architecture based on User Presets, layering, and keyboard split.
 
 ---
 
@@ -217,14 +219,6 @@ Topics include:
 - https://github.com/jeong0449/NanoArdule
 - https://github.com/jeong0449/NanoArdule/tree/main/firmware/ardule_usb_midi_host
 - https://github.com/jeong0449/uno-midi-bridge
-
----
-
-## Status
-
-🚧 Work in progress  
-
-This repository documents the evolving system architecture, hardware integration, and standalone instrument workflow of Fluid Ardule.
 
 ---
 
