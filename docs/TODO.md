@@ -45,6 +45,8 @@ Focus areas:
 
 **Status:** Open / small bug
 
+---
+
 ## Medium Priority
 
 ### Fine-tune Encoder Acceleration
@@ -74,12 +76,29 @@ Focus areas:
 -   Improve active Combi indication.
 -   Prepare for layer mute/solo.
 
+### SoundFont Readiness Detection
+
+Replace fixed startup delays with state-based readiness detection.
+
+Focus areas:
+
+- Detect when FluidSynth is ready to accept MIDI.
+- Display "Loading..." and "Ready" status in the UI.
+- Eliminate unnecessary fixed waits where possible.
+- Investigate first-note latency with large SoundFonts (e.g. FluidGM).
+
+Status: Planned
+
+---
+
 ## Low Priority
 
 ### UI Rendering Optimization
 
 -   Reduce redraw artifacts.
 -   Evaluate list-region redraw strategy.
+
+---
 
 ## Recently Completed
 
