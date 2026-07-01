@@ -6,6 +6,14 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+### 260701j
+
+- DOWN long-press sound refresh now keeps the current screen instead of returning to Home.
+- Show a loading modal consistently whenever a SoundFont or Yoshimi sound source is reloaded.
+- Reduce Yoshimi restart transition noise using brief output attenuation (20% → restart → 30 ms → restore).
+
+---
+
 ## 2026-06-29
 
 ### Stability
