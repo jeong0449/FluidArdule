@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260629f"
+SCRIPT_VERSION = "260701j"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -58,6 +58,21 @@ SOUNDFONTS = [
 YOSHIMI_EXECUTABLE = "yoshimi"
 YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
 YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.15
+# Experimental Yoshimi transition mute.
+#
+# Yoshimi preview/apply currently uses the reliable restart-with -L path.
+# That guarantees the selected .xiz is applied, but the audio engine can emit
+# a short "thump/boom" while an old patch is still ringing or while ALSA is
+# torn down and recreated.  Instead of sending MIDI CCs through aplaymidi
+# (which proved unreliable in this setup), briefly mute the ALSA output around
+# the Yoshimi engine transition and then restore the previous logical volume.
+#
+# This is intentionally limited to Yoshimi transitions.  FluidSynth preset
+# changes are lightweight program changes and do not need global output mute.
+YOSHIMI_TRANSITION_MUTE_ENABLED = True
+YOSHIMI_TRANSITION_MUTE_LEVEL_PERCENT = 20
+YOSHIMI_TRANSITION_MUTE_RESTORE_DELAY_SEC = 0.03
+YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT = 100
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -742,6 +757,69 @@ def set_output_volume(percent: int, *, announce: bool = False) -> None:
     except Exception as exc:
         if announce:
             mark_dirty(f"Volume set failed: {exc}")
+
+
+def set_alsa_output_volume_only(percent: int) -> bool:
+    """Set ALSA output level without changing Fluid Ardule's logical volume.
+
+    This is used for very short transition mutes.  The physical POT and the
+    saved logical volume should still own the user-visible volume value, so this
+    helper deliberately does not modify state.volume_percent or the saved volume
+    file.
+    """
+    percent = max(0, min(100, int(percent)))
+    try:
+        subprocess.run(
+            ["amixer", "sset", AMIXER_CONTROL, f"{percent}%"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return True
+    except Exception as exc:
+        log(f"ALSA volume set failed during transition mute: {exc}")
+        return False
+
+
+def yoshimi_transition_mute_begin(reason: str = "") -> int | None:
+    """Drop ALSA output level before a Yoshimi engine transition.
+
+    This is an output-only anti-thump experiment.  It does not change
+    state.volume_percent or the saved POT-owned volume.  Instead of muting all
+    the way to 0%, keep a little level (default 20%) so the transition feels
+    less abruptly gated, then restore to the configured restore level after a
+    short delay.
+    """
+    if not YOSHIMI_TRANSITION_MUTE_ENABLED:
+        return None
+    previous = max(0, min(100, int(state.volume_percent)))
+    transition_level = max(0, min(100, int(YOSHIMI_TRANSITION_MUTE_LEVEL_PERCENT)))
+    if set_alsa_output_volume_only(transition_level):
+        suffix = f" ({reason})" if reason else ""
+        log(
+            f"Yoshimi transition attenuation ON{suffix}: "
+            f"{transition_level}% -> restore {YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT}% "
+            f"(logical {previous}%)"
+        )
+        return previous
+    return None
+
+
+def yoshimi_transition_mute_end(previous_volume: int | None, reason: str = "") -> None:
+    """Restore ALSA output after a Yoshimi engine transition."""
+    if previous_volume is None:
+        return
+    try:
+        time.sleep(max(0.0, float(YOSHIMI_TRANSITION_MUTE_RESTORE_DELAY_SEC)))
+    except Exception:
+        pass
+    restore_percent = max(0, min(100, int(YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT)))
+    set_alsa_output_volume_only(restore_percent)
+    suffix = f" ({reason})" if reason else ""
+    log(
+        f"Yoshimi transition attenuation OFF{suffix}: "
+        f"restored {restore_percent}% (logical {previous_volume}%)"
+    )
 
 
 def save_volume_state(percent: int) -> None:
@@ -5105,6 +5183,12 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
         log(f"Yoshimi instrument file missing: {xiz_path}")
         return False
 
+    # Mute only the output level around the Yoshimi transition.  This is an
+    # experimental anti-thump strategy: avoid aplaymidi/CC123, keep the proven
+    # restart-with -L path, and hide the short audio artifact while the engine
+    # is stopped and recreated.
+    transition_restore_volume = yoshimi_transition_mute_begin(xiz.name)
+
     # Stop the currently managed engine first. This is intentionally the same
     # process slot used by FluidSynth, because Fluid Ardule runs only one live
     # synth engine at a time.
@@ -5153,9 +5237,11 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
             text=True,
         )
     except FileNotFoundError:
+        yoshimi_transition_mute_end(transition_restore_volume, "missing")
         mark_dirty("Yoshimi missing")
         return False
     except Exception as exc:
+        yoshimi_transition_mute_end(transition_restore_volume, "start exception")
         mark_dirty(f"Yoshimi start failed: {exc}")
         log(f"Yoshimi start exception: {exc}")
         return False
@@ -5165,11 +5251,13 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
         state.fluid_pid = fluid_proc.pid
         state.current_engine = "yoshimi"
         reconnect_midi_to_fluidsynth(force_draw=True)
+        yoshimi_transition_mute_end(transition_restore_volume, "started")
         return True
 
     rc = fluid_proc.returncode
     fluid_proc = None
     state.fluid_pid = None
+    yoshimi_transition_mute_end(transition_restore_volume, "failed")
     mark_dirty(f"Yoshimi failed rc={rc}")
     log(f"Yoshimi failed to start; returncode={rc}. See {YOSHIMI_LOG_PATH}")
     return False
@@ -6164,6 +6252,13 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
     state.audio_device = audio_device
     state.dac_preview_index = state.dac_index
 
+    # Any operation that reloads a SoundFont/synth engine can take long enough
+    # to make the UI appear frozen.  Show the blocking modal here, at the common
+    # engine-restart entry point, so Sound Source SELECT, preset preview across
+    # sources, DAC changes, refresh, and User Preset source recalls behave
+    # consistently.
+    show_modal_message("Loading Sound...", f"{sf_name} / {dac_name}")
+
     if is_yoshimi_source(sf_index):
         presets = load_presets_for_sf2(sf_index)
         target = None
@@ -6184,11 +6279,13 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
                     break
         target = target or choose_default_preset(presets)
         if not target:
+            clear_modal_message()
             mark_dirty("No Yoshimi JSON")
             send_ui_status("READY", force=True)
             return
         path = str(target.get("path", current_path)).strip()
         if not path:
+            clear_modal_message()
             mark_dirty("Yoshimi path missing")
             log(f"Yoshimi restart rejected: empty path for target={target}")
             send_ui_status("READY", force=True)
@@ -6200,8 +6297,10 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
         state.current_instrument_path = path
         ok = start_yoshimi_instrument(path, audio_device)
         if not ok:
+            clear_modal_message()
             send_ui_status("READY", force=True)
             return
+        clear_modal_message()
         mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
         send_ui_status("READY", force=True)
         return
@@ -6209,9 +6308,11 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
     mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
     ok = start_fluidsynth(sf_path, audio_device)
     if not ok:
+        clear_modal_message()
         send_ui_status("READY", force=True)
         return
     reconnect_midi_to_fluidsynth(force_draw=False)
+    clear_modal_message()
     mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
     send_ui_status("READY", force=True)
 
@@ -7507,7 +7608,11 @@ def refresh_current_sound() -> None:
     # its source/engine and saved Sound Edit values are restored consistently.
     user_item = find_current_user_preset_item()
     if user_item is not None:
-        apply_user_preset(user_item)
+        # DOWN long-press is a refresh in place.  Do not let User Preset reload
+        # call leave_submenu(), because that unexpectedly returns to Home while
+        # the user is browsing another screen.
+        apply_user_preset(user_item, leave_after=False)
+        clear_modal_message()
         return
 
     sf_index = state.sf_index
@@ -7533,7 +7638,10 @@ def refresh_current_sound() -> None:
     finally:
         clear_modal_message()
 
-    leave_submenu("Sound refreshed")
+    # DOWN long-press refresh must stay exactly where the user invoked it.
+    # Do not call leave_submenu() here; returning to Home/Sound Source during a
+    # refresh is a navigation side effect, not part of the musical operation.
+    mark_dirty("Sound refreshed")
 
 def apply_default_user_preset() -> None:
     presets = load_user_presets()
