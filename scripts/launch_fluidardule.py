@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260702c"
+SCRIPT_VERSION = "260702f"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -58,21 +58,15 @@ SOUNDFONTS = [
 YOSHIMI_EXECUTABLE = "yoshimi"
 YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
 YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.15
-# Experimental Yoshimi transition mute.
-#
-# Yoshimi preview/apply currently uses the reliable restart-with -L path.
-# That guarantees the selected .xiz is applied, but the audio engine can emit
-# a short "thump/boom" while an old patch is still ringing or while ALSA is
-# torn down and recreated.  Instead of sending MIDI CCs through aplaymidi
-# (which proved unreliable in this setup), briefly mute the ALSA output around
-# the Yoshimi engine transition and then restore the previous logical volume.
-#
-# This is intentionally limited to Yoshimi transitions.  FluidSynth preset
-# changes are lightweight program changes and do not need global output mute.
-YOSHIMI_TRANSITION_MUTE_ENABLED = True
-YOSHIMI_TRANSITION_MUTE_LEVEL_PERCENT = 20
-YOSHIMI_TRANSITION_MUTE_RESTORE_DELAY_SEC = 0.03
-YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT = 100
+# Experimental restart-free Yoshimi instrument switching.
+# When Yoshimi is already running, Fluid Ardule tries to keep the process alive
+# and sends "load instrument <path>" through Yoshimi stdin.  The Yoshimi JSON
+# should use space-free symlink paths because the Yoshimi CLI is fragile with
+# filenames containing spaces.  If live loading is unavailable, the code falls
+# back to the previous reliable restart-with -L path.
+YOSHIMI_LIVE_LOAD_ENABLED = True
+YOSHIMI_LIVE_LOAD_FALLBACK_RESTART = True
+YOSHIMI_LIVE_LOAD_TRACE = False
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -794,69 +788,6 @@ def set_output_volume(percent: int, *, announce: bool = False) -> None:
     except Exception as exc:
         if announce:
             mark_dirty(f"Volume set failed: {exc}")
-
-
-def set_alsa_output_volume_only(percent: int) -> bool:
-    """Set ALSA output level without changing Fluid Ardule's logical volume.
-
-    This is used for very short transition mutes.  The physical POT and the
-    saved logical volume should still own the user-visible volume value, so this
-    helper deliberately does not modify state.volume_percent or the saved volume
-    file.
-    """
-    percent = max(0, min(100, int(percent)))
-    try:
-        subprocess.run(
-            ["amixer", "sset", AMIXER_CONTROL, f"{percent}%"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return True
-    except Exception as exc:
-        log(f"ALSA volume set failed during transition mute: {exc}")
-        return False
-
-
-def yoshimi_transition_mute_begin(reason: str = "") -> int | None:
-    """Drop ALSA output level before a Yoshimi engine transition.
-
-    This is an output-only anti-thump experiment.  It does not change
-    state.volume_percent or the saved POT-owned volume.  Instead of muting all
-    the way to 0%, keep a little level (default 20%) so the transition feels
-    less abruptly gated, then restore to the configured restore level after a
-    short delay.
-    """
-    if not YOSHIMI_TRANSITION_MUTE_ENABLED:
-        return None
-    previous = max(0, min(100, int(state.volume_percent)))
-    transition_level = max(0, min(100, int(YOSHIMI_TRANSITION_MUTE_LEVEL_PERCENT)))
-    if set_alsa_output_volume_only(transition_level):
-        suffix = f" ({reason})" if reason else ""
-        log(
-            f"Yoshimi transition attenuation ON{suffix}: "
-            f"{transition_level}% -> restore {YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT}% "
-            f"(logical {previous}%)"
-        )
-        return previous
-    return None
-
-
-def yoshimi_transition_mute_end(previous_volume: int | None, reason: str = "") -> None:
-    """Restore ALSA output after a Yoshimi engine transition."""
-    if previous_volume is None:
-        return
-    try:
-        time.sleep(max(0.0, float(YOSHIMI_TRANSITION_MUTE_RESTORE_DELAY_SEC)))
-    except Exception:
-        pass
-    restore_percent = max(0, min(100, int(YOSHIMI_TRANSITION_MUTE_RESTORE_PERCENT)))
-    set_alsa_output_volume_only(restore_percent)
-    suffix = f" ({reason})" if reason else ""
-    log(
-        f"Yoshimi transition attenuation OFF{suffix}: "
-        f"restored {restore_percent}% (logical {previous_volume}%)"
-    )
 
 
 def save_volume_state(percent: int) -> None:
@@ -4893,7 +4824,7 @@ def process_pending_yoshimi_preview() -> None:
         log(f"Yoshimi preview rejected: empty path for {p}")
         return
     mark_dirty(f'Preview Yoshimi: {p.get("name", "Yoshimi")}')
-    start_yoshimi_instrument(path, state.audio_device)
+    load_or_start_yoshimi_instrument(path, state.audio_device)
 
 def cancel_preset_preview_and_restore() -> None:
     state.pending_yoshimi_preview_index = None
@@ -5242,11 +5173,12 @@ def ensure_yoshimi_stopped(reason: str = "") -> None:
 def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     """Start Yoshimi headlessly and load one .xiz instrument at launch.
 
-    Important:
-    - Do not drive Yoshimi through the interactive CLI.
-    - Use the command form verified on the target system:
-      yoshimi -i -A -a -L /path/to/instrument.xiz
-    - Keep stdin closed with DEVNULL so the prompt cannot fill the log.
+    This is still the reliable cold-start path:
+        yoshimi -i -A -a -L /path/to/instrument.xiz
+
+    Unlike earlier versions, stdin is kept open so later patch changes can be
+    sent with:
+        load instrument /space/free/symlink.xiz
     """
     global fluid_proc, yoshimi_log_handle
 
@@ -5266,7 +5198,6 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     # experimental anti-thump strategy: avoid aplaymidi/CC123, keep the proven
     # restart-with -L path, and hide the short audio artifact while the engine
     # is stopped and recreated.
-    transition_restore_volume = yoshimi_transition_mute_begin(xiz.name)
 
     # Stop the currently managed engine first. This is intentionally the same
     # process slot used by FluidSynth, because Fluid Ardule runs only one live
@@ -5296,9 +5227,8 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
 
     log(f"Starting Yoshimi with {xiz.name} / {audio_device}")
     # Yoshimi can repeatedly emit interactive prompts such as
-    # "yoshimi> @ Top" even when used as a headless engine. Keep a minimal
-    # Fluid Ardule-side launch log, but do not pipe Yoshimi stdout/stderr
-    # into a persistent log file.
+    # "yoshimi> @ Top" even when used as a headless engine. Keep stdout/stderr
+    # suppressed, but keep stdin open for restart-free live instrument loading.
     try:
         with open(YOSHIMI_LOG_PATH, "w", buffering=1) as yh:
             yh.write("CMD: " + " ".join(cmd) + "\n")
@@ -5311,16 +5241,14 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             preexec_fn=os.setsid,
             text=True,
         )
     except FileNotFoundError:
-        yoshimi_transition_mute_end(transition_restore_volume, "missing")
         mark_dirty("Yoshimi missing")
         return False
     except Exception as exc:
-        yoshimi_transition_mute_end(transition_restore_volume, "start exception")
         mark_dirty(f"Yoshimi start failed: {exc}")
         log(f"Yoshimi start exception: {exc}")
         return False
@@ -5330,16 +5258,94 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
         state.fluid_pid = fluid_proc.pid
         state.current_engine = "yoshimi"
         reconnect_midi_to_fluidsynth(force_draw=True)
-        yoshimi_transition_mute_end(transition_restore_volume, "started")
         return True
 
     rc = fluid_proc.returncode
     fluid_proc = None
     state.fluid_pid = None
-    yoshimi_transition_mute_end(transition_restore_volume, "failed")
     mark_dirty(f"Yoshimi failed rc={rc}")
     log(f"Yoshimi failed to start; returncode={rc}. See {YOSHIMI_LOG_PATH}")
     return False
+
+
+def yoshimi_process_alive() -> bool:
+    return (
+        state.current_engine == "yoshimi"
+        and fluid_proc is not None
+        and fluid_proc.poll() is None
+    )
+
+
+def send_yoshimi_cli_command(command: str) -> bool:
+    """Send one command to the running Yoshimi CLI through stdin."""
+    if not yoshimi_process_alive():
+        return False
+    if fluid_proc is None or fluid_proc.stdin is None:
+        log("Yoshimi CLI unavailable: stdin is not open")
+        return False
+    try:
+        if YOSHIMI_LIVE_LOAD_TRACE:
+            log(f"Yoshimi CLI >>> {command}")
+        fluid_proc.stdin.write(command.rstrip("\n") + "\n")
+        fluid_proc.stdin.flush()
+        return True
+    except BrokenPipeError:
+        log("Yoshimi CLI write failed: broken pipe")
+        return False
+    except Exception as exc:
+        log(f"Yoshimi CLI write failed: {exc}")
+        return False
+
+
+def live_load_yoshimi_instrument(xiz_path: str) -> bool:
+    """Try to change the running Yoshimi instrument without restarting it."""
+    if not YOSHIMI_LIVE_LOAD_ENABLED:
+        return False
+
+    xiz_path = str(xiz_path or "").strip()
+    if not xiz_path:
+        return False
+    xiz = Path(xiz_path)
+    if not xiz.exists():
+        log(f"Yoshimi live load rejected; file missing: {xiz_path}")
+        return False
+
+    # The Yoshimi CLI does not parse paths with spaces reliably.  The symlink
+    # JSON should provide a space-free path.  If a path with spaces is seen,
+    # skip live loading so the fallback -L start path can still work.
+    if " " in xiz_path:
+        log(f"Yoshimi live load skipped; path contains spaces: {xiz_path}")
+        return False
+
+    if not send_yoshimi_cli_command(f"load instrument {xiz_path}"):
+        return False
+
+    # There is no simple synchronous OK response here because stdout/stderr are
+    # suppressed to avoid CLI prompt spam.  Treat a still-alive process shortly
+    # after the command as a successful live load.
+    time.sleep(0.05)
+    if not yoshimi_process_alive():
+        log("Yoshimi live load failed; process exited after command")
+        return False
+
+    state.current_engine = "yoshimi"
+    state.current_instrument_path = xiz_path
+    state.fluid_pid = fluid_proc.pid if fluid_proc is not None else None
+    if YOSHIMI_LIVE_LOAD_TRACE:
+        log(f"Yoshimi live load OK: {xiz.name}")
+    return True
+
+
+def load_or_start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
+    """Prefer live Yoshimi instrument loading, with restart fallback."""
+    xiz_path = str(xiz_path or "").strip()
+    if yoshimi_process_alive() and live_load_yoshimi_instrument(xiz_path):
+        return True
+
+    if not YOSHIMI_LIVE_LOAD_FALLBACK_RESTART and yoshimi_process_alive():
+        return False
+
+    return start_yoshimi_instrument(xiz_path, audio_device)
 
 
 def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
@@ -6220,7 +6226,7 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
             mark_dirty("Yoshimi path missing")
             log(f"Yoshimi apply rejected: empty path for {state.current_preset_name}")
             return
-        ok = start_yoshimi_instrument(path, state.audio_device)
+        ok = load_or_start_yoshimi_instrument(path, state.audio_device)
         if ok:
             state.current_engine = "yoshimi"
             state.current_instrument_path = path
@@ -7980,7 +7986,6 @@ def apply_current_submenu_selection() -> None:
         if state.submenu_index == len(SOUNDFONTS):
             # Keep the same convention as other Sound Sources:
             # SELECT recalls a default item, RIGHT enters the full preset list.
-            show_timed_modal_message("Loading Default", hold_sec=0.8, subtext="User Preset")
             apply_default_user_preset()
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
@@ -7995,7 +8000,6 @@ def apply_current_submenu_selection() -> None:
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
             return
-        show_timed_modal_message("Loading Default", hold_sec=0.8, subtext=source_name_for_index(state.submenu_index))
         apply_soundfont_with_default_preset(state.submenu_index)
         leave_submenu("SoundFont applied")
         if resume_after_apply:
