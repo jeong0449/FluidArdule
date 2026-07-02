@@ -6,6 +6,34 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260702f — Live Yoshimi Instrument Loading
+
+### New
+
+- Replaced Yoshimi restart-based instrument switching with live `load instrument` commands.
+- Added persistent stdin control channel for the Yoshimi process.
+- Adopted symlink-based Yoshimi instrument JSON to eliminate filename whitespace issues.
+- Preserved automatic restart fallback if live loading fails.
+
+### Improvements
+
+- Removed obsolete transition mute workaround and temporary volume ducking.
+- Simplified Yoshimi instrument loading workflow.
+- Reduced latency during instrument changes.
+- Eliminated unnecessary audio interruption during preset changes.
+
+### UI
+
+- Removed redundant "Loading Default" modal.
+- Sound Source SELECT now shows only a single loading dialog during engine initialization.
+
+### Maintenance
+
+- Updated Yoshimi control architecture for persistent runtime control.
+- Improved maintainability by removing obsolete restart-era code.
+
+---
+
 ## 260702c — Context-specific Encoder Acceleration & Input Cleanup
 
 ### New
