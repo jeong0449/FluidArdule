@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260701j"
+SCRIPT_VERSION = "260702c"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -377,11 +377,46 @@ SOUND_EDIT_SEND_ALL_CHANNELS = True
 # Keep the debug logging hooks in the code, but leave them disabled for normal use.
 # Set this to True temporarily when verifying CC transmission with journalctl.
 SOUND_EDIT_CC_DEBUG = False
-ENCODER_ACCEL_DEFAULT_PROFILE = 2
+# Encoder trace diagnostics. Enable this temporarily while running the script
+# from a terminal (not as a systemd service) to see every ENC event received
+# from UNO-1 and the resulting UI/value movement. Keep False for normal use.
+ENCODER_TRACE = False
+# Encoder acceleration profile sync diagnostics. Enable temporarily to see
+# Pi -> UNO ACCELSET:n decisions when UI context changes or serial reconnects.
+ACCEL_PROFILE_TRACE = False
+# If True, ACCEL:n reports from UNO-1 also produce a short TFT footer message.
+# Keep False for normal context-specific profile switching because UNO LCD
+# already shows the active P0/P1/P2/P3 profile.
+ACCEL_PROFILE_TFT_FEEDBACK = False
+ENCODER_ACCEL_DEFAULT_PROFILE = 0
 ENCODER_ACCEL_OPTIONS = {
+    0: "P0 Precise",
     1: "P1 Fine",
     2: "P2 Normal",
     3: "P3 Fast",
+}
+# Pi-side default acceleration policy. UNO-1 still applies the acceleration,
+# but Raspberry Pi selects the suitable profile for the current UI context.
+# Long-list navigation gets P1; precise top-level/menu screens get P0;
+# continuous/value editing gets P2. Unknown contexts fall back to P0.
+UI_ACCEL_PROFILE_DEFAULT = 0
+UI_ACCEL_PROFILE_BY_CONTEXT = {
+    "main": 0,
+    "file_source": 0,
+    "file_browser": 1,
+    "radio_browser": 1,
+    "quick_menu": 0,
+    "player": 0,
+    "power_menu": 0,
+    "restart_wait": 0,
+    "sound_edit": 2,
+    "submenu:preset": 1,
+    "submenu:preset_category": 1,
+    "submenu:user_preset_load": 1,
+    "submenu:combi_load": 1,
+    "submenu:combi_detail": 1,
+    "submenu:external_midi_pc": 1,
+    "submenu:user_preset_rename": 0,
 }
 # Navigation jitter guard for the rotary encoder.
 # UNO-1 can occasionally emit a single opposite-direction ENC event when the
@@ -623,6 +658,8 @@ combi_router_thread_handle = None
 _wifi_status_cache_until = 0.0
 _wifi_known_ssids_cache_until = 0.0
 _wifi_known_ssids_cache: list[str] = []
+last_accel_context_key: str | None = None
+last_sent_accel_profile: int | None = None
 
 
 
@@ -1671,6 +1708,48 @@ def send_ui_status(status: str, *, force: bool = False) -> bool:
 
 def periodic_serial_ui_status() -> None:
     send_ui_status(current_ui_link_status())
+
+
+def encoder_accel_context_key() -> str:
+    """Return a compact key for Pi-selected encoder acceleration policy."""
+    if state.ui_mode == "submenu":
+        return f"submenu:{state.submenu_key or ''}"
+    return str(state.ui_mode or "main")
+
+
+def desired_encoder_accel_profile() -> int:
+    """Choose the default encoder acceleration profile for the current UI."""
+    key = encoder_accel_context_key()
+    profile = UI_ACCEL_PROFILE_BY_CONTEXT.get(key, UI_ACCEL_PROFILE_DEFAULT)
+    try:
+        return max(0, min(3, int(profile)))
+    except Exception:
+        return UI_ACCEL_PROFILE_DEFAULT
+
+
+def sync_encoder_accel_profile(*, force: bool = False, reason: str = "") -> None:
+    """Send the UI-context-specific acceleration profile to UNO-1.
+
+    UNO-1 owns the low-level encoder acceleration and displays the active
+    P0/P1/P2/P3 profile on its LCD.  The Pi only selects the desired profile
+    for the current UI context and sends ACCELSET:n when the context changes
+    or after serial reconnect.
+    """
+    global last_accel_context_key, last_sent_accel_profile
+    if serial_handle is None:
+        return
+    key = encoder_accel_context_key()
+    profile = desired_encoder_accel_profile()
+    if (not force) and key == last_accel_context_key and profile == last_sent_accel_profile:
+        return
+    if send_serial_line(f"ACCELSET:{profile}"):
+        last_accel_context_key = key
+        last_sent_accel_profile = profile
+        state.encoder_accel_profile = profile
+        state.encoder_accel_pending_profile = profile
+        if ACCEL_PROFILE_TRACE:
+            suffix = f" reason={reason}" if reason else ""
+            log(f"ACCEL_PROFILE ui={key} -> P{profile}{suffix}")
 
 
 def request_startup_pot_snapshot_window() -> None:
@@ -5871,9 +5950,6 @@ def stop_combi_router() -> None:
             pass
     state.combi_router_signature = ""
     combi_router_thread_handle = None
-_wifi_status_cache_until = 0.0
-_wifi_known_ssids_cache_until = 0.0
-_wifi_known_ssids_cache: list[str] = []
 
 
 def start_combi_router() -> bool:
@@ -6833,6 +6909,7 @@ def sound_edit_delta_from_uno(raw_step: int) -> int:
     UNO-1 already detects rotation speed and sends ENC:+1/+2/+3 or ENC:-1/-2/-3.
     In Sound Edit we intentionally use that magnitude, but scale it gently by
     the current UNO acceleration profile:
+      P0 Precise: always +/-1 for precise editing
       P1 Fine   : always +/-1 for precise editing
       P2 Normal : use UNO step as-is
       P3 Fast   : stronger non-linear boost, 1->1, 2->4, 3->7, capped at +/-10
@@ -6846,9 +6923,9 @@ def sound_edit_delta_from_uno(raw_step: int) -> int:
 
     sign = 1 if raw > 0 else -1
     mag = abs(raw)
-    profile = max(1, min(3, int(getattr(state, "encoder_accel_profile", ENCODER_ACCEL_DEFAULT_PROFILE))))
+    profile = max(0, min(3, int(getattr(state, "encoder_accel_profile", ENCODER_ACCEL_DEFAULT_PROFILE))))
 
-    if profile == 1:
+    if profile in (0, 1):
         units = 1
     elif profile == 2:
         units = mag
@@ -8689,11 +8766,6 @@ def handle_button_event(btn_value: str) -> None:
 
     # UP long refreshes slow-changing status values on demand.
     # Normal UI events redraw only; they do not poll Load/Temp/MIDI/DAC/USB/Wi-Fi.
-    if btn == "UP_LP":
-        pulse_button_activity()
-        refresh_status_once()
-        return
-
     if state.ui_mode == "radio_browser":
         labels_len = len(radio_display_labels())
         if btn == "UP":
@@ -8860,19 +8932,6 @@ def handle_button_event(btn_value: str) -> None:
             play_adjacent(-1); return
         if btn == "DOWN":
             play_adjacent(+1); return
-        if btn == "LEFT_LP":
-            pulse_button_activity()
-            request_usb_eject(); return
-        if btn == "UP_LP":
-            pulse_button_activity()
-            if state.player_status == "Stopped" and state.player_path and Path(state.player_path).suffix.lower() in (".mid", ".midi"):
-                return_player_to_browser("Back to list")
-                state.pending_resume_after_sf_apply = True
-                enter_submenu("soundfont", return_mode="file_browser")
-                mark_dirty("SoundFont menu")
-            else:
-                mark_dirty("UP long only from stopped MIDI list state")
-            return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -8912,9 +8971,6 @@ def handle_button_event(btn_value: str) -> None:
             state.browser_index = 0
             invalidate_full_display()
             mark_dirty("Back to main"); return
-        if btn == "LEFT_LP":
-            pulse_button_activity()
-            request_usb_eject(); return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -8948,23 +9004,6 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "LEFT":
             pulse_button_activity()
             browser_go_parent(); return
-        if btn == "LEFT_LP":
-            pulse_button_activity()
-            request_usb_eject(); return
-        if btn == "UP_LP":
-            pulse_button_activity()
-            if state.browser_entries:
-                idx = clamp_index(state.browser_index, len(state.browser_entries))
-                item = state.browser_entries[idx]
-                if item.get("type") == "file" and Path(item.get("path", "")).suffix.lower() in (".mid", ".midi"):
-                    state.pending_resume_after_sf_apply = True
-                    enter_submenu("soundfont", return_mode="file_browser")
-                    mark_dirty("SoundFont menu")
-                else:
-                    mark_dirty("UP long only for selected MIDI file")
-            else:
-                mark_dirty("UP long unavailable here")
-            return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -9128,10 +9167,6 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "LEFT":
             pulse_button_activity()
             leave_submenu("Canceled")
-            return
-        if btn == "UP_LP":
-            pulse_button_activity()
-            mark_dirty("UP long unavailable here")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -9409,6 +9444,7 @@ def serial_reader() -> None:
                 time.sleep(0.02)
                 send_serial_line("PLAY:OFF")
                 send_ui_status("READY", force=True)
+                sync_encoder_accel_profile(force=True, reason="serial_connected")
                 last_serial_hb_time = time.time()
                 state.serial_input_ignore_until = time.time() + SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC
                 mark_dirty("Serial connected")
@@ -9818,13 +9854,17 @@ def handle_serial_line(line: str) -> None:
         return
     if msg_type == "ACCEL":
         try:
-            p = max(1, min(3, int(value)))
+            p = max(0, min(3, int(value)))
             state.encoder_accel_profile = p
             state.encoder_accel_pending_profile = p
-            names = {1: "Fine", 2: "Normal", 3: "Fast"}
-            show_footer_message(f"Accel: P{p} {names[p]}", ACCEL_FOOTER_HOLD_SEC)
+            if ACCEL_PROFILE_TFT_FEEDBACK:
+                label = ENCODER_ACCEL_OPTIONS.get(p, f"P{p}")
+                show_footer_message(f"Accel: {label}", ACCEL_FOOTER_HOLD_SEC)
+            elif ACCEL_PROFILE_TRACE:
+                log(f"ACCEL_REPORT P{p}")
         except Exception:
-            show_footer_message(f"Accel: P{value}", ACCEL_FOOTER_HOLD_SEC)
+            if ACCEL_PROFILE_TFT_FEEDBACK:
+                show_footer_message(f"Accel: P{value}", ACCEL_FOOTER_HOLD_SEC)
         return
     mark_dirty(f"Unknown line: {line}")
 
@@ -9852,6 +9892,107 @@ def _move_index_by_delta(current: int, delta: int, length: int) -> tuple[int, bo
     new_index = max(0, min(length - 1, int(current) + int(delta)))
     return new_index, (new_index != int(current))
 
+
+
+def encoder_context_label() -> str:
+    """Return a compact stable label for the current encoder context."""
+    if state.ui_mode == "submenu" and state.submenu_key:
+        return f"submenu:{state.submenu_key}"
+    if state.ui_mode == "radio_browser":
+        return f"radio_browser:{state.radio_view_mode}"
+    if state.ui_mode == "power_menu" and state.power_confirm_action:
+        return f"power_menu:{state.power_confirm_action}"
+    return str(state.ui_mode)
+
+
+def encoder_position_snapshot() -> str:
+    """Return the currently controlled index/value for encoder trace logs.
+
+    The goal is not to describe the whole UI state, but to show the exact
+    object that ENC:+/-N is expected to move: menu index, list index, current
+    CC value, rename cursor/character, etc.  This makes it easy to compare
+    hand-felt detents with the resulting logical movement.
+    """
+    try:
+        if state.ui_mode == "main":
+            label = MAIN_MENU[state.menu_index] if 0 <= state.menu_index < len(MAIN_MENU) else "-"
+            return f"menu_index={state.menu_index}({label})"
+
+        if state.ui_mode == "quick_menu":
+            label = QUICK_MENU_ITEMS[state.quick_menu_index] if 0 <= state.quick_menu_index < len(QUICK_MENU_ITEMS) else "-"
+            return f"quick_index={state.quick_menu_index}({label})"
+
+        if state.ui_mode == "sound_edit":
+            if SOUND_EDIT_PARAMS:
+                idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
+                item = SOUND_EDIT_PARAMS[idx]
+                cc = int(item["cc"])
+                value = state.sound_edit_values.get(cc, int(item.get("default", 0)))
+                return f"sound_edit_index={idx}({item['label']} CC{cc}) value={value}"
+            return "sound_edit_index=0(empty)"
+
+        if state.ui_mode == "submenu":
+            key = state.submenu_key or "-"
+            if key == "preset":
+                label = state.preset_entries[state.submenu_index].get("name", "-") if 0 <= state.submenu_index < len(state.preset_entries) else "-"
+                return f"submenu_index={state.submenu_index} preset=({shorten_text(str(label), 24)})"
+            if key == "preset_category":
+                label = state.category_entries[state.submenu_index] if 0 <= state.submenu_index < len(state.category_entries) else "-"
+                return f"submenu_index={state.submenu_index} category=({shorten_text(str(label), 24)})"
+            if key == "user_preset_load":
+                label = state.user_preset_entries[state.submenu_index].get("name", "-") if 0 <= state.submenu_index < len(state.user_preset_entries) else "-"
+                return f"submenu_index={state.submenu_index} user_preset=({shorten_text(str(label), 24)})"
+            if key == "combi_load":
+                label = state.combi_entries[state.submenu_index].get("name", "-") if 0 <= state.submenu_index < len(state.combi_entries) else "-"
+                return f"submenu_index={state.submenu_index} combi=({shorten_text(str(label), 24)})"
+            if key == "external_midi_pc":
+                return f"external_pc_index={state.external_midi_pc_index}({gm_program_label(state.external_midi_pc_index)})"
+            if key == "user_preset_rename":
+                cursor = state.user_preset_rename_cursor
+                text = state.user_preset_rename_text or ""
+                ch = text[cursor] if 0 <= cursor < len(text) else ""
+                return f"rename_cursor={cursor} char=({ch}) text=({shorten_text(text, 20)})"
+            return f"submenu_index={state.submenu_index} key={key}"
+
+        if state.ui_mode == "file_source":
+            entries = get_file_source_entries()
+            label = entries[state.browser_index].get("display", "-") if 0 <= state.browser_index < len(entries) else "-"
+            return f"browser_index={state.browser_index} source=({label})"
+
+        if state.ui_mode == "file_browser":
+            label = state.browser_entries[state.browser_index].get("name", "-") if 0 <= state.browser_index < len(state.browser_entries) else "-"
+            return f"browser_index={state.browser_index} file=({shorten_text(str(label), 24)})"
+
+        if state.ui_mode == "radio_browser":
+            labels = radio_display_labels()
+            label = labels[state.radio_index] if 0 <= state.radio_index < len(labels) else "-"
+            return f"radio_index={state.radio_index} station=({shorten_text(str(label), 24)})"
+
+        if state.ui_mode == "player":
+            return f"player_status={state.player_status} path=({shorten_text(str(state.player_path or '-'), 24)})"
+
+        if state.ui_mode == "power_menu":
+            if state.power_confirm_action:
+                label = POWER_CONFIRM_ITEMS[state.power_confirm_index] if 0 <= state.power_confirm_index < len(POWER_CONFIRM_ITEMS) else "-"
+                return f"power_confirm_index={state.power_confirm_index}({label}) action={state.power_confirm_action}"
+            label = POWER_MENU_ITEMS[state.power_menu_index] if 0 <= state.power_menu_index < len(POWER_MENU_ITEMS) else "-"
+            return f"power_menu_index={state.power_menu_index}({label})"
+
+        return f"ui_mode={state.ui_mode} submenu_key={state.submenu_key}"
+    except Exception as exc:
+        return f"snapshot_error={exc}"
+
+
+def encoder_trace(step: int, before: str, after: str | None = None, note: str = "") -> None:
+    """Print one concise encoder diagnostic line when ENCODER_TRACE is enabled."""
+    if not ENCODER_TRACE:
+        return
+    context = encoder_context_label()
+    profile = getattr(state, "encoder_accel_profile", ENCODER_ACCEL_DEFAULT_PROFILE)
+    if after is None:
+        after = encoder_position_snapshot()
+    suffix = f" note={note}" if note else ""
+    log(f"ENC_TRACE step={int(step):+d} profile=P{profile} ui={context} before=[{before}] after=[{after}]{suffix}")
 
 def handle_encoder_navigation_step(step: int) -> bool:
     """Apply ENC:+/-N as an N-row navigation move where it is safe.
@@ -9997,10 +10138,13 @@ def handle_encoder_value(value: str) -> None:
     if step == 0:
         return
 
+    trace_before = encoder_position_snapshot()
+
     if state.ui_mode == "submenu" and state.submenu_key == "user_preset_rename":
         # Character editing remains deliberately fine-grained.
         rename_char_delta(1 if step > 0 else -1)
         last_enc_time = now
+        encoder_trace(step, trace_before, note="rename fine-step")
         return
 
     # In Sound Edit, do not apply the global 20 ms navigation debounce.
@@ -10008,6 +10152,7 @@ def handle_encoder_value(value: str) -> None:
     if state.ui_mode == "sound_edit":
         adjust_sound_edit_value(step)
         last_enc_time = now
+        encoder_trace(step, trace_before, note="sound_edit value")
         return
 
     # Do not time-debounce navigation ENC lines here.
@@ -10026,11 +10171,13 @@ def handle_encoder_value(value: str) -> None:
         and nav_dir != state.last_nav_enc_dir
         and (now - state.last_nav_enc_time) < ENC_NAV_REVERSAL_GUARD_SEC
     ):
+        encoder_trace(step, trace_before, trace_before, note=f"ignored reversal_guard dt={now - state.last_nav_enc_time:.3f}s")
         return
 
     state.last_nav_enc_dir = nav_dir
     state.last_nav_enc_time = now
     handle_encoder_navigation_step(step)
+    encoder_trace(step, trace_before, note="navigation")
 
 
 def performance_render_limited() -> bool:
@@ -10182,6 +10329,7 @@ def main() -> None:
                         break
                 periodic_serial_heartbeat()
                 periodic_serial_ui_status()
+                sync_encoder_accel_profile(reason="event")
                 maybe_render(force=True)
                 continue
 
@@ -10198,6 +10346,7 @@ def main() -> None:
             process_pending_yoshimi_preview()
             process_pending_user_preset_preview()
             process_pending_external_midi_pc_preview()
+            sync_encoder_accel_profile(reason="idle")
             if midi_status_changed:
                 maybe_render(force=True)
             else:
