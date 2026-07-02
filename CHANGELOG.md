@@ -6,6 +6,41 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260702c — Context-specific Encoder Acceleration & Input Cleanup
+
+### New
+
+- Added **context-specific encoder acceleration profiles**.
+- Defined default acceleration policy by UI context:
+  - **P0** – Home / precise navigation
+  - **P1** – Preset, Combi, File Browser, Radio Browser
+  - **P2** – Continuous parameter editing (CC, Tempo, Volume)
+  - **P3** – Manual high-speed override
+- Added Pi → UNO-1 **ACCELSET:0–3** protocol.
+- UNO-1 now updates and displays the current acceleration profile (P0–P3).
+- Current UI acceleration profile is automatically resent after UNO reconnect.
+
+### Diagnostics
+
+- Added optional **Encoder Trace** (`ENCODER_TRACE`) for detailed encoder event logging.
+- Added optional **Acceleration Profile Trace** (`ACCEL_PROFILE_TRACE`) for Pi → UNO profile synchronization.
+
+### UI / UX
+
+- Introduced **context-aware encoder behavior** instead of a single global acceleration setting.
+- Preserved manual profile override using encoder long press.
+- Reserved **P3** as a user-selectable turbo profile rather than using it automatically.
+
+### Cleanup
+
+- Removed obsolete long-press handlers left from previous UI designs.
+- Removed unreachable menu/event branches.
+- Removed duplicate global variable declarations.
+- Simplified encoder and long-press logic for consistency.
+- Updated serial protocol documentation for context-specific acceleration profiles.
+
+---
+
 ### 260701j
 
 - DOWN long-press sound refresh now keeps the current screen instead of returning to Home.
