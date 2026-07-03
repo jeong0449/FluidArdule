@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260702f"
+SCRIPT_VERSION = "260703g"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -67,6 +67,20 @@ YOSHIMI_PREVIEW_DEBOUNCE_SEC = 0.15
 YOSHIMI_LIVE_LOAD_ENABLED = True
 YOSHIMI_LIVE_LOAD_FALLBACK_RESTART = True
 YOSHIMI_LIVE_LOAD_TRACE = False
+
+# Yoshimi factory "Arpeggios" patches are not MIDI arpeggiators.
+# Arpeggio1-like patches get their apparent repeat speed mainly from
+# Part 1 / Effect 2 / Echo Delay.  The user-facing number below is calibrated
+# to feel close to real BPM, then converted to Yoshimi Echo Delay.
+ARP_BPM_DEFAULT = 120
+ARP_BPM_MIN = 60
+ARP_BPM_MAX = 240
+ARP_BPM_STEP = 1
+ARP_BPM_FINE_STEP = 1
+ARP_CAL_SLOPE = 0.797
+ARP_CAL_INTERCEPT = 5.13
+ARP_DELAY_NUMERATOR = 6000
+
 
 DEFAULT_DAC = ("default", "I2S default")
 KNOWN_USB_DACS = [
@@ -276,6 +290,7 @@ QUICK_MENU_ITEMS = [
     "Sound",
     "USB Eject",
     "Save User Preset",
+    "Arpeggio Speed",
 ]
 
 FILE_ROOT_CANDIDATES = [
@@ -410,6 +425,7 @@ UI_ACCEL_PROFILE_BY_CONTEXT = {
     "submenu:combi_load": 1,
     "submenu:combi_detail": 1,
     "submenu:external_midi_pc": 1,
+    "submenu:arp_speed": 2,
     "submenu:user_preset_rename": 0,
 }
 # Navigation jitter guard for the rotary encoder.
@@ -478,6 +494,7 @@ class RuntimeState:
     external_midi_connected: bool = False
     external_midi_pc_index: int = 0
     external_midi_pc_channel: int = 1
+    arp_bpm: int = ARP_BPM_DEFAULT
     pending_external_midi_pc_index: int | None = None
     pending_external_midi_pc_due: float = 0.0
 
@@ -1108,6 +1125,51 @@ def toggle_radio_favorite_by_id(station_id: str | None, station_name: str | None
     else:
         mark_dirty(msg)
 
+
+
+def play_adjacent_radio_station(delta: int) -> None:
+    """Move to the previous/next station while Internet radio is playing.
+
+    This mirrors file playback's adjacent-item behavior, but uses the active
+    radio view (all/favorites) and does not wrap at either end.
+    """
+    if state.player_proc_kind != "radio" and state.player_return_mode != "radio_browser":
+        mark_dirty("Radio not active")
+        return
+
+    if not state.radio_entries:
+        state.radio_entries = load_radio_entries_for_view(state.radio_view_mode)
+    if not state.radio_entries:
+        show_player_notice("No stations")
+        return
+
+    current_id = str(state.player_radio_station_id or "").strip()
+    current_pos = None
+    if current_id:
+        for i, station in enumerate(state.radio_entries):
+            if str(station.get("id", "")).strip() == current_id:
+                current_pos = i
+                break
+
+    if current_pos is None:
+        # Fall back to the browser selection.  In the all-stations view the
+        # first display row is "Favorites", so convert the display index back
+        # to a station index.
+        current_pos = radio_station_index() if state.radio_view_mode == "all" else state.radio_index
+        current_pos = clamp_index(current_pos, len(state.radio_entries))
+
+    next_pos = current_pos + int(delta)
+    if next_pos < 0:
+        show_player_notice("First station")
+        return
+    if next_pos >= len(state.radio_entries):
+        show_player_notice("Last station")
+        return
+
+    state.radio_index = next_pos + (1 if state.radio_view_mode == "all" else 0)
+    station = state.radio_entries[next_pos]
+    log(f"RADIO adjacent delta={delta} next={station.get('name','Radio')}")
+    start_radio_station(station)
 
 def start_radio_station(station: dict) -> None:
     url = str(station.get("url", "")).strip()
@@ -2474,10 +2536,7 @@ class TFTDisplay:
         if label == "DAC":
             return state.dac_name
         if label == "Extension":
-            wifi = wifi_status_label(short=True)
-            if external_midi_out_available():
-                return f"WiFi:{wifi} Ext:{state.external_midi_out_mode.upper()}"
-            return f"WiFi:{wifi}"
+            return "SEL to Expand"
         return ""
 
     def _draw_overflow_hints(self, draw, *, current_idx: int, items_len: int, top_y: int, row_h: int, bottom_y: int) -> None:
@@ -2879,6 +2938,7 @@ class TFTDisplay:
             "controls": "Sound Edit",
             "extension": "Extension",
             "wifi": "Wi-Fi",
+            "arp_speed": "Arpeggio Speed",
             "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC Send",
@@ -2923,6 +2983,8 @@ class TFTDisplay:
             info = shorten_text(state.current_combi_name or "Combi", 18)
         elif state.submenu_key == "wifi":
             info = wifi_status_label(short=False)
+        elif state.submenu_key == "arp_speed":
+            info = f"{state.arp_bpm}"
 
         self._draw_submenu_title(draw, title, info)
 
@@ -2945,6 +3007,16 @@ class TFTDisplay:
                     self._draw_user_preset_load_rows(draw, options)
                 else:
                     self._draw_submenu_generic_rows(draw, options)
+                    if state.submenu_key == "arp_speed":
+                        hint = "Rotate Encoder to adjust"
+                        bbox = draw.textbbox((0, 0), hint, font=self.font_small)
+                        hint_w = bbox[2] - bbox[0]
+                        draw.text(
+                            (self.width - 24 - hint_w, 112),
+                            hint,
+                            font=self.font_small,
+                            fill=DIM,
+                        )
 
     def _draw_file_source(self, draw):
         self._draw_submenu_title(draw, "Media Player", usb_status_text())
@@ -2981,8 +3053,11 @@ class TFTDisplay:
 
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
         if state.player_proc_kind == "radio":
-            up_label = "-"
-            down_label = "-"
+            # 260703b: Radio now supports adjacent-station switching in
+            # Now Playing mode, so show the same PREV/NEXT labels that the
+            # buttons actually perform.  RIGHT remains Favorite toggle.
+            up_label = "PREV"
+            down_label = "NEXT"
             try:
                 is_fav = bool(state.player_radio_station_id and state.player_radio_station_id in load_radio_favorites())
             except Exception:
@@ -5297,6 +5372,78 @@ def send_yoshimi_cli_command(command: str) -> bool:
         return False
 
 
+def clamp_arp_bpm(value: int) -> int:
+    try:
+        value = int(value)
+    except Exception:
+        value = ARP_BPM_DEFAULT
+    return max(ARP_BPM_MIN, min(ARP_BPM_MAX, value))
+
+
+def arp_display_bpm_to_raw_speed(display_bpm: int) -> int:
+    display_bpm = clamp_arp_bpm(display_bpm)
+    raw_speed = round((display_bpm - ARP_CAL_INTERCEPT) / ARP_CAL_SLOPE)
+    return max(1, int(raw_speed))
+
+
+def arp_bpm_to_echo_delay(display_bpm: int) -> int:
+    raw_speed = arp_display_bpm_to_raw_speed(display_bpm)
+    return max(1, min(127, round(ARP_DELAY_NUMERATOR / raw_speed)))
+
+
+def current_yoshimi_patch_is_arpeggio() -> bool:
+    if state.current_engine != "yoshimi":
+        return False
+    name = str(state.current_preset_name or "").lower()
+    path = str(state.current_instrument_path or "").lower()
+    return "arpeggio" in name or "arpeggios" in path
+
+
+def send_yoshimi_cli_block(commands: list[str]) -> bool:
+    ok = True
+    for command in commands:
+        ok = send_yoshimi_cli_command(command) and ok
+    return ok
+
+
+def apply_yoshimi_arpeggio_speed(announce: bool = True) -> bool:
+    state.arp_bpm = clamp_arp_bpm(state.arp_bpm)
+    if not yoshimi_process_alive():
+        if announce:
+            mark_dirty("Yoshimi not running")
+        return False
+    if not current_yoshimi_patch_is_arpeggio():
+        if announce:
+            mark_dirty("Arpeggio Speed: Yoshimi Arpeggio only")
+        return False
+    delay = arp_bpm_to_echo_delay(state.arp_bpm)
+    ok = send_yoshimi_cli_block([
+        "/",
+        "set part 1",
+        "set effect 2 echo",
+        f"set delay {delay}",
+    ])
+    if announce:
+        mark_dirty(f"Arpeggio Speed {state.arp_bpm} -> D{delay}" if ok else "Arpeggio Speed failed")
+    return ok
+
+
+def adjust_arp_speed(delta: int, *, announce: bool = True) -> None:
+    try:
+        delta = int(delta)
+    except Exception:
+        delta = 0
+    if delta == 0:
+        return
+    old = state.arp_bpm
+    state.arp_bpm = clamp_arp_bpm(old + delta)
+    if state.arp_bpm == old:
+        mark_dirty("Max speed" if delta > 0 else "Min speed")
+        return
+    apply_yoshimi_arpeggio_speed(announce=announce)
+    state.dirty = True
+
+
 def live_load_yoshimi_instrument(xiz_path: str) -> bool:
     """Try to change the running Yoshimi instrument without restarting it."""
     if not YOSHIMI_LIVE_LOAD_ENABLED:
@@ -6230,6 +6377,8 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
         if ok:
             state.current_engine = "yoshimi"
             state.current_instrument_path = path
+            if current_yoshimi_patch_is_arpeggio():
+                apply_yoshimi_arpeggio_speed(announce=False)
             mark_dirty(f"Yoshimi -> {state.current_preset_name}")
         return
 
@@ -6819,7 +6968,7 @@ def poll_player_state() -> None:
         if auto_advanced:
             return
 
-    restart_engine(state.sf_index, state.dac_index)
+    resume_internal_sound_after_playback("Finished")
 
     state.ui_mode = "player"
     invalidate_full_display()
@@ -7779,6 +7928,9 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
         refresh_wifi_status()
         scan_wifi_ssids()
         state.submenu_index = 0
+    elif key == "arp_speed":
+        state.arp_bpm = clamp_arp_bpm(state.arp_bpm)
+        state.submenu_index = 0
     elif key == "external_midi_device":
         refresh_external_midi_state(quiet=True)
         ports = list_external_midi_seq_ports()
@@ -7869,15 +8021,24 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         active_cat = categorize_preset(state.current_preset_bank, state.current_preset_program, state.current_preset_name)
         return [(cat, state.category_source_sf_index == state.sf_index and cat == active_cat) for cat in state.category_entries]
     if key == "preset":
-        return [
-            (
-                (p["name"] if p.get("engine") == "yoshimi" else f'{p["name"]} ({p["bank"]},{p["program"]})'),
+        rows = []
+        cat = ""
+        try:
+            if state.category_entries:
+                cat = str(state.category_entries[clamp_index(state.category_index, len(state.category_entries))])
+        except Exception:
+            cat = ""
+        for i, p in enumerate(state.preset_entries):
+            label = p["name"] if p.get("engine") == "yoshimi" else f'{p["name"]} ({p["bank"]},{p["program"]})'
+            if i == 0 and p.get("engine") == "yoshimi" and "arpeggio" in cat.lower():
+                label = f"{label}   Speed {state.arp_bpm}"
+            rows.append((
+                label,
                 state.preset_sf_index == state.sf_index
                 and p.get("bank", p.get("bank_id", 0)) == state.current_preset_bank
                 and p.get("program", p.get("slot", 0)) == state.current_preset_program,
-            )
-            for p in state.preset_entries
-        ]
+            ))
+        return rows
     if key == "dac":
         return [(name, i == state.dac_index) for i, (_dev, name) in enumerate(state.dac_options)]
     if key == "midi":
@@ -7900,7 +8061,10 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
 
-        rows = [(f"Wi-Fi [{wifi_status_label(short=True)}]", False)]
+        rows = [
+            (f"Wi-Fi [{wifi_status_label(short=True)}]", False),
+            (f"Arpeggio Speed [{state.arp_bpm}]", current_yoshimi_patch_is_arpeggio()),
+        ]
         if external_midi_out_available():
             # Show current Extension status directly on the first-level menu.
             # Wi-Fi is always the first Extension item; External MIDI follows.
@@ -7912,6 +8076,9 @@ def get_submenu_options() -> list[tuple[str, bool]]:
                 (f"PC Send [{device_label}]: {pc_label}", False),
             ])
         return rows
+    if key == "arp_speed":
+        status = "Yoshimi Arpeggio" if current_yoshimi_patch_is_arpeggio() else "Yoshimi Arpeggio only"
+        return [(f"{state.arp_bpm}  {status}", False)]
     if key == "wifi":
         return wifi_menu_options()
     if key == "controls":
@@ -8100,10 +8267,14 @@ def apply_current_submenu_selection() -> None:
             enter_submenu("wifi", return_mode="submenu")
             mark_dirty("Wi-Fi")
             return
+        if state.submenu_index == 1:
+            enter_submenu("arp_speed", return_mode="submenu")
+            mark_dirty("Arpeggio Speed")
+            return
         if not external_midi_out_available():
             leave_submenu("Extension")
             return
-        if state.submenu_index == 1:
+        if state.submenu_index == 2:
             if len(list_external_midi_seq_ports()) > 1:
                 enter_submenu("external_midi_device")
                 mark_dirty("Select External MIDI")
@@ -8111,7 +8282,7 @@ def apply_current_submenu_selection() -> None:
                 enter_submenu("external_midi_out")
                 mark_dirty("External MIDI OUT")
             return
-        if state.submenu_index == 2:
+        if state.submenu_index == 3:
             enter_submenu("external_midi_pc")
             mark_dirty("External MIDI PC Send")
             return
@@ -8163,7 +8334,7 @@ def apply_current_submenu_selection() -> None:
         state.pending_external_midi_pc_due = 0.0
         ok = send_external_midi_program_change(state.external_midi_pc_index, state.external_midi_pc_channel)
         label = gm_program_label(state.external_midi_pc_index)
-        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=2)
+        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=3)
         return
     if key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
@@ -8186,7 +8357,7 @@ def apply_current_submenu_selection() -> None:
                 send_external_midi_program_change(0, state.external_midi_pc_channel)
         else:
             state.external_midi_connected = False
-        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=1)
+        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=2)
         return
     if key == "user_preset_save":
         presets = load_user_presets()
@@ -8355,6 +8526,7 @@ def quick_resume_label() -> str:
             "midi": "MIDI Mode",
             "extension": "Extension",
             "wifi": "Wi-Fi",
+            "arp_speed": "Arpeggio Speed",
             "external_midi_device": "External MIDI Device",
             "external_midi_out": "External MIDI OUT",
             "external_midi_pc": "External MIDI PC",
@@ -8469,6 +8641,10 @@ def quick_menu_select() -> None:
         return
     if item == "Save User Preset":
         enter_user_preset_save_menu()
+        return
+    if item == "Arpeggio Speed":
+        enter_submenu("arp_speed", return_mode="quick_menu")
+        mark_dirty("Arpeggio Speed")
         return
     mark_dirty("Not implemented yet")
 
@@ -8606,18 +8782,44 @@ def send_all_notes_off() -> None:
     restore_current_preset_after_engine_restart()
 
 
+
+def internal_engine_running() -> bool:
+    return fluid_proc is not None and fluid_proc.poll() is None
+
+
+def resume_internal_sound_after_playback(event: str = "Stopped") -> None:
+    """Return from file/radio playback to live keyboard use.
+
+    Prefer a lightweight live MIDI route restore when the engine is still alive.
+    In the current RAW-MIDI playback architecture, media/radio playback usually
+    stops the engine to prevent the internal sound from playing over mpv or the
+    MIDI-file player; in that case a recovery restart is still required.  Keeping
+    this as one helper makes the distinction explicit and prevents unrelated
+    Stop code from reapplying defaults or resetting volume/gain.
+    """
+    if internal_engine_running():
+        reconnect_midi_to_fluidsynth(force_draw=False)
+        mark_dirty(event)
+        return
+
+    # Recovery path only: the live engine was intentionally stopped for playback.
+    show_modal_message("Restoring sound...", shorten_text(state.current_user_preset_name or state.current_preset_name, 24))
+    restart_engine(state.sf_index, state.dac_index)
+    restore_current_preset_after_engine_restart()
+    clear_modal_message()
+    mark_dirty(event)
+
+
 def stop_player_keep_player(event: str = "Stopped") -> None:
     state.player_stop_requested = True
     stop_player_only()
-    restart_engine(state.sf_index, state.dac_index)
-    restore_current_preset_after_engine_restart()
+    resume_internal_sound_after_playback(event)
     state.ui_mode = "player"
     invalidate_full_display()
     state.player_status = "Stopped"
     state.player_paused = False
     state.player_proc_kind = None
     set_play_led("OFF")
-    mark_dirty(event)
 
 
 def return_player_to_browser(event: str = "Back to list") -> None:
@@ -8933,9 +9135,17 @@ def handle_button_event(btn_value: str) -> None:
                 mark_dirty("RIGHT unused")
             return
         if btn == "UP":
-            play_adjacent(-1); return
+            if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
+                play_adjacent_radio_station(-1)
+            else:
+                play_adjacent(-1)
+            return
         if btn == "DOWN":
-            play_adjacent(+1); return
+            if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
+                play_adjacent_radio_station(+1)
+            else:
+                play_adjacent(+1)
+            return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -9047,14 +9257,38 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_device":
         if btn == "LEFT":
             pulse_button_activity()
-            return_to_extension_submenu("Extension", index=1)
+            return_to_extension_submenu("Extension", index=2)
             return
 
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_out":
         if btn == "LEFT":
             pulse_button_activity()
-            return_to_extension_submenu("Extension", index=1)
+            return_to_extension_submenu("Extension", index=2)
             return
+
+    if state.ui_mode == "submenu" and state.submenu_key == "arp_speed":
+        if btn == "UP":
+            pulse_button_activity(); adjust_arp_speed(+ARP_BPM_STEP); return
+        if btn == "DOWN":
+            pulse_button_activity(); adjust_arp_speed(-ARP_BPM_STEP); return
+        if btn == "RIGHT":
+            pulse_button_activity(); adjust_arp_speed(+ARP_BPM_STEP); return
+        if btn == "SEL":
+            pulse_button_activity(); apply_yoshimi_arpeggio_speed(announce=True); return
+        if btn == "LEFT":
+            pulse_button_activity()
+            if state.submenu_return_mode == "quick_menu":
+                state.ui_mode = "quick_menu"
+                state.submenu_key = None
+                state.submenu_index = 0
+                state.submenu_return_mode = None
+                invalidate_full_display()
+                mark_dirty("Quick Menu")
+            else:
+                return_to_extension_submenu("Extension", index=1)
+            return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
 
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_pc":
         if btn == "UP":
@@ -9951,6 +10185,8 @@ def encoder_position_snapshot() -> str:
                 return f"submenu_index={state.submenu_index} combi=({shorten_text(str(label), 24)})"
             if key == "external_midi_pc":
                 return f"external_pc_index={state.external_midi_pc_index}({gm_program_label(state.external_midi_pc_index)})"
+            if key == "arp_speed":
+                return f"arp_bpm={state.arp_bpm} delay={arp_bpm_to_echo_delay(state.arp_bpm)}"
             if key == "user_preset_rename":
                 cursor = state.user_preset_rename_cursor
                 text = state.user_preset_rename_text or ""
@@ -10063,6 +10299,10 @@ def handle_encoder_navigation_step(step: int) -> bool:
         new_index, moved = _move_index_by_delta(state.browser_index, step, len(state.browser_entries))
         state.browser_index = new_index
         mark_dirty(None if moved else edge_msg)
+        return True
+
+    if state.ui_mode == "submenu" and state.submenu_key == "arp_speed":
+        adjust_arp_speed(step * ARP_BPM_STEP)
         return True
 
     if state.ui_mode == "submenu" and state.submenu_key == "external_midi_pc":
