@@ -197,12 +197,12 @@ This allows speed adjustment during live performance.
 
 The standalone calibration and runtime test utility is available at:
 
-[`scripts/test_ypshimi_art_speed_calibrated.py`](../scripts/test_ypshimi_art_speed_calibrated.py)
+[`scripts/test_yoshimi_art_speed_calibrated.py`](../scripts/test_yoshimi_art_speed_calibrated.py)
 
 On the Fluid Ardule system, the corresponding script is located at:
 
 ``` text
-~/scripts/test_ypshimi_art_speed_calibrated.py
+~/scripts/test_yoshimi_art_speed_calibrated.py
 ```
 
 This is the calibrated revision of the test utility. An initial test
