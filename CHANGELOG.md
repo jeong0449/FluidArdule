@@ -6,6 +6,45 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260703g
+
+### Improved Internet Radio Playback Controls
+
+- Added direct station switching during internet radio playback.
+  - UP: previous station
+  - DOWN: next station
+- Added first/last station boundary feedback.
+- Improved Stop behavior so internal sound is restored immediately after radio or media playback.
+- Updated the Now Playing footer to display PREV/NEXT controls consistently.
+
+### Added Extension Submenu
+
+- Expanded the Home `Extension` item into a submenu.
+- Added `SEL to Expand` guidance to avoid confusion with RIGHT-button navigation.
+- Moved the existing Wi-Fi function under Extension.
+- Added Arpeggio Speed as a performance control.
+- Preserved Extension as an expandable location for future functions.
+
+### Added Live Yoshimi Arpeggio Speed Control
+
+- Added `Arpeggio Speed` to the Extension submenu and Quick Menu.
+- Added the current speed value to the Yoshimi Arpeggios preset list.
+- Identified Part 1 Effect 2 Echo Delay as the effective repetition-speed control for the tested Yoshimi arpeggio preset.
+- Added live Echo Delay control through the running Yoshimi CLI without restarting Yoshimi or reloading the instrument.
+- Added an empirically calibrated BPM-like speed mapping:
+  - `raw_speed = round((display_bpm - 5.13) / 0.797)`
+  - `echo_delay = round(6000 / raw_speed)`
+- Changed Arpeggio Speed adjustment from 5-unit steps to 1-unit steps for finer control.
+- Added a non-selectable, right-aligned `Rotate Encoder to adjust` hint.
+- Separated operational hints from selectable menu rows for clearer UI behavior.
+
+### Documentation
+
+- Added technical documentation for Yoshimi Arpeggio Speed investigation and calibration.
+- Updated the user interface documentation for Extension, Arpeggio Speed, Quick Menu access, and long-press shortcuts.
+
+---
+
 ## 260702f — Live Yoshimi Instrument Loading
 
 ### New
