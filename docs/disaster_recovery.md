@@ -352,7 +352,18 @@ With Raspberry Pi Imager:
 4.  Write the image.
 5.  Allow the write verification to complete.
 
-Carefully verify the target device before writing.
+The target microSD card does not need to be formatted before writing the
+image.
+
+Raspberry Pi Imager writes the image directly to the block device. The
+partition table, partitions, and filesystems contained in the image
+replace the existing layout of the target card.
+
+Therefore, the previous filesystem on the target card, such as FAT32,
+exFAT, NTFS, or ext4, is irrelevant. Existing data and partition
+information on the target card will be overwritten.
+
+**Carefully verify the target device before writing.**
 
 The target card does not need to have the same exact physical sector
 count as the original 32 GB card. It only needs to be large enough for
