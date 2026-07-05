@@ -627,3 +627,133 @@ audio recovery test.
 Additional peripheral checks may be completed later, but the image has
 already been demonstrated to restore a bootable and audio-producing
 Fluid Ardule system.
+
+------------------------------------------------------------------------
+
+## 18. Optional Local Recovery-Card Workflow
+
+A verified recovery image may also be copied back to the filesystem of
+the stable Fluid Ardule SD card, provided sufficient free space is
+available.
+
+For example:
+
+``` text
+~/recovery/Fluid_Ardule_260705.img
+~/recovery/Fluid_Ardule_260705.img.sha256
+```
+
+This creates a useful local recovery workflow:
+
+``` text
+Stable Fluid Ardule SD
+        |
+        | contains a verified recovery image
+        v
+~/recovery/Fluid_Ardule_YYMMDD.img
+        |
+        | write image to a microSD card in a USB reader
+        v
+Bootable recovery microSD card
+```
+
+The practical advantage is that a replacement boot card can be prepared
+directly from the Raspberry Pi without first transferring the image to a
+Windows PC.
+
+Before writing anything, identify the running system device and the
+external target device:
+
+``` bash
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS,MODEL
+```
+
+For the reference Fluid Ardule system:
+
+``` text
+/dev/mmcblk0 = running Fluid Ardule SD
+```
+
+The external microSD card in a USB reader may appear as `/dev/sda`,
+`/dev/sdb`, or another device name.
+
+**Never assume the target device name.**
+
+The image source and target device must be different physical devices.
+
+### Raspberry Pi Imager CLI
+
+Raspberry Pi Imager supports a command-line invocation with the general
+form:
+
+``` bash
+sudo rpi-imager --cli image.img /dev/target-device
+```
+
+A commonly documented example is:
+
+``` bash
+sudo rpi-imager --cli os.img /dev/nvme0n1
+```
+
+Therefore, after confirming the actual external microSD device, the
+intended Fluid Ardule workflow would be conceptually:
+
+``` bash
+sudo rpi-imager --cli \
+  ~/recovery/Fluid_Ardule_260705.img \
+  /dev/sdX
+```
+
+Replace `/dev/sdX` only after checking the actual `lsblk` output.
+
+**WARNING: the entire target device will be overwritten.**
+
+However, the installed Raspberry Pi Imager version and runtime
+environment must be checked before relying on this workflow:
+
+``` bash
+rpi-imager --version
+rpi-imager --help
+```
+
+The reference Fluid Ardule installation is a headless Raspberry Pi OS
+Lite system. Raspberry Pi Imager CLI behavior has varied between
+versions, and recent Imager builds may still depend on a graphical
+runtime even when invoked with `--cli`.
+
+For that reason, **the local `rpi-imager --cli` recovery-card workflow
+is documented here as an optional procedure and has not yet been
+verified on the reference headless Fluid Ardule system**.
+
+Do not mark this procedure as verified until the installed Trixie
+`rpi-imager` package has been tested directly.
+
+### Possible Future Automation
+
+If CLI image writing is confirmed to work reliably on the headless Fluid
+Ardule system, a small helper script could implement the following
+workflow:
+
+``` text
+1. Display lsblk
+2. Require explicit target-device selection
+3. Reject /dev/mmcblk0 as a target
+4. Verify the recovery image SHA-256
+5. Write the image to the selected external microSD card
+6. Verify completion
+7. Instruct the user to boot-test the new card
+```
+
+Such a tool could provide a convenient way to create an immediately
+bootable cold-spare SD card directly from Fluid Ardule.
+
+Until this workflow is tested, the verified recovery path remains:
+
+``` text
+image-backup
+    -> image-check
+    -> SHA-256 verification
+    -> Raspberry Pi Imager on Windows
+    -> boot test
+```
