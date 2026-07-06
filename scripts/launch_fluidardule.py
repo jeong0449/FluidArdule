@@ -32,7 +32,7 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260703g"
+SCRIPT_VERSION = "260706b"
 
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
@@ -325,6 +325,10 @@ COMBI_PREVIEW_FOOTER_HOLD_SEC = 1.5
 USER_PRESET_PREVIEW_ON_HIGHLIGHT = True
 # Delay User Preset preview while scrolling so only the final highlighted item loads.
 USER_PRESET_PREVIEW_DEBOUNCE_SEC = 0.45
+# Larger SF2 files need a little more settling time after FluidSynth starts.
+FLUIDSYNTH_STARTUP_SETTLE_DEFAULT_SEC = 1.2
+FLUIDSYNTH_STARTUP_SETTLE_LARGE_SEC = 2.4
+FLUIDSYNTH_LARGE_SF2_NAMES = {"FluidR3_GM.sf2", "GeneralUser_GS.sf2"}
 
 RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
 RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
@@ -617,6 +621,7 @@ class RuntimeState:
     user_preset_target_index: int = 0
     pending_user_preset_preview_index: int | None = None
     pending_user_preset_preview_due: float = 0.0
+    previewed_user_preset_index: int | None = None
     user_preset_rename_text: str = ""
     user_preset_rename_cursor: int = 0
     current_user_preset_name: str | None = None
@@ -629,6 +634,7 @@ class RuntimeState:
     combi_router_signature: str = ""
     combi_preview_active: bool = False
     combi_browse_snapshot: dict | None = None
+    previewed_combi_index: int | None = None
     modal_message: str = ""
     modal_submessage: str = ""
     modal_until: float = 0.0
@@ -1201,7 +1207,7 @@ def start_radio_station(station: dict) -> None:
     try:
         player_proc = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle, preexec_fn=os.setsid, text=True)
     except FileNotFoundError:
-        restart_engine(state.sf_index, state.dac_index)
+        restart_engine(state.sf_index, state.dac_index, manage_modal=False)
         clear_modal_message()
         mark_dirty("mpv missing")
         send_ui_status("READY", force=True)
@@ -4538,7 +4544,11 @@ def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: 
                 continue
             seen.add(key)
             if c.exists() and c.is_file():
-                return str(c.resolve())
+                # Preserve a space-free symlink path for Yoshimi live-load.
+                # Path.resolve() follows the symlink back into the factory bank,
+                # where filenames may contain spaces and Yoshimi CLI parsing fails.
+                # absolute() makes the path absolute without dereferencing it.
+                return str(c.absolute())
         except Exception:
             continue
 
@@ -5495,6 +5505,17 @@ def load_or_start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
     return start_yoshimi_instrument(xiz_path, audio_device)
 
 
+
+def fluidsynth_startup_settle_sec(sf_path: str) -> float:
+    """Return a conservative post-start settling delay for the selected SF2."""
+    try:
+        name = Path(str(sf_path or "")).name
+    except Exception:
+        name = ""
+    if name in FLUIDSYNTH_LARGE_SF2_NAMES:
+        return FLUIDSYNTH_STARTUP_SETTLE_LARGE_SEC
+    return FLUIDSYNTH_STARTUP_SETTLE_DEFAULT_SEC
+
 def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
     global fluid_proc
     stop_fluidsynth()
@@ -5532,7 +5553,7 @@ def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
     except Exception as exc:
         mark_dirty(f"fluidsynth start failed: {exc}")
         return False
-    time.sleep(1.2)
+    time.sleep(fluidsynth_startup_settle_sec(sf_path))
     if fluid_proc.poll() is None:
         state.fluid_pid = fluid_proc.pid
         state.current_engine = "fluidsynth"
@@ -5592,7 +5613,7 @@ def find_soundfont_index_by_basename(filename: str) -> int | None:
     return None
 
 
-def ensure_combi_soundfont_loaded(required_sf2: str) -> bool:
+def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = True) -> bool:
     """Load the Combi-required SF2 only when the current source differs.
 
     This keeps Combi selection fast when FluidR3_GM.sf2 is already active, but
@@ -5613,9 +5634,11 @@ def ensure_combi_soundfont_loaded(required_sf2: str) -> bool:
         return False
 
     log(f"Combi loading required SoundFont: {required} (current={current or '-'})")
-    show_modal_message("Loading Combi SF2...", required)
-    restart_engine(target_index, state.dac_index)
-    clear_modal_message()
+    if manage_modal:
+        show_modal_message("Loading Combi SF2...", required)
+    restart_engine(target_index, state.dac_index, manage_modal=manage_modal)
+    if manage_modal:
+        clear_modal_message()
     ok = (state.current_engine == "fluidsynth" and fluid_proc is not None and fluid_proc.poll() is None)
     if not ok:
         log("Combi SF2 load failed: FluidSynth is not running after restart_engine")
@@ -6176,6 +6199,7 @@ def begin_combi_browse_session() -> None:
     if state.combi_browse_snapshot is None:
         state.combi_browse_snapshot = make_combi_browse_snapshot()
     state.combi_preview_active = False
+    state.previewed_combi_index = None
 
 
 def restore_combi_browse_snapshot() -> None:
@@ -6219,6 +6243,7 @@ def restore_combi_browse_snapshot() -> None:
 def finish_combi_browse_session() -> None:
     state.combi_browse_snapshot = None
     state.combi_preview_active = False
+    state.previewed_combi_index = None
 
 
 def enter_combi_detail_screen(event: str = "Combi loaded") -> None:
@@ -6247,6 +6272,9 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         mark_dirty("Invalid combi")
         return
 
+    label_for_modal = shorten_text(str(combi.get("name") or "Combi"), 24)
+    show_modal_message("Loading Combi...", label_for_modal)
+
     # Stop the previous Combi router as early as possible.  Otherwise the old
     # router thread may see state.combi_active=True while SoundFont/MIDI mode is
     # being changed and may restart aseqdump once or twice during the new load.
@@ -6260,7 +6288,8 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         log(f"Combi requested while {state.current_engine}; switching to FluidSynth")
 
     required_sf2 = Path(str(combi.get("sf2") or "")).name
-    if not ensure_combi_soundfont_loaded(required_sf2):
+    if not ensure_combi_soundfont_loaded(required_sf2, manage_modal=False):
+        clear_modal_message()
         return
     t_sf = time.perf_counter()
 
@@ -6275,8 +6304,9 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         state.midi_mode = "alsa_midi"
         state.midi_selected_name = midi_mode_to_label("alsa_midi")
         refresh_midi_options(quiet=True)
-        restart_engine(state.sf_index, state.dac_index)
+        restart_engine(state.sf_index, state.dac_index, manage_modal=False)
         if state.current_engine != "fluidsynth" or fluid_proc is None or fluid_proc.poll() is not None:
+            clear_modal_message()
             mark_dirty("Combi engine restart failed")
             return
     else:
@@ -6325,6 +6355,7 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         f"parts={len(state.combi_parts)} preview={bool(preview)}"
     )
     label = shorten_text(state.current_combi_name, 20)
+    clear_modal_message()
     state.combi_preview_active = bool(preview)
     if leave_after:
         finish_combi_browse_session()
@@ -6351,6 +6382,7 @@ def preview_combi_at_index(index: int) -> None:
     idx = clamp_index(index, len(state.combi_entries))
     state.submenu_index = idx
     apply_combi(state.combi_entries[idx], leave_after=False, preview=True)
+    state.previewed_combi_index = idx
 
 
 def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
@@ -6467,7 +6499,7 @@ def restore_current_preset_after_engine_restart() -> None:
     )
 
 
-def restart_engine(sf_index: int, dac_index: int) -> None:
+def restart_engine(sf_index: int, dac_index: int, *, manage_modal: bool = True) -> bool:
     send_ui_status("BUSY", force=True)
     sf_index %= len(SOUNDFONTS)
     dac_index %= len(state.dac_options)
@@ -6483,12 +6515,12 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
     state.audio_device = audio_device
     state.dac_preview_index = state.dac_index
 
-    # Any operation that reloads a SoundFont/synth engine can take long enough
-    # to make the UI appear frozen.  Show the blocking modal here, at the common
-    # engine-restart entry point, so Sound Source SELECT, preset preview across
-    # sources, DAC changes, refresh, and User Preset source recalls behave
-    # consistently.
-    show_modal_message("Loading Sound...", f"{sf_name} / {dac_name}")
+    # 260706a: a compound sound transition (User Preset / Combi) may own the
+    # modal around a nested engine restart.  Keep the old default behavior for
+    # simple callers, but allow manage_modal=False so the outer transition does
+    # not lose its loading modal halfway through the real sound apply.
+    if manage_modal:
+        show_modal_message("Loading Sound...", f"{sf_name} / {dac_name}")
 
     if is_yoshimi_source(sf_index):
         presets = load_presets_for_sf2(sf_index)
@@ -6510,17 +6542,19 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
                     break
         target = target or choose_default_preset(presets)
         if not target:
-            clear_modal_message()
+            if manage_modal:
+                clear_modal_message()
             mark_dirty("No Yoshimi JSON")
             send_ui_status("READY", force=True)
-            return
+            return False
         path = str(target.get("path", current_path)).strip()
         if not path:
-            clear_modal_message()
+            if manage_modal:
+                clear_modal_message()
             mark_dirty("Yoshimi path missing")
             log(f"Yoshimi restart rejected: empty path for target={target}")
             send_ui_status("READY", force=True)
-            return
+            return False
         mark_dirty(f"Restarting -> Yoshimi:{target.get('name','Instrument')} / DAC:{dac_name}")
         state.current_preset_bank = int(target.get("bank", target.get("bank_id", 0)))
         state.current_preset_program = int(target.get("program", target.get("slot", 0)))
@@ -6528,25 +6562,36 @@ def restart_engine(sf_index: int, dac_index: int) -> None:
         state.current_instrument_path = path
         ok = start_yoshimi_instrument(path, audio_device)
         if not ok:
-            clear_modal_message()
+            if manage_modal:
+                clear_modal_message()
             send_ui_status("READY", force=True)
-            return
-        clear_modal_message()
-        mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
+            return False
+        reconnect_midi_to_fluidsynth(force_draw=False)
+        if manage_modal:
+            clear_modal_message()
+        if state.midi_connected:
+            mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
+        else:
+            show_footer_message("Sound loaded / MIDI waiting", 1.5)
         send_ui_status("READY", force=True)
-        return
+        return True
 
     mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
     ok = start_fluidsynth(sf_path, audio_device)
     if not ok:
-        clear_modal_message()
+        if manage_modal:
+            clear_modal_message()
         send_ui_status("READY", force=True)
-        return
+        return False
     reconnect_midi_to_fluidsynth(force_draw=False)
-    clear_modal_message()
-    mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
+    if manage_modal:
+        clear_modal_message()
+    if state.midi_connected:
+        mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
+    else:
+        show_footer_message("Sound loaded / MIDI waiting", 1.5)
     send_ui_status("READY", force=True)
-
+    return True
 
 def midi_panic() -> None:
     send_ui_status("BUSY", force=True)
@@ -7470,6 +7515,7 @@ def enter_user_preset_load_menu(return_mode: str | None = None) -> None:
     state.submenu_key = "user_preset_load"
     state.submenu_return_mode = return_mode or "main"
     state.submenu_index = 0
+    state.previewed_user_preset_index = None
     invalidate_full_display()
     # Keep User Preset behavior consistent with SF2 preset browsing:
     # the first highlighted row should sound immediately, not only after
@@ -7712,17 +7758,33 @@ def find_source_index_for_user_preset(item: dict) -> int | None:
     return None
 
 
-def apply_user_preset(item: dict, *, leave_after: bool = True, preview: bool = False) -> None:
+def user_preset_identity(item: dict, index: int | None = None) -> tuple:
+    """Stable-enough identity for preview/commit de-duplication."""
+    if not isinstance(item, dict):
+        return (index,)
+    return (
+        index,
+        str(item.get("name") or ""),
+        str(item.get("source_path") or ""),
+        str(item.get("source_name") or ""),
+        str(item.get("engine") or "fluidsynth"),
+        int(item.get("bank", 0) or 0),
+        int(item.get("program", 0) or 0),
+        str(item.get("instrument_path") or ""),
+    )
+
+
+def apply_user_preset(item: dict, *, leave_after: bool = True, preview: bool = False) -> bool:
     if block_sound_change_while_playing():
-        return
+        return False
     if not item:
         mark_dirty("Empty preset")
-        return
+        return False
 
     source_index = find_source_index_for_user_preset(item)
     if source_index is None:
         mark_dirty("User preset source missing")
-        return
+        return False
 
     old_source_index = state.sf_index
     engine = str(item.get("engine", "fluidsynth")).lower().strip() or "fluidsynth"
@@ -7730,43 +7792,51 @@ def apply_user_preset(item: dict, *, leave_after: bool = True, preview: bool = F
     bank = int(item.get("bank", 0))
     program = int(item.get("program", 0))
     instrument_path = str(item.get("instrument_path") or "").strip()
-
-    show_modal_message("Loading...", shorten_text(str(item.get("name", name)), 24))
-
-    state.sf_index = source_index
-    state.sf_name = source_name_for_index(source_index)
-
-    if engine == "yoshimi":
-        if not instrument_path:
-            clear_modal_message()
-            mark_dirty("User preset path missing")
-            return
-        apply_preset(bank, program, name, engine="yoshimi", path=instrument_path)
-        # Yoshimi does not consume FluidSynth CC edits here, but the saved
-        # values remain in the JSON for future-compatible use.
-    else:
-        # A User Preset must recall its stored engine/source first, not merely
-        # change the bank/program on whichever engine happens to be active.
-        if (
-            source_index != old_source_index
-            or state.current_engine != "fluidsynth"
-            or fluid_proc is None
-            or fluid_proc.poll() is not None
-        ):
-            restart_engine(source_index, state.dac_index)
-        apply_preset(bank, program, name, engine="fluidsynth")
-        apply_sound_edit_values_from_user_preset(item)
-
-    state.current_user_preset_name = str(item.get("name") or name).strip() or name
-    state.current_user_preset_kind = "edited" if user_preset_is_edited(item) else "bookmark"
-    clear_modal_message()
     label = shorten_text(str(item.get('name', name)), 16)
-    if leave_after:
-        leave_submenu(f"User Preset: {label}")
-    else:
-        mark_dirty(f"Preview: {label}" if preview else f"User Preset: {label}")
 
+    show_modal_message("Loading Preset...", shorten_text(str(item.get("name", name)), 24))
+    ok = True
+    try:
+        state.sf_index = source_index
+        state.sf_name = source_name_for_index(source_index)
 
+        if engine == "yoshimi":
+            if not instrument_path:
+                mark_dirty("User preset path missing")
+                ok = False
+                return False
+            apply_preset(bank, program, name, engine="yoshimi", path=instrument_path)
+            reconnect_midi_to_fluidsynth(force_draw=False)
+            # Yoshimi does not consume FluidSynth CC edits here, but the saved
+            # values remain in the JSON for future-compatible use.
+        else:
+            # A User Preset must recall its stored engine/source first, not merely
+            # change the bank/program on whichever engine happens to be active.
+            if (
+                source_index != old_source_index
+                or state.current_engine != "fluidsynth"
+                or fluid_proc is None
+                or fluid_proc.poll() is not None
+            ):
+                ok = restart_engine(source_index, state.dac_index, manage_modal=False)
+                if not ok:
+                    return False
+            apply_preset(bank, program, name, engine="fluidsynth")
+            apply_sound_edit_values_from_user_preset(item)
+            reconnect_midi_to_fluidsynth(force_draw=False)
+
+        state.current_user_preset_name = str(item.get("name") or name).strip() or name
+        state.current_user_preset_kind = "edited" if user_preset_is_edited(item) else "bookmark"
+        return True
+    finally:
+        clear_modal_message()
+        if ok:
+            if not state.midi_connected:
+                show_footer_message("Preset loaded / MIDI waiting", 1.5)
+            if leave_after:
+                leave_submenu(f"User Preset: {label}")
+            else:
+                mark_dirty(f"Preview: {label}" if preview else f"User Preset: {label}")
 
 def preview_user_preset_at_index(index: int) -> None:
     """Queue highlighted User Preset preview without leaving the browser.
@@ -7784,6 +7854,8 @@ def preview_user_preset_at_index(index: int) -> None:
         return
     idx = clamp_index(index, len(presets))
     state.user_preset_entries = presets
+    if state.previewed_user_preset_index != idx:
+        state.previewed_user_preset_index = None
     state.submenu_index = idx
     state.pending_user_preset_preview_index = idx
     state.pending_user_preset_preview_due = time.time() + USER_PRESET_PREVIEW_DEBOUNCE_SEC
@@ -7811,7 +7883,8 @@ def process_pending_user_preset_preview() -> None:
     if idx != state.submenu_index:
         return
     state.user_preset_entries = presets
-    apply_user_preset(presets[idx], leave_after=False, preview=True)
+    if apply_user_preset(presets[idx], leave_after=False, preview=True):
+        state.previewed_user_preset_index = idx
 
 
 def find_current_user_preset_item() -> dict | None:
@@ -8416,26 +8489,38 @@ def apply_current_submenu_selection() -> None:
         save_user_preset_rename()
         return
     if key == "user_preset_load":
-        # SELECT confirms the currently highlighted row. If its debounced
-        # preview is still pending, apply it immediately rather than waiting
-        # for the timer or loading a stale previous preview.
-        if state.pending_user_preset_preview_index is not None:
-            state.pending_user_preset_preview_due = 0.0
-            process_pending_user_preset_preview()
+        # SELECT is commit, not a second load. If the current highlighted row
+        # already completed preview, simply leave the browser. If preview is
+        # still pending or missing, apply the current row exactly once.
         presets = load_user_presets()
         if not presets:
             leave_submenu("No user presets")
             return
-        item = presets[clamp_index(state.submenu_index, len(presets))]
-        apply_user_preset(item)
+        idx = clamp_index(state.submenu_index, len(presets))
+        item = presets[idx]
+        label = shorten_text(str(item.get("name") or item.get("preset_name") or "User Preset"), 16)
+        if state.previewed_user_preset_index == idx and state.pending_user_preset_preview_index is None:
+            state.previewed_user_preset_index = None
+            leave_submenu(f"User Preset: {label}")
+            return
+        state.pending_user_preset_preview_index = None
+        state.pending_user_preset_preview_due = 0.0
+        if apply_user_preset(item, leave_after=True, preview=False):
+            state.previewed_user_preset_index = None
         return
     if key == "combi_load":
         combis = load_user_combis()
         if not combis:
             leave_submenu("No combis")
             return
-        item = combis[clamp_index(state.submenu_index, len(combis))]
-        apply_combi(item, leave_after=False, preview=True)
+        idx = clamp_index(state.submenu_index, len(combis))
+        item = combis[idx]
+        if state.previewed_combi_index == idx and state.combi_active:
+            label = shorten_text(str(item.get("name") or "Combi"), 20)
+            finish_combi_browse_session()
+            enter_combi_detail_screen(f"Combi loaded: {label}")
+        else:
+            apply_combi(item, leave_after=True, preview=False)
         return
     leave_submenu("Not implemented yet")
 
@@ -9450,6 +9535,8 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index > 0:
                 state.submenu_index -= 1
+                if state.previewed_combi_index != state.submenu_index:
+                    state.previewed_combi_index = None
                 mark_dirty("Combi browse")
             else:
                 mark_dirty("First item")
@@ -9458,6 +9545,8 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index < len(options) - 1:
                 state.submenu_index += 1
+                if state.previewed_combi_index != state.submenu_index:
+                    state.previewed_combi_index = None
                 mark_dirty("Combi browse")
             else:
                 mark_dirty("Last item")
@@ -9465,8 +9554,16 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "SEL":
             pulse_button_activity()
             if state.combi_entries:
-                item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
-                apply_combi(item, leave_after=True, preview=False)
+                idx = clamp_index(state.submenu_index, len(state.combi_entries))
+                item = state.combi_entries[idx]
+                if state.previewed_combi_index == idx and state.combi_active:
+                    # SELECT commits the already playable preview.  Do not
+                    # rebuild/reapply the same Combi after RIGHT already loaded it.
+                    label = shorten_text(str(item.get("name") or "Combi"), 20)
+                    finish_combi_browse_session()
+                    enter_combi_detail_screen(f"Combi loaded: {label}")
+                else:
+                    apply_combi(item, leave_after=True, preview=False)
             else:
                 mark_dirty("No combis")
             return
