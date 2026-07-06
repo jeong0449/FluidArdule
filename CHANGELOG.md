@@ -11,7 +11,7 @@ Entries are grouped by development date (KST), which may differ from the corresp
 - Improved Sound selection and transition consistency across SoundFont presets, User Presets, and Combis.
 - Refined preview/commit behavior to avoid unnecessary duplicate sound loading.
 - Improved loading modal handling and startup settling for large SoundFonts.
-- Restored smooth Yoshimi patch live loading by preserving symbolic-link paths instead of resolving them to space-containing target paths.
+- Improved smooth Yoshimi patch live loading by preserving symbolic-link paths for instrument selection.
 
 
 
