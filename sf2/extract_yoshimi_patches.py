@@ -82,7 +82,7 @@ PATCH_EXTS = {".xiz"}
 CATEGORY_FALLBACK = "Yoshimi"
 DEFAULT_PATCH_DIR = Path("/home/pi/sf2/yoshimi_patches")
 DEFAULT_OUTPUT_BASENAME = "yoshimi.patches.json"
-JSON_VERSION = 3
+JSON_VERSION = 2
 
 
 def clean_display_name(text: str) -> str:
