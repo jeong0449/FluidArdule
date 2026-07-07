@@ -114,12 +114,14 @@ Prepare Yoshimi for Fluid Ardule with:
 ``` bash
 python3 extract_yoshimi_patches.py \
     /usr/share/yoshimi/banks \
-    -o ~/sf2/yoshimi.patches.json
+    -o ~/sf2/yoshimi.patches.json \
+    --patch-dir ~/sf2/yoshimi_patches
 ```
 
 The extractor performs two tasks:
 
-1.  Creates a CLI-safe symbolic-link repository in `~/sf2/yoshimi_links`
+1.  Copies Yoshimi `.xiz` patch files into `~/sf2/yoshimi_patches` with
+    whitespace-free filenames
 2.  Generates the Fluid Ardule patch database
 
 Result:
@@ -127,22 +129,25 @@ Result:
 ``` text
 ~/sf2/
 ├── yoshimi.patches.json
-└── yoshimi_links/
+└── yoshimi_patches/
     ├── Pads__0001-Warm-Pad.xiz
     ├── Piano__0003-Grand-Piano.xiz
     └── ...
 ```
 
-Using symbolic links avoids problems caused by spaces in original
-Yoshimi filenames while preserving the original bank organization.
+Copying the patch files avoids problems caused by spaces in original
+Yoshimi filenames without relying on symbolic links.  The original bank
+files remain untouched under `/usr/share/yoshimi/banks`, while Fluid
+Ardule loads only the copied, CLI-safe patch paths.
 
-The generated JSON references the symbolic-link paths so Fluid Ardule
-can load patches reliably during live instrument switching.
+The generated JSON references the copied patch paths so Fluid Ardule can
+load patches reliably during live instrument switching.  The original
+path is still preserved as `original_path` for diagnostics.
 
 The extractor:
 
 -   scans `.xiz` patch files
--   creates safe symbolic links
+-   copies patches to `~/sf2/yoshimi_patches` using safe filenames
 -   treats folders as banks/categories
 -   extracts patch names
 -   assigns `bank` and `program`
@@ -154,13 +159,37 @@ Example:
 {
   "id": "yoshimi:Pads:1:Warm-Pad",
   "name": "Warm Pad",
-  "path": "/home/pi/sf2/yoshimi_links/Pads__0001-Warm-Pad.xiz",
+  "path": "/home/pi/sf2/yoshimi_patches/Pads__0001-Warm-Pad.xiz",
   "original_path": "/usr/share/yoshimi/banks/Pads/0001-Warm Pad.xiz",
   "bank": 0,
   "program": 1,
   "category": "Pads",
   "is_drum": false
 }
+```
+
+Useful maintenance commands:
+
+``` bash
+# Rebuild the JSON and update copied patches as needed
+python3 extract_yoshimi_patches.py \
+    /usr/share/yoshimi/banks \
+    -o ~/sf2/yoshimi.patches.json \
+    --patch-dir ~/sf2/yoshimi_patches
+
+# Remove old copied .xiz files first, then rebuild
+python3 extract_yoshimi_patches.py \
+    /usr/share/yoshimi/banks \
+    -o ~/sf2/yoshimi.patches.json \
+    --patch-dir ~/sf2/yoshimi_patches \
+    --clean-patches
+```
+
+The old `~/sf2/yoshimi_links` symbolic-link directory is no longer used.
+After confirming that the copied-patch setup works, it can be removed:
+
+``` bash
+rm -rf ~/sf2/yoshimi_links
 ```
 
 ------------------------------------------------------------------------
@@ -195,6 +224,6 @@ Performance   → playable state built from an instrument plus Part Edit setting
 -   Rename **GeneralUser GS** to `GeneralUser_GS.sf2`
 -   Place all SoundFonts in `~/sf2/`
 -   Run `extract_sf2_presets_v2.py` for each `.sf2`
--   Run `extract_yoshimi_patches.py` to generate both the Yoshimi patch
-    database and the symbolic-link repository
+-   Run `extract_yoshimi_patches.py` to generate the Yoshimi patch
+    database and the copied-patch repository
 -   Keep the generated JSON files together with the sound source files
