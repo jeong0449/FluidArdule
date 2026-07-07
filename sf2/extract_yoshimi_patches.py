@@ -60,7 +60,7 @@ Examples:
 
 JSON format:
     format  = instrument-list
-    version = 3
+    version = 2
     engine  = yoshimi
 
 The output intentionally keeps bank/program/name fields so that it can be
