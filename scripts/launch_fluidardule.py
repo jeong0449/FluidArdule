@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+SCRIPT_VERSION = "260707h"
+
 # =========================================================
 # Fluid Ardule main UI/runtime script
 # Version is defined by SCRIPT_VERSION below.
@@ -32,14 +34,12 @@ except Exception as exc:
 # User config
 # =========================================================
 
-SCRIPT_VERSION = "260706b"
-
 SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_12724551266415469650-if00"
 # Optional exact UNO-2 identifier.  If set, MIDI Mode shows
 # "UNO-2 bridge (SEQ)" only when this by-id symlink exists.  Leave empty to
 # fall back to detecting any additional Arduino/Uno serial device other than
 # UNO-1.
-UNO2_SERIAL_PORT = ""  # e.g. "/dev/serial/by-id/usb-Arduino__...-if00"
+UNO2_SERIAL_PORT = "/dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_75834353930351211140-if00"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 0.1
 SERIAL_INPUT_IGNORE_AFTER_OPEN_SEC = 1.5
@@ -284,7 +284,6 @@ MAIN_MENU = [
 
 QUICK_MENU_ITEMS = [
     "MIDI Panic",
-    "Return",
     "Home",
     "Now Playing",
     "Sound",
@@ -672,6 +671,7 @@ midi_activity_signature = ""
 midi_activity_thread_handle = None
 combi_router_proc = None
 combi_router_thread_handle = None
+combi_router_generation = 0
 _wifi_status_cache_until = 0.0
 _wifi_known_ssids_cache_until = 0.0
 _wifi_known_ssids_cache: list[str] = []
@@ -3286,19 +3286,13 @@ class TFTDisplay:
             else:
                 fill = DIM
                 prefix = "  "
-            draw.text((64, top + 3), f"{prefix}{label}", font=self.font_body, fill=fill)
+            draw.text((64, top), f"{prefix}{label}", font=self.font_body, fill=fill)
     def _draw_quick_menu(self, draw):
         # Quick Menu is a shortcut overlay, not a normal page.
         # Do not draw the global Fluid Ardule header here; use the full height
         # so all six quick actions are visible without scrolling.
         draw.text((16, 10), "Quick Menu", font=self.font_title, fill=ACCENT)
-        ctx = quick_resume_label()
-        labels = []
-        for item in QUICK_MENU_ITEMS:
-            if item == "Return" and ctx:
-                labels.append((f"Return  [{ctx}]", False))
-            else:
-                labels.append((item, False))
+        labels = [(item, False) for item in QUICK_MENU_ITEMS]
         draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         self._draw_scrolled_rows(draw, labels, state.quick_menu_index, 52, 34, self.height - 50)
 
@@ -5001,6 +4995,9 @@ def refresh_browser_entries(keep_name: str | None = None) -> None:
 
 
 def enter_file_browser() -> None:
+    if combi_locked():
+        warn_combi_quick_blocked()
+        return
     enter_file_source(default_usb=state.usb_mounted)
 
 
@@ -5613,7 +5610,7 @@ def find_soundfont_index_by_basename(filename: str) -> int | None:
     return None
 
 
-def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = True) -> bool:
+def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = True, force_restart: bool = False) -> bool:
     """Load the Combi-required SF2 only when the current source differs.
 
     This keeps Combi selection fast when FluidR3_GM.sf2 is already active, but
@@ -5624,7 +5621,13 @@ def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = Tru
     if not required:
         return True
     current = _combi_source_file()
-    if current == required and fluid_proc is not None and fluid_proc.poll() is None:
+    if (
+        not force_restart
+        and current == required
+        and state.current_engine == "fluidsynth"
+        and fluid_proc is not None
+        and fluid_proc.poll() is None
+    ):
         return True
 
     target_index = find_soundfont_index_by_basename(required)
@@ -5982,16 +5985,17 @@ def _forward_combi_event_to_channel(kind: str, channel_0based: int, a: int, b: i
     return False
 
 
-def _combi_router_thread() -> None:
-    global combi_router_proc
-    while state.running and state.combi_active:
+def _combi_router_thread(generation: int) -> None:
+    global combi_router_proc, combi_router_generation
+    while state.running and state.combi_active and generation == combi_router_generation:
         src = state.selected_alsa_input or state.midi_src_port
         if not src or src in {"-", "seq"}:
             time.sleep(0.2)
             continue
         signature = f"{src}|{state.current_combi_name}|{len(state.combi_parts)}"
+        proc: subprocess.Popen | None = None
         try:
-            combi_router_proc = subprocess.Popen(
+            proc = subprocess.Popen(
                 ["aseqdump", "-p", src],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -5999,6 +6003,7 @@ def _combi_router_thread() -> None:
                 bufsize=1,
                 preexec_fn=os.setsid,
             )
+            combi_router_proc = proc
             state.combi_router_signature = signature
             log(f"Combi router started: {src}")
             # Remember exactly which routed notes were started, so Note Off
@@ -6006,10 +6011,10 @@ def _combi_router_thread() -> None:
             # Key: (input_channel_1based, input_note)
             # Value: [(output_channel_0based, output_note), ...]
             active_note_targets: dict[tuple[int, int], list[tuple[int, int]]] = {}
-            while state.running and state.combi_active and combi_router_proc and combi_router_proc.poll() is None:
-                if combi_router_proc.stdout is None:
+            while state.running and state.combi_active and generation == combi_router_generation and proc.poll() is None:
+                if proc.stdout is None:
                     break
-                line = combi_router_proc.stdout.readline()
+                line = proc.stdout.readline()
                 if not line:
                     time.sleep(0.02)
                     continue
@@ -6100,8 +6105,12 @@ def _combi_router_thread() -> None:
             log(f"Combi router exception: {exc}")
             time.sleep(0.5)
         finally:
-            proc = combi_router_proc
-            combi_router_proc = None
+            rc = proc.poll() if proc is not None else None
+            if proc is not None and state.running and state.combi_active and generation == combi_router_generation:
+                log(f"Combi router exited: rc={rc}; restarting")
+            if generation == combi_router_generation and combi_router_proc is proc:
+                combi_router_proc = None
+                state.combi_router_signature = ""
             if proc is not None:
                 try:
                     if proc.poll() is None:
@@ -6112,7 +6121,8 @@ def _combi_router_thread() -> None:
 
 
 def stop_combi_router() -> None:
-    global combi_router_proc, combi_router_thread_handle
+    global combi_router_proc, combi_router_thread_handle, combi_router_generation
+    combi_router_generation += 1
     proc = combi_router_proc
     combi_router_proc = None
     if proc is not None:
@@ -6129,7 +6139,7 @@ def stop_combi_router() -> None:
 
 
 def start_combi_router() -> bool:
-    global combi_router_thread_handle, combi_router_proc
+    global combi_router_thread_handle, combi_router_proc, combi_router_generation
     if not state.combi_active or not state.combi_parts:
         return False
     if state.current_engine != "fluidsynth":
@@ -6171,7 +6181,9 @@ def start_combi_router() -> bool:
         return True
     _disconnect_all_midi_routes_to_fluidsynth()
     stop_combi_router()
-    combi_router_thread_handle = threading.Thread(target=_combi_router_thread, daemon=True)
+    combi_router_generation += 1
+    generation = combi_router_generation
+    combi_router_thread_handle = threading.Thread(target=_combi_router_thread, args=(generation,), daemon=True)
     combi_router_thread_handle.start()
     state.midi_connected = True
     refresh_midi_display_text()
@@ -6282,35 +6294,32 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
     stop_combi_router()
     state.combi_active = False
 
-    # Combi always runs on FluidSynth.  If the current engine is Yoshimi, do
-    # not reject the request; switch to the Combi-required SF2 below.
+    # Combi always runs on FluidSynth with an ALSA sequencer input owned by the
+    # Python router.  Switch the MIDI backend state BEFORE loading the required
+    # SF2 so a Yoshimi/RAW -> Combi transition starts FluidSynth only once,
+    # directly as ALSA_SEQ.  The previous 260707a ordering could start
+    # FluidSynth as ALSA_RAW and then immediately restart it as ALSA_SEQ.
     if state.current_engine != "fluidsynth":
         log(f"Combi requested while {state.current_engine}; switching to FluidSynth")
 
-    required_sf2 = Path(str(combi.get("sf2") or "")).name
-    if not ensure_combi_soundfont_loaded(required_sf2, manage_modal=False):
-        clear_modal_message()
-        return
-    t_sf = time.perf_counter()
-
-    # Important ordering fix:
-    # In usb_direct_raw mode FluidSynth owns the raw MIDI device directly.
-    # The Combi router needs ALSA sequencer input, so switching to Combi may
-    # restart FluidSynth.  Do that BEFORE sending per-channel bank/program/CC
-    # setup; otherwise the first Load appears to do nothing because the setup
-    # is lost during the restart, and only the second Load works.
-    if state.midi_mode == "usb_direct_raw":
+    midi_transition_to_alsa = (state.midi_mode == "usb_direct_raw")
+    if midi_transition_to_alsa:
         log("Combi switching MIDI mode: USB direct RAW -> ALSA MIDI")
         state.midi_mode = "alsa_midi"
         state.midi_selected_name = midi_mode_to_label("alsa_midi")
         refresh_midi_options(quiet=True)
-        restart_engine(state.sf_index, state.dac_index, manage_modal=False)
-        if state.current_engine != "fluidsynth" or fluid_proc is None or fluid_proc.poll() is not None:
-            clear_modal_message()
-            mark_dirty("Combi engine restart failed")
-            return
-    else:
-        reconnect_midi_to_fluidsynth(force_draw=False)
+
+    required_sf2 = Path(str(combi.get("sf2") or "")).name
+    if not ensure_combi_soundfont_loaded(required_sf2, manage_modal=False, force_restart=midi_transition_to_alsa):
+        clear_modal_message()
+        return
+    t_sf = time.perf_counter()
+
+    reconnect_midi_to_fluidsynth(force_draw=False)
+    if state.current_engine != "fluidsynth" or fluid_proc is None or fluid_proc.poll() is not None:
+        clear_modal_message()
+        mark_dirty("Combi engine restart failed")
+        return
     t_midi = time.perf_counter()
 
     clear_current_user_preset_state()
@@ -6385,11 +6394,19 @@ def preview_combi_at_index(index: int) -> None:
     state.previewed_combi_index = idx
 
 
-def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
+def clear_combi_state_for_explicit_sound_load() -> None:
+    """End the Combi performance lock only when the user explicitly loads another sound."""
     stop_combi_router()
     state.combi_active = False
     state.combi_parts = []
     state.current_combi_name = None
+    state.combi_preview_active = False
+    state.previewed_combi_index = None
+    state.combi_browse_snapshot = None
+
+
+def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
+    clear_combi_state_for_explicit_sound_load()
     clear_current_user_preset_state()
     state.current_preset_bank = int(bank)
     state.current_preset_program = int(program)
@@ -6440,6 +6457,7 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
         mark_dirty(f"Preset queued: {state.current_preset_name}")
 
 def apply_soundfont_with_default_preset(sf_index: int) -> None:
+    clear_combi_state_for_explicit_sound_load()
     presets = load_presets_for_sf2(sf_index)
     default_preset = choose_default_preset(presets)
 
@@ -6593,6 +6611,45 @@ def restart_engine(sf_index: int, dac_index: int, *, manage_modal: bool = True) 
     send_ui_status("READY", force=True)
     return True
 
+def send_current_engine_panic() -> bool:
+    """Send a lightweight MIDI panic to the currently running synth engine.
+
+    Quick Menu > MIDI Panic is an emergency silence command, not a sound
+    refresh.  Do not restart FluidSynth/Yoshimi and do not reload SoundFonts or
+    presets here; Down long-press owns the heavier Refresh Sound behavior.
+    """
+    ok = False
+
+    # FluidSynth accepts CLI commands on stdin in both RAW and SEQ modes.
+    # Send sustain off first, then All Notes Off and All Sound Off.
+    if state.current_engine == "fluidsynth":
+        for ch in range(16):
+            ok = send_fluidsynth_command(f"cc {ch} 64 0") or ok
+            ok = send_fluidsynth_command(f"cc {ch} 123 0") or ok
+            ok = send_fluidsynth_command(f"cc {ch} 120 0") or ok
+        return ok
+
+    # Yoshimi is controlled through ALSA sequencer MIDI, so use the same tiny
+    # SMF mechanism used for external hardware modules.
+    dst = state.fluid_dst_port if state.fluid_dst_port not in {None, "", "-"} else find_fluidsynth_port()
+    if dst:
+        tmp_path = "/tmp/fluidardule_engine_panic.mid"
+        try:
+            write_external_panic_midi_file(tmp_path)
+            p = subprocess.run(
+                ["aplaymidi", "-p", dst, tmp_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2.0,
+                check=False,
+            )
+            ok = (p.returncode == 0)
+        except Exception as exc:
+            log(f"Engine MIDI panic failed: {exc}")
+
+    return ok
+
+
 def midi_panic() -> None:
     send_ui_status("BUSY", force=True)
     # If a MIDI file is currently playing, stop that dedicated player first.
@@ -6600,13 +6657,18 @@ def midi_panic() -> None:
     if state.player_proc_kind == "midi_file":
         stop_player_only()
         time.sleep(0.05)
-    restart_engine(state.sf_index, state.dac_index)
-    restore_current_preset_after_engine_restart()
+
+    ok = send_current_engine_panic()
+    if state.external_midi_out_mode == "mirror" or state.external_midi_connected:
+        send_external_midi_panic()
+
     if state.player_proc_kind is None:
         state.player_status = "Stopped"
         state.player_paused = False
         set_play_led("OFF")
-    mark_dirty(f"MIDI Panic -> {state.current_preset_name}")
+
+    mark_dirty("MIDI Panic" if ok else "MIDI Panic sent")
+    show_footer_message("MIDI Panic: notes off", 0.8)
     send_ui_status("READY", force=True)
 
 
@@ -6639,10 +6701,10 @@ def write_external_panic_midi_file(path: str) -> None:
 
     events = bytearray()
     first = True
-    # CC120 All Sound Off, CC123 All Notes Off, CC121 Reset All Controllers.
+    # CC64 Sustain Off, CC120 All Sound Off, CC123 All Notes Off, CC121 Reset All Controllers.
     # Send them on all channels. Delta time is zero between events.
     for ch in range(16):
-        for cc in (120, 123, 121):
+        for cc in (64, 120, 123, 121):
             events.extend(vlq(0 if first else 1))
             events.extend(bytes([0xB0 | ch, cc, 0]))
             first = False
@@ -7897,6 +7959,68 @@ def find_current_user_preset_item() -> dict | None:
     return None
 
 
+def send_combi_notes_off() -> None:
+    """Silence all FluidSynth channels without changing the active Combi state."""
+    for ch in range(16):
+        # Sustain off first, then All Notes Off and All Sound Off.
+        # Keep this lightweight: no engine restart, no Combi state reset.
+        send_fluidsynth_command(f"cc {ch} 64 0")
+        send_fluidsynth_command(f"cc {ch} 123 0")
+        send_fluidsynth_command(f"cc {ch} 120 0")
+
+
+def refresh_current_combi() -> None:
+    """Re-apply the currently active Combi without leaving Combi performance mode.
+
+    Down long-press means Refresh Sound.  In Combi mode, the current Combi is
+    the current sound, so refreshing must not fall back to a single preset or
+    clear state.combi_active.  It should silence stuck notes, rebuild the
+    channel setup, and restart the Python router cleanly.
+    """
+    if not state.combi_active or not state.combi_parts:
+        mark_dirty("No active Combi")
+        return
+
+    label = shorten_text(state.current_combi_name or "Combi", 24)
+    show_modal_message("Refreshing Combi...", label)
+    send_ui_status("BUSY", force=True)
+    try:
+        stop_combi_router()
+        send_combi_notes_off()
+
+        ok = False
+        for part in state.combi_parts:
+            ok = _send_channel_setup_for_part(part) or ok
+
+        # Preserve the CH10 drum-pad support used by normal Combi loading.
+        send_fluidsynth_command("drums 9 on")
+        send_fluidsynth_command("bank 9 128")
+        send_fluidsynth_command("prog 9 0")
+        send_fluidsynth_command("select 9 0 128 0")
+
+        # Re-apply the same predictable controller baseline used by apply_combi().
+        for part in state.combi_parts:
+            ch = max(0, min(15, _safe_int(part.get("channel", 1), 1) - 1))
+            for param in SOUND_EDIT_PARAMS:
+                try:
+                    send_fluidsynth_command(f"cc {ch} {int(param['cc'])} {int(param['default'])}")
+                except Exception:
+                    pass
+
+        router_ok = start_combi_router()
+        if router_ok:
+            mark_dirty(f"Combi refreshed: {label}")
+            show_footer_message(f"Combi refreshed: {label}", 1.5)
+        elif ok:
+            mark_dirty(f"Combi setup refreshed: {label}")
+            show_footer_message(f"Combi setup refreshed: {label}", 1.5)
+        else:
+            mark_dirty("Combi refresh queued")
+    finally:
+        clear_modal_message()
+        send_ui_status("READY", force=True)
+
+
 def refresh_current_sound() -> None:
     """Restart/re-align the current sound without using full MIDI Panic.
 
@@ -7905,6 +8029,10 @@ def refresh_current_sound() -> None:
     User Preset Sound Edit values or the current volatile Sound Edit values.
     """
     if block_sound_change_while_playing():
+        return
+
+    if state.combi_active:
+        refresh_current_combi()
         return
 
     show_modal_message("Refreshing...", shorten_text(state.current_user_preset_name or state.current_preset_name, 24))
@@ -8052,6 +8180,10 @@ def leave_submenu(event: str = "Back") -> None:
     target = state.submenu_return_mode or "main"
     if state.submenu_key == "soundfont":
         state.pending_resume_after_sf_apply = False
+        if combi_locked():
+            warn_combi_quick_blocked()
+            return_to_sound_submenu("Combi active")
+            return
     if state.submenu_key == "preset":
         state.preset_entries = []
         state.preset_index = 0
@@ -8088,7 +8220,6 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         rows = [(name, i == state.sf_index) for i, (_path, name) in enumerate(SOUNDFONTS)]
         rows.append(("User Preset", False))
         rows.append(("Combi", bool(state.combi_active)))
-        rows.append(("Refresh Sound", False))
         return rows
     if key == "preset_category":
         active_cat = categorize_preset(state.current_preset_bank, state.current_preset_program, state.current_preset_name)
@@ -8236,6 +8367,9 @@ def apply_current_submenu_selection() -> None:
             show_timed_modal_message("Use RIGHT", hold_sec=0.9, subtext="Open Combi List")
             return
         if state.submenu_index == len(SOUNDFONTS) + 2:
+            if combi_locked():
+                warn_combi_quick_blocked()
+                return
             refresh_current_sound()
             if resume_after_apply:
                 resume_selected_browser_file_after_sf_change()
@@ -8271,6 +8405,9 @@ def apply_current_submenu_selection() -> None:
         leave_submenu(f'Preset: {p["name"]}')
         return
     if key == "dac":
+        if combi_locked():
+            warn_combi_quick_blocked()
+            return
         if block_sound_change_while_playing():
             return
         if state.submenu_index != state.dac_index:
@@ -8278,6 +8415,9 @@ def apply_current_submenu_selection() -> None:
         leave_submenu("DAC applied")
         return
     if key == "midi":
+        if combi_locked():
+            warn_combi_quick_blocked()
+            return
         if block_sound_change_while_playing():
             return
         if state.midi_options:
@@ -8527,6 +8667,9 @@ def apply_current_submenu_selection() -> None:
 
 def handle_main_select() -> None:
     label = MAIN_MENU[clamp_index(state.menu_index, len(MAIN_MENU))]
+    if combi_locked() and label != "Sound":
+        warn_combi_quick_blocked()
+        return
     if label == "Sound":
         if block_sound_change_while_playing():
             return
@@ -8632,12 +8775,17 @@ def combi_workflow_active() -> bool:
     return state.ui_mode == "submenu" and state.submenu_key in {"combi_load", "combi_detail"}
 
 
+def combi_locked() -> bool:
+    """Global performance lock: active Combi must keep sounding until an explicit Sound load replaces it."""
+    return bool(state.combi_active)
+
+
 def warn_combi_quick_blocked() -> None:
-    show_timed_modal_message("Combi Mode Active", hold_sec=0.8, subtext="Use LEFT to exit")
+    show_timed_modal_message("Combi Mode Active", hold_sec=0.8, subtext="Load another sound")
 
 
 def enter_quick_menu() -> None:
-    if combi_workflow_active():
+    if combi_locked():
         warn_combi_quick_blocked()
         return
     if state.ui_mode not in {"quick_menu", "power_menu"} and not state.usb_eject_confirm:
@@ -8688,6 +8836,10 @@ def restore_quick_snapshot() -> None:
 
 
 def enter_home() -> None:
+    if combi_locked():
+        warn_combi_quick_blocked()
+        return_to_sound_submenu("Combi active")
+        return
     state.ui_mode = "main"
     state.menu_index = 0
     invalidate_full_display()
@@ -8707,9 +8859,6 @@ def quick_menu_select() -> None:
     item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
     if item == "MIDI Panic":
         midi_panic()
-        return
-    if item == "Return":
-        restore_quick_snapshot()
         return
     if item == "Now Playing":
         enter_now_playing()
@@ -8965,9 +9114,14 @@ def handle_button_event(btn_value: str) -> None:
         # Sound Edit has its own input handler, so global long-press actions
         # that must remain available are handled first and explicitly.
         if btn == "RIGHT_LP":
-            pulse_button_activity(); enter_quick_menu(); return
+            pulse_button_activity()
+            if combi_locked():
+                midi_panic()
+            else:
+                enter_quick_menu()
+            return
         if btn == "DOWN_LP":
-            pulse_button_activity(); midi_panic(); return
+            pulse_button_activity(); refresh_current_sound(); return
         if btn == "LEFT_LP":
             pulse_button_activity(); toggle_pot_mode(); return
         if btn == "SEL_LP":
@@ -8993,9 +9147,9 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty(f"BTN ignored: {btn}")
         return
 
-    if btn == "RIGHT_LP" and combi_workflow_active():
+    if btn == "RIGHT_LP" and combi_locked():
         pulse_button_activity()
-        warn_combi_quick_blocked()
+        midi_panic()
         return
 
     if btn == "RIGHT_LP" and state.ui_mode != "power_menu":
@@ -9577,9 +9731,16 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "LEFT":
             pulse_button_activity()
-            restore_combi_browse_snapshot()
-            finish_combi_browse_session()
-            return_to_sound_submenu("Combi canceled")
+            if state.combi_active:
+                # Leaving the Combi browser is a UI exit only.  Keep the active
+                # Combi/router/MIDI backend exactly as-is; another Sound load will
+                # explicitly clear state.combi_active via apply_preset().
+                finish_combi_browse_session()
+                return_to_sound_submenu("Combi still active")
+            else:
+                restore_combi_browse_snapshot()
+                finish_combi_browse_session()
+                return_to_sound_submenu("Combi canceled")
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -9587,7 +9748,7 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "submenu" and state.submenu_key == "combi_detail":
         if btn == "LEFT":
             pulse_button_activity()
-            enter_combi_load_menu(return_mode="sound")
+            return_to_sound_submenu("Combi still active")
             return
         if btn == "SEL":
             pulse_button_activity()
@@ -9684,7 +9845,11 @@ def handle_button_event(btn_value: str) -> None:
         if state.ui_mode == "submenu":
             leave_submenu("Canceled")
         else:
-            mark_dirty("Main screen")
+            if combi_locked():
+                warn_combi_quick_blocked()
+                return_to_sound_submenu("Combi active")
+            else:
+                mark_dirty("Main screen")
         return
 
     if btn == "RIGHT":
