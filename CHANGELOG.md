@@ -6,14 +6,45 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260707h — Combi state locking, faster loading, and recovery control cleanup
+
+### Changed
+
+- Added `SCRIPT_VERSION` near the top of `launch_fluidardule.py`.
+- Adjusted Power menu highlight text vertical alignment.
+- Removed redundant `Return` from Quick menu.
+- Reworked Combi mode as a persistent `state.combi_active` performance-lock state.
+- Blocked Home and normal Quick menu access while Combi is active.
+- Preserved active Combi sound when leaving Combi browser for Sound menu.
+- Released Combi only when another sound is explicitly loaded.
+- Optimized Combi loading by switching to ALSA sequencer mode before loading the required SoundFont.
+- Reduced observed initial Combi load time from about 8.3 s to about 3.7 s.
+- Fixed duplicate Combi router startup caused by stale router threads.
+- Separated `MIDI Panic` from `Refresh Sound`.
+- Made `MIDI Panic` lightweight: no SoundFont reload, no engine restart.
+- Made Down long press preserve and reapply the current sound or Combi.
+- Added Combi-only Right long press Panic.
+- Removed redundant `Refresh Sound` from Quick menu.
+
+### Verified
+
+- Combi lock persists correctly after returning to Sound menu.
+- Explicitly loading another sound releases Combi lock.
+- Duplicate `Combi router started` logs no longer appear.
+- Quick menu Panic no longer reloads SoundFonts.
+- Refresh Sound reapplies active Combi without exiting Combi mode.
+- Copy-based `yoshimi.patches.json` works with 260707h.
+- UNO-2 with AKAI USB MIDI keyboard works.
+- Raspberry Pi power status remained `throttled=0x0`.
+
+---
+
 ## 260706b
 
 - Improved Sound selection and transition consistency across SoundFont presets, User Presets, and Combis.
 - Refined preview/commit behavior to avoid unnecessary duplicate sound loading.
 - Improved loading modal handling and startup settling for large SoundFonts.
 - Improved smooth Yoshimi patch live loading by preserving symbolic-link paths for instrument selection.
-
-
 
 ---
 
