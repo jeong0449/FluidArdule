@@ -4,14 +4,12 @@
 """
 extract_yoshimi_patches.py
 
-Scan Yoshimi/ZynAddSubFX instrument patch files and export them to a
+Scan Yoshimi/ZynAddSubFX instrument patch files, copy them into a
+Fluid Ardule-owned patch repository with CLI-safe filenames, and export a
 Fluid Ardule compatible JSON instrument list.
 
-This version also builds a symbolic-link repository for Yoshimi live
-instrument switching.
-
-Why symbolic links?
--------------------
+Why copy patches?
+-----------------
 Yoshimi can load an instrument into a running process with a CLI command like:
 
     load instrument /some/path/to/patch.xiz
@@ -21,15 +19,20 @@ factory Yoshimi banks contain filenames such as "0039-Soft Arpeggio1.xiz".
 Passing that original path directly to the CLI can therefore fail even though
 the file exists.
 
-The workaround used here is deliberately simple:
+Earlier versions of this extractor created a symbolic-link repository.  That
+removed spaces from the visible link path, but it still left one more layer of
+path indirection.  For a small appliance-like system such as Fluid Ardule, a
+real copy with a normalized filename is simpler and more robust.
+
+The current workflow is therefore:
 
     original bank file, possibly with spaces:
         /usr/share/yoshimi/banks/Arpeggios/0039-Soft Arpeggio1.xiz
 
-    safe symbolic link, no spaces:
-        /home/pi/sf2/yoshimi_links/Arpeggios__0039-Soft-Arpeggio1.xiz
+    Fluid Ardule patch copy, no spaces:
+        /home/pi/sf2/yoshimi_patches/Arpeggios__0039-Soft-Arpeggio1.xiz
 
-The JSON preset's top-level "path" field points to the safe symbolic link, so
+The JSON preset's top-level "path" field points to the copied patch file, so
 runtime code can simply send:
 
     load instrument <preset["path"]>
@@ -43,8 +46,8 @@ Primary target:
 Default output file:
     <bank-root>/yoshimi.patches.json
 
-Default symbolic-link directory:
-    /home/pi/sf2/yoshimi_links
+Default copied-patch directory:
+    /home/pi/sf2/yoshimi_patches
 
 Examples:
     python3 extract_yoshimi_patches.py /usr/share/yoshimi/banks
@@ -53,11 +56,11 @@ Examples:
         -o /home/pi/sf2/yoshimi.patches.json
 
     python3 extract_yoshimi_patches.py /usr/share/yoshimi/banks \
-        --link-dir /home/pi/sf2/yoshimi_links --clean-links
+        --patch-dir /home/pi/sf2/yoshimi_patches --clean-patches
 
 JSON format:
     format  = instrument-list
-    version = 2
+    version = 3
     engine  = yoshimi
 
 The output intentionally keeps bank/program/name fields so that it can be
@@ -67,17 +70,19 @@ handled by the same UI concepts used for SF2 preset lists.
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
-import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
 
 PATCH_EXTS = {".xiz"}
 CATEGORY_FALLBACK = "Yoshimi"
-DEFAULT_LINK_DIR = Path("/home/pi/sf2/yoshimi_links")
+DEFAULT_PATCH_DIR = Path("/home/pi/sf2/yoshimi_patches")
 DEFAULT_OUTPUT_BASENAME = "yoshimi.patches.json"
+JSON_VERSION = 3
 
 
 def clean_display_name(text: str) -> str:
@@ -92,8 +97,8 @@ def safe_filename_component(text: str) -> str:
     """
     Convert bank names and patch filenames into CLI-safe filename fragments.
 
-    The design note only requires replacing spaces with hyphens, but this
-    helper is a little more defensive:
+    The important rule is that generated paths must not contain whitespace.
+    This helper is intentionally defensive:
 
     * any whitespace becomes "-";
     * path separators become "-";
@@ -101,9 +106,6 @@ def safe_filename_component(text: str) -> str:
     * characters that are awkward in shells or CLIs are replaced with "-";
     * ordinary useful characters such as letters, digits, dot, underscore,
       hyphen, plus, and parentheses are preserved.
-
-    The result is still readable, while avoiding the Yoshimi CLI's path parsing
-    problem caused by spaces.
     """
     text = clean_display_name(text)
     text = text.replace("/", "-").replace("\\", "-")
@@ -195,82 +197,89 @@ def relative_bank_name(bank_dir: Path, root: Path) -> str:
         return bank_dir.name
 
 
-def make_link_name(bank_name: str, patch_path: Path) -> str:
+def make_patch_copy_name(bank_name: str, patch_path: Path) -> str:
     """
-    Create a collision-resistant, space-free symbolic-link filename.
+    Create a collision-resistant, whitespace-free copied-patch filename.
 
-    The bank name is included before a double underscore.  This follows the
-    design note's example and prevents collisions when two banks contain the
-    same patch filename.
+    The bank name is included before a double underscore.  This prevents
+    collisions when two banks contain the same patch filename.
     """
     safe_bank = safe_filename_component(bank_name)
     safe_patch_stem = safe_filename_component(patch_path.stem)
     return f"{safe_bank}__{safe_patch_stem}{patch_path.suffix.lower()}"
 
 
-def create_or_update_symlink(original_path: Path, link_path: Path, *, force: bool = False) -> None:
+def copy_patch_file(original_path: Path, copy_path: Path, *, force: bool = False) -> bool:
     """
-    Create link_path -> original_path.
+    Copy original_path to copy_path.
 
-    Existing correct links are left alone.  Broken or outdated symlinks are
-    replaced.  Non-symlink files are never overwritten unless --force-links is
-    used, because an unexpected real file in the link repository may represent
-    a user mistake that deserves attention.
+    Returns True when a copy was written and False when an existing copy was
+    already up to date.  Existing real files are updated when their contents
+    differ.  Existing symlinks are refused unless --force-patches is used,
+    because the new design intentionally avoids symlinks.
     """
     original_path = original_path.resolve()
-    link_path.parent.mkdir(parents=True, exist_ok=True)
+    copy_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if link_path.exists() or link_path.is_symlink():
-        if link_path.is_symlink():
+    if copy_path.exists() or copy_path.is_symlink():
+        if copy_path.is_symlink():
+            if not force:
+                raise FileExistsError(
+                    f"Refusing to overwrite symlink in patch repository: {copy_path}. "
+                    "Use --force-patches only if this is intentional."
+                )
+            copy_path.unlink()
+        elif copy_path.is_file():
             try:
-                current_target = link_path.resolve(strict=True)
-            except FileNotFoundError:
-                current_target = None
-
-            if current_target == original_path:
-                return
-
-            link_path.unlink()
+                if filecmp.cmp(original_path, copy_path, shallow=False):
+                    return False
+            except OSError:
+                pass
         elif force:
-            link_path.unlink()
+            if copy_path.is_dir():
+                shutil.rmtree(copy_path)
+            else:
+                copy_path.unlink()
         else:
             raise FileExistsError(
-                f"Refusing to overwrite non-symlink file: {link_path}. "
-                "Use --force-links only if this is intentional."
+                f"Refusing to overwrite non-file path: {copy_path}. "
+                "Use --force-patches only if this is intentional."
             )
 
-    os.symlink(str(original_path), str(link_path))
+    shutil.copy2(original_path, copy_path)
+    return True
 
 
-def clean_link_repository(link_dir: Path) -> int:
+def clean_patch_repository(patch_dir: Path) -> int:
     """
-    Remove existing .xiz symlinks in the link repository.
+    Remove existing .xiz files in the copied-patch repository.
 
-    This is optional and intentionally conservative: only symbolic links with
-    a .xiz suffix directly inside link_dir are removed.  Real files and
-    subdirectories are left untouched.
+    This is optional and intentionally conservative: only .xiz files or .xiz
+    symlinks directly inside patch_dir are removed.  Subdirectories and other
+    files are left untouched.
     """
-    if not link_dir.exists():
+    if not patch_dir.exists():
         return 0
 
     removed = 0
-    for p in link_dir.iterdir():
-        if p.is_symlink() and p.suffix.lower() in PATCH_EXTS:
+    for p in patch_dir.iterdir():
+        if (p.is_file() or p.is_symlink()) and p.suffix.lower() in PATCH_EXTS:
             p.unlink()
             removed += 1
     return removed
 
 
-def scan_yoshimi_patches(root: Path, link_dir: Path, *, force_links: bool = False) -> list[dict]:
+def scan_yoshimi_patches(root: Path, patch_dir: Path, *, force_patches: bool = False) -> tuple[list[dict], int]:
     """
-    Scan bank files, create safe symbolic links, and return JSON presets.
+    Scan bank files, create safe patch copies, and return JSON presets.
 
     The top-level "path" is the value the runtime should pass to Yoshimi CLI.
     The top-level "original_path" is retained for debugging, so one can always
-    trace a safe link back to the factory/user bank file.
+    trace a copied patch back to the factory/user bank file.
     """
     banks = discover_bank_dirs(root)
     presets: list[dict] = []
+    copied_count = 0
 
     for bank_number, bank_dir in enumerate(banks):
         bank_name = relative_bank_name(bank_dir, root)
@@ -283,10 +292,11 @@ def scan_yoshimi_patches(root: Path, link_dir: Path, *, force_links: bool = Fals
             program, patch_name = parse_patch_filename(patch_path, fallback_index)
             patch_path_abs = patch_path.resolve()
             bank_path_abs = bank_dir.resolve()
-            link_name = make_link_name(bank_name, patch_path)
-            link_path = (link_dir / link_name).resolve()
+            patch_copy_name = make_patch_copy_name(bank_name, patch_path)
+            patch_copy_path = (patch_dir / patch_copy_name).resolve()
 
-            create_or_update_symlink(patch_path_abs, link_path, force=force_links)
+            if copy_patch_file(patch_path_abs, patch_copy_path, force=force_patches):
+                copied_count += 1
 
             presets.append(
                 {
@@ -296,10 +306,10 @@ def scan_yoshimi_patches(root: Path, link_dir: Path, *, force_links: bool = Fals
                     # This is the important field for restart-free preview or
                     # live switching.  Runtime code should use this path when
                     # issuing: load instrument <path>
-                    "path": str(link_path),
+                    "path": str(patch_copy_path),
 
-                    # Kept for diagnostics and for humans checking whether a
-                    # symbolic link points back to the expected bank file.
+                    # Kept for diagnostics and for humans checking where the
+                    # copied patch came from.
                     "original_path": str(patch_path_abs),
 
                     "bank": bank_number,
@@ -314,17 +324,17 @@ def scan_yoshimi_patches(root: Path, link_dir: Path, *, force_links: bool = Fals
                         "patch_file": patch_path.name,
                         "patch_path": str(patch_path_abs),
                         "patch_ext": patch_path.suffix.lower(),
-                        "link_file": link_name,
-                        "link_path": str(link_path),
+                        "patch_copy_file": patch_copy_name,
+                        "patch_copy_path": str(patch_copy_path),
                     },
                 }
             )
 
     presets.sort(key=lambda x: (x["bank"], x["program"], x["name"].lower()))
-    return presets
+    return presets, copied_count
 
 
-def build_output(root: Path, presets: list[dict], link_dir: Path) -> dict:
+def build_output(root: Path, presets: list[dict], patch_dir: Path) -> dict:
     """Build the Fluid Ardule JSON document."""
     categories = sorted({p.get("category", CATEGORY_FALLBACK) for p in presets})
 
@@ -332,12 +342,12 @@ def build_output(root: Path, presets: list[dict], link_dir: Path) -> dict:
         "engine": "yoshimi",
         "source_type": "yoshimi-bank-root",
         "format": "instrument-list",
-        "version": 2,
+        "version": JSON_VERSION,
 
         "source_file": root.name,
         "source_path": str(root),
-        "uses_symlink_paths": True,
-        "link_dir": str(link_dir),
+        "uses_symlink_paths": False,
+        "patch_dir": str(patch_dir),
         "preset_count": len(presets),
         "melodic_preset_count": len(presets),
         "drum_preset_count": 0,
@@ -350,7 +360,7 @@ def build_output(root: Path, presets: list[dict], link_dir: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Extract Yoshimi .xiz patch information, create safe symlinks, and save JSON."
+        description="Extract Yoshimi .xiz patch information, copy safe patch files, and save JSON."
     )
     parser.add_argument(
         "bank_root",
@@ -362,19 +372,19 @@ def main() -> int:
         help=f"Optional output JSON path. Default: <bank_root>/{DEFAULT_OUTPUT_BASENAME}",
     )
     parser.add_argument(
-        "--link-dir",
-        default=str(DEFAULT_LINK_DIR),
-        help=f"Directory for safe .xiz symlinks. Default: {DEFAULT_LINK_DIR}",
+        "--patch-dir",
+        default=str(DEFAULT_PATCH_DIR),
+        help=f"Directory for copied, whitespace-free .xiz patches. Default: {DEFAULT_PATCH_DIR}",
     )
     parser.add_argument(
-        "--clean-links",
+        "--clean-patches",
         action="store_true",
-        help="Remove existing .xiz symlinks in --link-dir before creating new links.",
+        help="Remove existing .xiz files in --patch-dir before creating new copies.",
     )
     parser.add_argument(
-        "--force-links",
+        "--force-patches",
         action="store_true",
-        help="Allow replacing non-symlink files in --link-dir. Use with care.",
+        help="Allow replacing symlinks, directories, or unusual paths in --patch-dir. Use with care.",
     )
     parser.add_argument(
         "--compact",
@@ -396,12 +406,12 @@ def main() -> int:
         if args.output
         else root / DEFAULT_OUTPUT_BASENAME
     )
-    link_dir = Path(args.link_dir).expanduser().resolve()
+    patch_dir = Path(args.patch_dir).expanduser().resolve()
 
     try:
-        cleaned = clean_link_repository(link_dir) if args.clean_links else 0
-        presets = scan_yoshimi_patches(root, link_dir, force_links=args.force_links)
-        payload = build_output(root, presets, link_dir)
+        cleaned = clean_patch_repository(patch_dir) if args.clean_patches else 0
+        presets, copied_count = scan_yoshimi_patches(root, patch_dir, force_patches=args.force_patches)
+        payload = build_output(root, presets, patch_dir)
     except PermissionError as exc:
         print(f"ERROR: Permission denied: {exc}", file=sys.stderr)
         return 2
@@ -409,7 +419,7 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 5
     except OSError as exc:
-        print(f"ERROR: Could not create symbolic links: {exc}", file=sys.stderr)
+        print(f"ERROR: Could not create copied patch repository: {exc}", file=sys.stderr)
         return 6
     except Exception as exc:
         print(f"ERROR: Unexpected failure: {exc}", file=sys.stderr)
@@ -435,9 +445,10 @@ def main() -> int:
     print(f"Engine: {payload['engine']}")
     print(f"Patch count: {payload['preset_count']}")
     print(f"Bank/category count: {payload['category_count']}")
-    print(f"Symlink directory: {payload['link_dir']}")
-    if args.clean_links:
-        print(f"Removed old .xiz symlinks: {cleaned}")
+    print(f"Patch directory: {payload['patch_dir']}")
+    print(f"Copied or updated .xiz files: {copied_count}")
+    if args.clean_patches:
+        print(f"Removed old .xiz patch copies: {cleaned}")
     return 0
 
 
