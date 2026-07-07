@@ -2,7 +2,7 @@
   "engine": "yoshimi",
   "source_type": "yoshimi-bank-root",
   "format": "instrument-list",
-  "version": 3,
+  "version": 2,
   "source_file": "banks",
   "source_path": "/usr/share/yoshimi/banks",
   "uses_symlink_paths": false,
