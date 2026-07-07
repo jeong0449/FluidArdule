@@ -58,7 +58,7 @@ Install the required packages:
 ```bash
 sudo apt update
 sudo apt upgrade
-sudo apt install fbi alsa-utils fluidsynth python3 python3-serial python3-mido python3-rtmidi dhcpcd
+sudo apt install fbi alsa-utils fluidsynth yoshimi python3 python3-serial python3-mido python3-rtmidi dhcpcd
 ```
 
 ---
