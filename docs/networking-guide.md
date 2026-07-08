@@ -1,6 +1,6 @@
 # Networking Guide
 
-Updated: 2026-05-27
+Updated: 2026-07-09
 
 
 This document explains the networking configuration used in Fluid Ardule, focusing on a lightweight and predictable setup.
@@ -20,6 +20,26 @@ Instead, the recommended networking stack is based on:
 These components provide reliable automatic Wi-Fi connectivity while remaining compatible with headless embedded operation.
 
 > Note: `dhclient` is not used in this setup, as `dhcpcd` handles DHCP.
+
+---
+
+## 2. Design Scope and User Expectations
+
+Fluid Ardule is designed as a DIY embedded musical instrument, not as a general-purpose consumer device.
+
+Users are expected to have basic familiarity with Raspberry Pi OS and SSH. The initial Wi-Fi network should normally be configured using Raspberry Pi Imager when the OS image is prepared.
+
+The Fluid Ardule runtime UI intentionally does not provide a general-purpose text entry system for entering arbitrary SSIDs or Wi-Fi passwords. Network configuration is considered a system administration task rather than a musical performance function.
+
+Additional Wi-Fi networks may be added manually through the Raspberry Pi OS networking configuration. Once configured, Fluid Ardule can select and prioritize known networks through its runtime interface.
+
+This separation is intentional:
+
+- Raspberry Pi OS handles network configuration.
+- Fluid Ardule manages selection among already configured networks.
+- The runtime UI remains focused on immediate musical operation.
+
+This approach avoids captive portals, temporary access-point modes, on-screen keyboards, and other network provisioning mechanisms that would increase system complexity and maintenance burden.
 
 ---
 

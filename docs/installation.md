@@ -1,5 +1,7 @@
 # Installation Guide
 
+Updated: 2026-07-09
+
 🚧 This document is currently under construction and may contain errors or incomplete instructions.
 
 ---
@@ -17,6 +19,16 @@ For Windows users, Raspberry Pi Imager is the recommended tool for installing Ra
 https://www.raspberrypi.com/software/
 
 > Be careful to select the correct device to avoid data loss.
+
+#### Initial Wi-Fi Setup
+
+It is strongly recommended to configure the initial Wi-Fi network using Raspberry Pi Imager before writing the OS image.
+
+Fluid Ardule is a DIY Raspberry Pi synthesizer project rather than a consumer appliance. Basic familiarity with Raspberry Pi OS, SSH, and command-line system administration is recommended.
+
+The Fluid Ardule runtime interface is intentionally focused on musical operation and does not provide a general-purpose text entry interface for entering new Wi-Fi credentials. Additional wireless networks can be configured later through the Raspberry Pi OS networking configuration.
+
+This design avoids adding a complex on-device network setup system and keeps the runtime environment lightweight and predictable.
 
 This guide assumes the default Raspberry Pi OS user account `pi`.
 
@@ -64,6 +76,12 @@ sudo apt install fbi alsa-utils fluidsynth yoshimi python3 python3-serial python
 ---
 
 ### 1.3 Network Configuration (without NetworkManager)
+
+The initial Wi-Fi connection should already have been configured using Raspberry Pi Imager as described above. Verify that the Raspberry Pi can connect to the network and that SSH access works before changing the networking stack.
+
+Recent Raspberry Pi OS installations use NetworkManager by default. While convenient during initial setup, NetworkManager may add significant boot time on a small embedded system.
+
+NetworkManager should only be disabled after the replacement network configuration has been prepared and verified. Disabling NetworkManager before configuring `wpa_supplicant` may result in loss of network and SSH access.
 
 Use the following commands to identify services that slow down the boot process:
 
