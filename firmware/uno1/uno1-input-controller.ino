@@ -1447,6 +1447,7 @@ void handleIncomingLine(String s) {
   }
 
   if (s == "HB") {
+    bool wasLinked = piLinked;
     notePiSeen();
     if (powerState == POWER_REBOOT_ARMED) {
       powerState = POWER_NORMAL;
@@ -1458,28 +1459,52 @@ void handleIncomingLine(String s) {
       powerState = POWER_SHUTDOWN_ARMED;
       powerLinkLostMs = 0;
       setLocalDisplay("FINALIZING", "PLEASE WAIT");
+    } else if (!wasLinked && powerState == POWER_NORMAL && !keypadCalMode) {
+      // If HB is the first message after a timeout, clear any stale LINK LOST
+      // line immediately. Otherwise line 1 may remain stale until local input.
+      setLocalDisplay("PI LINKED", linkUiText());
+      drawStatus();
+      lastLcdRefreshMs = millis();
     }
     return;
   }
 
   if (s == "UI:READY") {
+    bool wasLinked = piLinked;
     notePiSeen();
     restartShutdownWaitIfPowerOk();
     piUiState = UI_READY;
     lastUiSeenMs = millis();
     if (powerState == POWER_NORMAL) {
-      setCurrentStatusLine2();
+      if (!wasLinked && !keypadCalMode) {
+        // UI:READY may be the first message after a timeout. Refresh both
+        // lines so stale LINK LOST is not left on line 1.
+        setLocalDisplay("PI LINKED", linkUiText());
+        drawStatus();
+        lastLcdRefreshMs = millis();
+      } else {
+        setCurrentStatusLine2();
+      }
     }
     return;
   }
 
   if (s == "UI:BUSY") {
+    bool wasLinked = piLinked;
     notePiSeen();
     restartShutdownWaitIfPowerOk();
     piUiState = UI_BUSY;
     lastUiSeenMs = millis();
     if (powerState == POWER_NORMAL) {
-      setCurrentStatusLine2();
+      if (!wasLinked && !keypadCalMode) {
+        // UI:BUSY may be the first message after a timeout. Refresh both
+        // lines so stale LINK LOST is not left on line 1.
+        setLocalDisplay("PI LINKED", linkUiText());
+        drawStatus();
+        lastLcdRefreshMs = millis();
+      } else {
+        setCurrentStatusLine2();
+      }
     }
     return;
   }
