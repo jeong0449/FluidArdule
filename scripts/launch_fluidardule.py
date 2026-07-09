@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260707h"
+SCRIPT_VERSION = "260710d"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -359,10 +359,11 @@ DEFAULT_RADIO_STATIONS = [
 USER_PRESET_RENAME_CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.,()"
 USER_PRESET_RENAME_MAX_LEN = 32
 
-POWER_MENU_ITEMS = ["Cancel", "Halt", "Restart Software", "Reboot"]
+POWER_MENU_ITEMS = ["Cancel", "Halt", "Restart Software", "Console", "Reboot"]
 POWER_CONFIRM_ITEMS = ["No", "Yes"]
 FLUID_ARDULE_SERVICE = "fluid_ardule.service"
 RESTART_SOFTWARE_MARKER = "/tmp/fluidardule_restart_software_pending"
+CONSOLE_HELPER = "/usr/local/sbin/fluidardule-console"
 
 # Sound Edit is a volatile, non-saving performance edit page.
 # CC7 Volume is intentionally excluded because the hardware pot controls volume.
@@ -3261,6 +3262,10 @@ class TFTDisplay:
             draw.text((52, 84), "Restarting software...", font=self.font_title, fill=FG)
             draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
             return
+        if state.power_confirm_action == "EXEC_CONSOLE":
+            draw.text((52, 84), "Entering console...", font=self.font_title, fill=FG)
+            draw.text((52, 126), "Please wait", font=self.font_body, fill=DIM)
+            return
         if state.power_confirm_action:
             draw.text((52, 70), f"{state.power_confirm_action}?", font=self.font_title, fill=FG)
             draw.text((52, 108), "Are you sure?", font=self.font_body, fill=DIM)
@@ -3269,24 +3274,32 @@ class TFTDisplay:
             start_y = 154
             row_h = 40
         else:
-            draw.text((52, 70), "Select action", font=self.font_body, fill=DIM)
+            draw.text((52, 60), "Select action", font=self.font_body, fill=DIM)
             labels = POWER_MENU_ITEMS
             current_idx = state.power_menu_index
-            row_h = 40
+            row_h = 34
+            highlight_h = 30
             rows_height = len(labels) * row_h
-            rows_top = 104
-            rows_bottom = self.height - 62
+            rows_top = 102
+            rows_bottom = self.height - 56
             start_y = rows_top + max(0, (rows_bottom - rows_top - rows_height) // 2)
         for i, label in enumerate(labels):
             top = start_y + i * row_h
             if i == current_idx:
-                draw.rounded_rectangle((52, top, self.width - 52, top + 32), radius=8, fill=SELECT_BG)
+                draw.rounded_rectangle((52, top, self.width - 52, top + highlight_h), radius=8, fill=SELECT_BG)
                 fill = FG
                 prefix = "▶ "
             else:
                 fill = DIM
                 prefix = "  "
-            draw.text((64, top), f"{prefix}{label}", font=self.font_body, fill=fill)
+            row_text = f"{prefix}{label}"
+            try:
+                tb = draw.textbbox((0, 0), row_text, font=self.font_body)
+                text_h = tb[3] - tb[1]
+                text_y = top + (highlight_h - text_h) // 2 - tb[1]
+            except Exception:
+                text_y = top + 4
+            draw.text((64, text_y), row_text, font=self.font_body, fill=fill)
     def _draw_quick_menu(self, draw):
         # Quick Menu is a shortcut overlay, not a normal page.
         # Do not draw the global Fluid Ardule header here; use the full height
@@ -8935,6 +8948,46 @@ def execute_power_action(action: str | None = None) -> None:
             notify_uno_power_state(action)
             time.sleep(1.0)
             subprocess.Popen(["sudo", "systemctl", "reboot"])
+        elif action == "Console":
+            state.power_confirm_action = "EXEC_CONSOLE"
+            state.power_confirm_index = 0
+            invalidate_full_display()
+            mark_dirty("Entering console...")
+            maybe_render(force=True)
+            time.sleep(0.25)
+
+            # Run the console helper immediately and check the result before
+            # exiting the Fluid Ardule main loop.  In a systemd service context,
+            # silently detached sudo failures can otherwise leave the TFT stuck
+            # on the "Entering console..." page with no visible error.
+            log("Console requested; running console helper")
+            try:
+                p = subprocess.run(
+                    ["sudo", "-n", CONSOLE_HELPER],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=3.0,
+                    check=False,
+                )
+            except Exception as exc:
+                state.power_confirm_action = None
+                mark_dirty("Console failed")
+                show_timed_modal_message("Console failed", hold_sec=1.5, subtext=str(exc)[:32])
+                log(f"Console helper exception: {exc}")
+                return
+
+            if p.returncode != 0:
+                out = (p.stdout or "").strip()
+                state.power_confirm_action = None
+                mark_dirty("Console failed")
+                show_timed_modal_message("Console failed", hold_sec=1.5, subtext=shorten_text(out or f"rc={p.returncode}", 32))
+                log(f"Console helper failed rc={p.returncode}: {out}")
+                return
+
+            log("Console helper completed; exiting Fluid Ardule main loop")
+            state.running = False
         elif action == "Restart Software":
             # Software restart should restart only this Python UI/runtime,
             # not ask systemd to restart the unit from inside the same unit.
@@ -9258,7 +9311,7 @@ def handle_button_event(btn_value: str) -> None:
         return
 
     if state.ui_mode == "power_menu":
-        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE"}:
+        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE", "EXEC_CONSOLE"}:
             mark_dirty("Power action running")
             return
         if state.power_confirm_action:
@@ -9319,6 +9372,8 @@ def handle_button_event(btn_value: str) -> None:
             elif item == "Restart Software":
                 # Restart only the Fluid Ardule systemd service, not the Raspberry Pi.
                 execute_power_action("Restart Software")
+            elif item == "Console":
+                execute_power_action("Console")
             elif item == "Reboot":
                 # Reboot uses the same single-step UX as Halt: show a short
                 # feedback page, notify UNO-1, then call systemd reboot.
@@ -10537,7 +10592,7 @@ def handle_encoder_navigation_step(step: int) -> bool:
         return True
 
     if state.ui_mode == "power_menu":
-        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE"}:
+        if state.power_confirm_action in {"EXEC_HALT", "EXEC_REBOOT", "EXEC_RESTART_SOFTWARE", "EXEC_CONSOLE"}:
             mark_dirty("Power action running")
             return True
         if state.power_confirm_action:
