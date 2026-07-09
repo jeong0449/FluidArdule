@@ -242,6 +242,19 @@ max_framebuffers=2
 dtoverlay=piscreen,spi0-0,rotate=90,speed=32000000,fps=30
 ```
 
+> [!NOTE]
+> The `rotate=90` option changes the ILI9486 framebuffer from its native portrait orientation to the 480×320 landscape orientation used by the Fluid Ardule UI.
+>
+> In the reference Fluid Ardule hardware, the TFT is then physically mounted in the opposite landscape orientation to simplify connector and cable routing inside the enclosure. This makes the raw framebuffer output appear 180 degrees inverted relative to the normal viewing direction.
+>
+> The Fluid Ardule runtime UI compensates for this physical mounting orientation by rotating the rendered screen by 180 degrees in software. This is intentional and is separate from the `rotate=90` framebuffer setting.
+>
+> Linux framebuffer console output does not pass through the Fluid Ardule runtime rendering path. Therefore, when the TFT is used as a text console, the reference system also adds the following kernel parameter to `/boot/firmware/cmdline.txt`:
+>
+> `fbcon=rotate:2`
+>
+> The `cmdline.txt` file must remain a single line. Display rotation settings may need to be adjusted if a different TFT mounting direction or enclosure layout is used.
+
 Reboot:
 
 ```bash
