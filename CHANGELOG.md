@@ -6,6 +6,18 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260710d
+
+- Added `Console` to the Power menu for switching the TFT from the Fluid Ardule UI to the Linux framebuffer console.
+- Added support for the privileged `/usr/local/sbin/fluidardule-console` helper.
+- Console helper execution is checked before the Fluid Ardule main loop exits, preventing silent failures in the systemd service environment.
+- Added `Entering console...` and console failure feedback.
+- Refined the Power menu layout to fit all actions on one screen.
+- Adjusted menu spacing and vertically centered labels within the selection highlight.
+- No changes were made to audio engines, MIDI routing, playback, or volume handling.
+
+---
+
 ## 260707h — Combi state locking, faster loading, and recovery control cleanup
 
 ### Changed
