@@ -70,7 +70,7 @@ Install the required packages:
 ```bash
 sudo apt update
 sudo apt upgrade
-sudo apt install fbi alsa-utils fluidsynth yoshimi python3 python3-serial python3-mido python3-rtmidi dhcpcd
+sudo apt install fbi alsa-utils fluidsynth yoshimi python3 python3-serial python3-mido python3-rtmidi dhcpcd git
 ```
 
 ---
@@ -275,7 +275,6 @@ ls /dev/fb*
 Test display (use [FluidArdule.png](/images/FluidArdule.png)):
 
 ```bash
-sudo apt install fbi
 sudo fbi -T 1 -d /dev/fb1 -a FluidArdule.png
 
 # Manually clear the framebuffer (/dev/fb1)
