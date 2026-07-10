@@ -24,6 +24,20 @@ https://www.raspberrypi.com/software/
 
 It is strongly recommended to configure the initial Wi-Fi network and enable SSH using Raspberry Pi Imager before writing the OS image. This allows the Raspberry Pi to connect to the network and accept SSH connections from the first boot.
 
+After the first boot, the Raspberry Pi must be located on the local network before connecting through SSH. A convenient method is to use the [Fing](https://www.fing.com/products/fing-app?utm_source=chatgpt.com) mobile app to scan the local network and identify the Raspberry Pi and its assigned IP address.
+
+Once the IP address is known, connect from another computer using:
+
+```bash
+ssh pi@<IP_ADDRESS>
+```
+
+For example:
+
+```bash
+ssh pi@192.168.0.123
+```
+
 Fluid Ardule is a DIY Raspberry Pi synthesizer project rather than a consumer appliance. Basic familiarity with Raspberry Pi OS, SSH, and command-line system administration is recommended.
 
 The Fluid Ardule runtime interface is intentionally focused on musical operation and does not provide a general-purpose text entry interface for entering new Wi-Fi credentials. Additional wireless networks can be configured later through the Raspberry Pi OS networking configuration.
@@ -31,6 +45,7 @@ The Fluid Ardule runtime interface is intentionally focused on musical operation
 This design avoids adding a complex on-device network setup system and keeps the runtime environment lightweight and predictable.
 
 This guide assumes the default Raspberry Pi OS user account `pi`.
+
 
 #### Environment (reference system)
 
