@@ -477,109 +477,89 @@ systemctl is-active dhcpcd.service
 
 ---
 
-## 10. Diagnostics
+## 10. Network Diagnostics
 
-### Quick Network Status
+### Quick Connection Check
+
+Check the currently connected Wi-Fi network and assigned IP address:
 
 ```bash
 iwgetid
 hostname -I
 ```
 
-These commands display:
+Example:
 
-- current connected SSID
-- current IP address
-
-For continuously updated status:
-
-```bash
-watch -n 1 "iwgetid ; hostname -I"
+```text
+wlan0    ESSID:"GomTaeng"
+192.168.0.123
 ```
 
----
+This confirms that `wlan0` is associated with a Wi-Fi network and has received an IP address.
 
-### Detailed Wireless Diagnostics
+### Detailed Network Status
+
+For more detailed wireless and routing information:
 
 ```bash
 iw dev wlan0 link
-ip a
+ip route
 ```
 
-These commands provide:
+Example:
 
-- signal strength
-- frequency/channel
-- bitrate
-- interface state
-- full IP/interface information
+```text
+Connected to aa:bb:cc:dd:ee:ff (on wlan0)
+        SSID: GomTaeng
+        freq: 5180
+        signal: -42 dBm
 
----
-
-### Network Scan Diagnostics
-
-```bash
-sudo iwlist wlan0 scan | grep ESSID
+default via 192.168.0.1 dev wlan0
+192.168.0.0/24 dev wlan0 scope link
 ```
 
-or:
+The important points are the connected SSID, signal level, and the presence of a default route through `wlan0`.
+
+### Scan for Nearby Wi-Fi Networks
+
+To check whether a wireless network is visible:
 
 ```bash
 sudo iw dev wlan0 scan | grep SSID
 ```
 
-These commands are useful when an access point or hotspot does not appear in the Fluid Ardule Wi-Fi menu.
-
----
-
-### Wi-Fi Service Status
-
-```bash
-systemctl status wpa_supplicant@wlan0
-journalctl -u wpa_supplicant@wlan0
-```
-
-These commands are useful for diagnosing:
-
-- authentication failures
-- reconnection loops
-- rfkill issues
-- service startup problems
-- configuration errors
-
----
-
-### Notes About `wpa_cli`
-
-Some Raspberry Pi OS configurations using:
-
-```bash
-wpa_supplicant@wlan0
-```
-
-may not expose a usable `wpa_cli` control socket.
-
-In such environments:
-
-```bash
-wpa_cli -i wlan0 status
-```
-
-may fail with:
+Example:
 
 ```text
-Failed to connect to non-global ctrl_ifname: wlan0
+SSID: GomTaeng
+SSID: GenoGlobe
+SSID: PhoneHotspot
 ```
 
-Even in this case, Wi-Fi itself may still function normally.
+This is useful when an expected network does not appear in the Fluid Ardule Wi-Fi menu.
 
-For this reason, Fluid Ardule primarily relies on:
+### Wi-Fi Service Status and Logs
 
-- configuration editing
-- priority-based reconnection
-- service restart
+Check the interface-specific `wpa_supplicant` service:
 
-rather than direct `wpa_cli select_network` control.
+```bash
+systemctl status wpa_supplicant@wlan0.service
+```
+
+A normally running service should include:
+
+```text
+Active: active (running)
+```
+
+For startup or reconnection problems, inspect the service log:
+
+```bash
+journalctl -u wpa_supplicant@wlan0.service
+```
+
+These commands are usually sufficient to determine whether a problem is related to Wi-Fi association, IP configuration, or service startup.
+
 
 ---
 
