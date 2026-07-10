@@ -102,6 +102,9 @@ Consider disabling or removing unnecessary services to improve boot performance:
 sudo systemctl stop NetworkManager.service
 sudo systemctl disable NetworkManager.service
 
+# Alternatively, use the following single command:
+sudo systemctl disable --now NetworkManager.service
+
 # Optional (for minimal/headless setups):
 sudo apt purge cloud-init -y
 ```
