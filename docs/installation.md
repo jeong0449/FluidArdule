@@ -20,9 +20,9 @@ https://www.raspberrypi.com/software/
 
 > Be careful to select the correct device to avoid data loss.
 
-#### Initial Wi-Fi Setup
+#### Initial Wi-Fi and SSH Setup
 
-It is strongly recommended to configure the initial Wi-Fi network using Raspberry Pi Imager before writing the OS image.
+It is strongly recommended to configure the initial Wi-Fi network and enable SSH using Raspberry Pi Imager before writing the OS image. This allows the Raspberry Pi to connect to the network and accept SSH connections from the first boot.
 
 Fluid Ardule is a DIY Raspberry Pi synthesizer project rather than a consumer appliance. Basic familiarity with Raspberry Pi OS, SSH, and command-line system administration is recommended.
 
@@ -53,10 +53,9 @@ sudo raspi-config
 ```
 
 Recommended:
-- Systems Options → Boot → Console
-- Interface Options → SSH → Yes
+- System Options → Boot → Console
 - Interface Options → SPI → Yes
-- Interface Options → Serial Port → Yes (if you want to use UART as a console interface, for example via PuTTY)
+- Interface Options → Serial Port → Enable as needed (for example, when using UART as a console interface via PuTTY)
 - Localisation Options → Choose as you want
 
 Reboot:
