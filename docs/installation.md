@@ -106,6 +106,9 @@ sudo systemctl disable NetworkManager.service
 sudo systemctl disable --now NetworkManager.service
 
 # Optional (for minimal/headless setups):
+# After the initial Raspberry Pi Imager configuration has been applied,
+# cloud-init is generally no longer needed on a dedicated appliance.
+# Removing it may reduce boot-time service overhead.
 sudo apt purge cloud-init -y
 ```
 
