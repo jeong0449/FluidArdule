@@ -27,83 +27,293 @@ These components provide reliable automatic Wi-Fi connectivity while remaining c
 
 Fluid Ardule is designed as a DIY embedded musical instrument, not as a general-purpose consumer device.
 
-Users are expected to have basic familiarity with Raspberry Pi OS and SSH. The initial Wi-Fi network should normally be configured using Raspberry Pi Imager when the OS image is prepared.
+Users are expected to have basic familiarity with Raspberry Pi OS, SSH, and command-line system administration. The initial Wi-Fi network may be configured using Raspberry Pi Imager so that the Raspberry Pi can be reached during the first stage of installation.
 
-The Fluid Ardule runtime UI intentionally does not provide a general-purpose text entry system for entering arbitrary SSIDs or Wi-Fi passwords. Network configuration is considered a system administration task rather than a musical performance function.
+The Fluid Ardule runtime UI intentionally does not provide a general-purpose text entry system for entering arbitrary SSIDs or Wi-Fi passwords. Network configuration is treated as a system administration task rather than a musical performance function.
 
-Additional Wi-Fi networks may initially be added while NetworkManager is still available, for example with `nmcli` or `nmtui`. Their saved connection profiles can then be migrated to the Fluid Ardule `wpa_supplicant` configuration before NetworkManager is disabled.
+In the setup described in this guide, NetworkManager is disabled and the final Wi-Fi configuration is created manually for `wpa_supplicant`. Additional known networks are added by editing the `wpa_supplicant` configuration file.
 
-Once the known networks have been migrated, Fluid Ardule can select and prioritize them through its runtime interface.
+Once configured, Fluid Ardule can select and prioritize known networks through its runtime interface.
 
 This separation is intentional:
 
-- Raspberry Pi OS handles network configuration.
-- Fluid Ardule manages selection among already configured networks.
-- The runtime UI remains focused on immediate musical operation.
+- system configuration defines known Wi-Fi networks and credentials
+- `wpa_supplicant` handles Wi-Fi association and reconnection
+- `dhcpcd` handles IP configuration
+- Fluid Ardule manages selection among already configured networks
+- the runtime UI remains focused on immediate musical operation
 
 This approach avoids captive portals, temporary access-point modes, on-screen keyboards, and other network provisioning mechanisms that would increase system complexity and maintenance burden.
 
 ---
 
-## 3. Current Fluid Ardule Networking Approach
+## 3. From a Fresh Raspberry Pi OS Installation to the Fluid Ardule Stack
 
-Raspberry Pi OS Bookworm and later use NetworkManager as the default network manager. Fluid Ardule replaces that default stack with `dhcpcd` and `wpa_supplicant` to reduce unnecessary service overhead and keep networking simple.
+### 3.1 Fresh installation state
 
-The current Fluid Ardule system uses the interface-specific systemd service:
+Raspberry Pi OS Bookworm and later use NetworkManager as the default network manager. When the initial Wi-Fi network is configured with Raspberry Pi Imager, a freshly installed system may show the following state:
 
 ```bash
-wpa_supplicant@wlan0.service
+systemctl is-active NetworkManager
 ```
 
-The Debian systemd template for this service starts `wpa_supplicant` with an interface-specific configuration file. For the `wlan0` instance, the expected file is:
+Example:
 
-```plaintext
-/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+```text
+active
 ```
 
-The `-wlan0` filename is **not a Raspberry Pi OS release convention** and is not a newer replacement for:
-
-```plaintext
-/etc/wpa_supplicant/wpa_supplicant.conf
-```
-
-`wpa_supplicant` itself does not require one universal configuration filename. The active file is determined by the `-c` option used when the process is started.
-
-Fluid Ardule originally used the traditional `wpa_supplicant.conf` during manual Wi-Fi setup. The interface-specific filename was adopted when Wi-Fi startup was moved to the `wpa_supplicant@wlan0.service` systemd service, whose template expects a configuration file corresponding to the interface instance.
-
-The current setup retains `wpa_supplicant@wlan0.service` and `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` because this arrangement is already used by the Fluid Ardule Wi-Fi management code and has proven stable in the reference system. A different `wpa_supplicant` startup method could use a different configuration filename.
-
----
-
-## 4. Determining the Active Wi-Fi Configuration
-
-Check which service is actually active:
+The active `wpa_supplicant` unit may appear as:
 
 ```bash
 systemctl list-units | grep wpa_supplicant
 ```
 
-Or:
-
-```bash
-ps -ef | grep wpa_supplicant
-```
-
-Typical output:
+Example:
 
 ```text
-/usr/sbin/wpa_supplicant \
-   -c/etc/wpa_supplicant/wpa_supplicant-wlan0.conf \
-   -iwlan0
+wpa_supplicant.service    loaded active running    WPA supplicant
 ```
 
-This indicates that the running `wpa_supplicant` process was explicitly started with:
+The running process may look like:
+
+```text
+/usr/sbin/wpa_supplicant -u -s -O DIR=/run/wpa_supplicant GROUP=netdev
+```
+
+This process has neither `-i wlan0` nor a `-c` configuration-file option. It is the global D-Bus-enabled `wpa_supplicant` daemon used by NetworkManager, not an interface-specific `wpa_supplicant@wlan0.service` instance.
+
+The NetworkManager view can be checked with:
+
+```bash
+nmcli device status
+```
+
+On a reference fresh installation configured by Raspberry Pi Imager, the Wi-Fi connection appeared as:
+
+```text
+DEVICE         TYPE      STATE                   CONNECTION
+wlan0          wifi      connected               netplan-wlan0-GomTaeng
+lo             loopback  connected (externally)  lo
+p2p-dev-wlan0  wifi-p2p  disconnected            --
+eth0           ethernet  unavailable             --
+```
+
+The connection name `netplan-wlan0-GomTaeng` shows that the initial Wi-Fi configuration has entered the default Raspberry Pi OS networking stack and is being managed by NetworkManager.
+
+Conceptually, the fresh installation is:
+
+```text
+Raspberry Pi Imager
+        |
+        v
+initial network configuration
+        |
+        v
+NetworkManager
+        |
+        | D-Bus
+        v
+wpa_supplicant.service
+        |
+        v
+      wlan0
+```
+
+At this stage, neither:
+
+```plaintext
+/etc/wpa_supplicant/wpa_supplicant.conf
+```
+
+nor:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 ```
 
-as its configuration file.
+should be assumed to be the active Wi-Fi configuration merely because the file exists. The running `wpa_supplicant` process has no `-c` option selecting either file.
+
+### 3.2 Why Fluid Ardule moved to `wpa_supplicant@wlan0.service`
+
+Fluid Ardule intentionally replaces the default NetworkManager-based arrangement with a smaller and more explicit runtime stack.
+
+The present design originated from a practical bring-up sequence. After moving away from NetworkManager, Wi-Fi association could be established manually with an explicit command of the following form:
+
+```bash
+sudo wpa_supplicant -B -i wlan0 \
+    -c /etc/wpa_supplicant/wpa_supplicant.conf
+```
+
+This demonstrated that:
+
+- the wireless interface `wlan0` was usable
+- `wpa_supplicant` itself was working
+- the Wi-Fi configuration was valid
+- the remaining problem was automatic startup and service management
+
+The next requirement was therefore to reproduce the successful interface-specific manual command automatically during boot.
+
+For this purpose, Fluid Ardule adopted the systemd instance service:
+
+```bash
+wpa_supplicant@wlan0.service
+```
+
+The `wlan0` instance was selected because the successfully tested manual command explicitly operated on the Raspberry Pi Wi-Fi interface:
+
+```text
+-i wlan0
+```
+
+The Debian systemd template for `wpa_supplicant@.service` uses the instance name to select both the interface and an interface-specific configuration file. For the `wlan0` instance, the expected file is:
+
+```plaintext
+/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+```
+
+Conceptually:
+
+```text
+successful manual test
+wpa_supplicant -i wlan0 -c wpa_supplicant.conf
+                    |
+                    v
+need automatic startup at boot
+                    |
+                    v
+wpa_supplicant@wlan0.service
+                    |
+                    v
+wpa_supplicant-wlan0.conf
+```
+
+Therefore, the `-wlan0` filename was not chosen because Raspberry Pi OS introduced a newer configuration-file convention. It appeared as a consequence of choosing the interface-specific systemd service that matched the successful manual `-i wlan0` test.
+
+`wpa_supplicant` itself does not require one universal configuration filename. The active file is determined by the `-c` option used when the process is started.
+
+### 3.3 Current Fluid Ardule target stack
+
+Fluid Ardule replaces NetworkManager with:
+
+- `wpa_supplicant@wlan0.service` for Wi-Fi association
+- `dhcpcd.service` for IP configuration
+
+The resulting arrangement is:
+
+```text
+/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+                    |
+                    v
+wpa_supplicant@wlan0.service
+                    |
+                    v
+                  wlan0
+                    |
+                    v
+              dhcpcd.service
+                    |
+                    v
+          IP address / route / DNS
+```
+
+The current setup retains `wpa_supplicant@wlan0.service` and `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` because this arrangement is already used by the Fluid Ardule Wi-Fi management code and has proven stable in the reference system.
+
+
+## 4. Manual NetworkManager Replacement
+
+Before disabling NetworkManager, verify that local console access is available. Disabling the active network manager will interrupt the current Wi-Fi and SSH connection.
+
+Install the required packages if necessary:
+
+```bash
+sudo apt update
+sudo apt install dhcpcd wpasupplicant
+```
+
+Create the interface-specific Wi-Fi configuration file:
+
+```bash
+sudo nano /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+```
+
+A minimal example is:
+
+```conf
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=KR
+
+network={
+    ssid="YOUR_SSID"
+    psk=YOUR_GENERATED_PSK
+    priority=10
+}
+```
+
+Generate the PSK with `wpa_passphrase` rather than manually calculating it:
+
+```bash
+wpa_passphrase "YOUR_SSID" "YOUR_PASSWORD"
+```
+
+Copy the generated `network={...}` block into `wpa_supplicant-wlan0.conf`.
+
+Secure the configuration file:
+
+```bash
+sudo chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+```
+
+The fresh Raspberry Pi OS installation may already have the global D-Bus-managed `wpa_supplicant.service` active under NetworkManager. The target Fluid Ardule configuration instead uses the interface-specific `wpa_supplicant@wlan0.service`.
+
+Before changing services, remember that disabling NetworkManager will interrupt the current Wi-Fi and SSH connection.
+
+Disable NetworkManager and the global `wpa_supplicant` service:
+
+```bash
+sudo systemctl disable --now NetworkManager.service
+sudo systemctl disable --now wpa_supplicant.service
+```
+
+Then enable the Fluid Ardule replacement services:
+
+```bash
+sudo systemctl enable wpa_supplicant@wlan0.service
+sudo systemctl enable dhcpcd.service
+```
+
+The explicit disabling of `wpa_supplicant.service` avoids leaving the global D-Bus-managed daemon active alongside the interface-specific `wpa_supplicant@wlan0.service`.
+
+Reboot:
+
+```bash
+sudo reboot
+```
+
+After reboot, verify the active Wi-Fi process:
+
+```bash
+systemctl list-units | grep wpa_supplicant
+```
+
+and:
+
+```bash
+ps -ef | grep '[w]pa_supplicant'
+```
+
+Typical output should show a process started with:
+
+```text
+/usr/sbin/wpa_supplicant    -c/etc/wpa_supplicant/wpa_supplicant-wlan0.conf    -iwlan0
+```
+
+This confirms that the running `wpa_supplicant` process is using:
+
+```plaintext
+/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+```
 
 For the systemd definition itself, inspect the service template:
 
@@ -111,9 +321,16 @@ For the systemd definition itself, inspect the service template:
 systemctl cat wpa_supplicant@wlan0.service
 ```
 
-The `ExecStart=` line determines the actual configuration filename. The file used by `wpa_supplicant` is selected by its `-c` option; the program does not require one universal configuration filename.
+The `ExecStart=` line determines the actual configuration filename. The file used by `wpa_supplicant` is selected by its `-c` option.
 
----
+Also verify Wi-Fi association and IP configuration:
+
+```bash
+iw dev wlan0 link
+hostname -I
+ip route
+```
+
 
 ## 5. Safe Configuration Generation
 
@@ -340,9 +557,107 @@ This approach has proven stable for:
 
 ## 12. Summary
 
-- NetworkManager is intentionally avoided
+- A fresh Raspberry Pi OS installation uses NetworkManager and the global D-Bus-enabled `wpa_supplicant.service`
+- Raspberry Pi Imager Wi-Fi configuration may appear in NetworkManager as a `netplan-wlan0-...` connection
+- Fluid Ardule intentionally replaces the default NetworkManager-based stack
+- `wpa_supplicant@wlan0.service` was chosen to automate a manually verified `wpa_supplicant -i wlan0` Wi-Fi setup
+- `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` follows from the interface-specific systemd service template
 - `dhcpcd` handles IP assignment
-- `wpa_supplicant` handles Wi-Fi
-- Raspberry Pi OS performs automatic reconnection
-- Fluid Ardule acts as a lightweight Wi-Fi front-end
-- priority-based reconnect is preferred over direct low-level control
+- Fluid Ardule acts as a lightweight front-end for selecting among already configured Wi-Fi networks
+- priority-based reconnection is preferred over direct low-level control
+
+---
+
+## 13. Future Idea: Migrating NetworkManager Wi-Fi Profiles
+
+The manual configuration described in this guide is simple and explicit, but entering SSIDs and passwords again can be inconvenient, especially on a small console-only system.
+
+A possible future improvement is to use NetworkManager only during initial Wi-Fi provisioning and then migrate its saved connection information to the Fluid Ardule `wpa_supplicant` configuration.
+
+A possible workflow is:
+
+1. Configure the primary Wi-Fi network with Raspberry Pi Imager.
+2. Boot Raspberry Pi OS with NetworkManager still active.
+3. Add other required networks, such as a mobile hotspot, using `nmcli` or `nmtui`.
+4. Set the desired NetworkManager autoconnect priorities.
+5. Run a Fluid Ardule migration script.
+6. Generate `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` from the saved NetworkManager profiles.
+7. Disable NetworkManager.
+8. Enable `wpa_supplicant@wlan0.service` and `dhcpcd.service`.
+9. Reboot and verify Wi-Fi association and IP configuration.
+
+Conceptually:
+
+```text
+Raspberry Pi Imager / nmcli / nmtui
+                 |
+                 v
+NetworkManager connection profiles
+                 |
+                 |  migration script
+                 v
+/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+                 |
+                 v
+wpa_supplicant@wlan0.service + dhcpcd.service
+```
+
+NetworkManager system connection profiles are normally stored under:
+
+```plaintext
+/etc/NetworkManager/system-connections/
+```
+
+A migration script could read the relevant Wi-Fi properties, such as:
+
+```text
+802-11-wireless.ssid
+802-11-wireless-security.key-mgmt
+802-11-wireless-security.psk
+connection.autoconnect
+connection.autoconnect-priority
+```
+
+and convert supported profiles into `wpa_supplicant` `network={...}` blocks.
+
+For example, relative NetworkManager priorities could be preserved as `wpa_supplicant` priorities:
+
+```conf
+network={
+    ssid="HomeWiFi"
+    psk=...
+    priority=20
+}
+
+network={
+    ssid="PhoneHotspot"
+    psk=...
+    priority=10
+}
+```
+
+Only the relative ordering of priority values is important for this use case.
+
+### Limitations and safety considerations
+
+Such a migration tool should initially support only simple, known configurations, such as WPA/WPA2 personal networks using a pre-shared key.
+
+It should explicitly detect or reject unsupported configurations rather than silently generating an incorrect Wi-Fi setup. Examples include:
+
+- enterprise authentication (802.1X / EAP)
+- externally managed secrets
+- unsupported WPA3-only settings
+- unusual hidden-network configurations
+- manually configured static IP settings
+
+The script should also:
+
+- back up the existing `wpa_supplicant` configuration
+- write the new configuration to a temporary file first
+- validate that required fields are present
+- apply restrictive file permissions
+- avoid disabling NetworkManager until conversion succeeds
+- clearly report which profiles were migrated or skipped
+
+This migration approach is **not currently part of the required Fluid Ardule installation procedure**. It is a possible future convenience feature intended to simplify Wi-Fi provisioning while retaining the lightweight `wpa_supplicant` and `dhcpcd` runtime stack.
+
