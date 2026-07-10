@@ -1,6 +1,6 @@
 # Installation Guide
 
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 🚧 This document is currently under construction and may contain errors or incomplete instructions.
 
@@ -165,7 +165,7 @@ sudo EDITOR=vim visudo
 Add the following line at the end of the file:
 
 ```
-pi ALL=(ALL) NOPASSWD: /usr/sbin/shutdown, /usr/sbin/reboot
+pi ALL=(root) NOPASSWD: /usr/sbin/shutdown, /usr/sbin/reboot
 ```
 
 Make sure the command paths are correct on your system.
@@ -796,6 +796,81 @@ Enable:
 ```bash
 sudo systemctl enable fluid_ardule.service
 ```
+
+---
+
+### 4.3 TFT Console Mode
+
+Fluid Ardule can temporarily hand the TFT framebuffer over to the Linux text console for system configuration and maintenance. A USB keyboard can then be used directly on the Raspberry Pi.
+
+The Power menu `Console` action uses a small privileged helper to switch virtual console 1 to the TFT framebuffer.
+
+Create the console helper:
+
+```bash
+sudo nano /usr/local/sbin/fluidardule-console
+```
+
+Add:
+
+```bash
+#!/bin/bash
+sleep 1
+/usr/bin/con2fbmap 1 1
+/usr/bin/chvt 1
+```
+
+Create the return helper:
+
+```bash
+sudo nano /usr/local/sbin/fluidardule-return
+```
+
+Add:
+
+```bash
+#!/bin/bash
+set -e
+
+/usr/bin/con2fbmap 1 0
+/bin/systemctl start fluid_ardule.service
+```
+
+Make both helpers executable:
+
+```bash
+sudo chmod 755 /usr/local/sbin/fluidardule-console
+sudo chmod 755 /usr/local/sbin/fluidardule-return
+```
+
+The Fluid Ardule service runs as user `pi`. Allow only these console helpers to run as `root` without a password.
+
+Edit the sudoers file using `visudo`:
+
+```bash
+sudo visudo
+```
+
+Add the following separate rule:
+
+```text
+pi ALL=(root) NOPASSWD: /usr/local/sbin/fluidardule-console, /usr/local/sbin/fluidardule-return
+```
+
+> [!NOTE]
+> This rule is intentionally separate from the shutdown/reboot rule configured in Section 1.4. Both rules restrict passwordless execution to explicitly listed commands and run them as `root`.
+
+#### Enter and leave Console mode
+
+Select `Console` from the Fluid Ardule Power menu. The runtime exits normally and the helper maps Linux virtual console 1 to `/dev/fb1`.
+
+To return to Fluid Ardule, run the following command from the TFT console:
+
+```bash
+sudo fluidardule-return
+```
+
+The `fbcon=rotate:2` setting described in Section 2.1 keeps the Linux text console aligned with the physical TFT orientation used by the reference Fluid Ardule hardware.
 
 ---
 
