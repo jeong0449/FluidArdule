@@ -147,10 +147,10 @@ sudo wpa_supplicant -B -i wlan0 \
 
 This demonstrated that:
 
-- the wireless interface `wlan0` was usable
-- `wpa_supplicant` itself was working
-- the Wi-Fi configuration was valid
-- the remaining problem was automatic startup and service management
+* the wireless interface `wlan0` was usable
+* `wpa_supplicant` itself was working
+* the Wi-Fi configuration was valid
+* the remaining problem was automatic startup and service management
 
 The next requirement was therefore to reproduce the successful interface-specific manual command automatically during boot.
 
@@ -160,13 +160,46 @@ For this purpose, Fluid Ardule adopted the systemd instance service:
 wpa_supplicant@wlan0.service
 ```
 
-The `wlan0` instance was selected because the successfully tested manual command explicitly operated on the Raspberry Pi Wi-Fi interface:
+The relationship between the service instance, the wireless interface, and the configuration filename can be verified directly by inspecting the service template:
+
+```bash
+systemctl cat wpa_supplicant@wlan0.service
+```
+
+The relevant part of the systemd unit is:
+
+```ini
+# NetworkManager users will probably want the dbus version instead.
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/wpa_supplicant -c/etc/wpa_supplicant/wpa_supplicant-%I.conf -i%I
+ExecReload=/bin/kill -HUP $MAINPID
+```
+
+In a systemd template unit, `%I` is replaced by the instance name. Therefore, starting:
+
+```bash
+wpa_supplicant@wlan0.service
+```
+
+causes the `ExecStart` command to resolve effectively to:
+
+```bash
+/usr/sbin/wpa_supplicant \
+    -c/etc/wpa_supplicant/wpa_supplicant-wlan0.conf \
+    -iwlan0
+```
+
+This closely matches the manually verified Wi-Fi setup: `wpa_supplicant` is started explicitly for `wlan0` and is given an explicit configuration file.
+
+The `wlan0` instance was therefore selected because the successful manual command had already established that Wi-Fi association worked when `wpa_supplicant` operated directly on:
 
 ```text
 -i wlan0
 ```
 
-The Debian systemd template for `wpa_supplicant@.service` uses the instance name to select both the interface and an interface-specific configuration file. For the `wlan0` instance, the expected file is:
+Once `wpa_supplicant@wlan0.service` was selected, the interface-specific configuration filename followed directly from the systemd service template:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
@@ -182,15 +215,23 @@ wpa_supplicant -i wlan0 -c wpa_supplicant.conf
 need automatic startup at boot
                     |
                     v
-wpa_supplicant@wlan0.service
+choose interface-specific systemd service
                     |
                     v
-wpa_supplicant-wlan0.conf
+wpa_supplicant@wlan0.service
+                    |
+                    |  %I = wlan0
+                    v
+-iwlan0
+-c/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 ```
 
-Therefore, the `-wlan0` filename was not chosen because Raspberry Pi OS introduced a newer configuration-file convention. It appeared as a consequence of choosing the interface-specific systemd service that matched the successful manual `-i wlan0` test.
+The service template also explicitly notes that NetworkManager users will normally want the D-Bus version of `wpa_supplicant`. This is consistent with the freshly installed Raspberry Pi OS system described in the previous section, where NetworkManager uses the global `wpa_supplicant.service` process started with the `-u` option.
+
+Therefore, the `-wlan0` filename was not chosen because Raspberry Pi OS introduced a newer configuration-file convention. It appeared as a direct consequence of choosing the interface-specific `wpa_supplicant@wlan0.service` that matched the previously verified manual `-i wlan0` setup.
 
 `wpa_supplicant` itself does not require one universal configuration filename. The active file is determined by the `-c` option used when the process is started.
+
 
 ### 3.3 Current Fluid Ardule target stack
 
