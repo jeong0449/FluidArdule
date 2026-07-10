@@ -31,7 +31,9 @@ Users are expected to have basic familiarity with Raspberry Pi OS and SSH. The i
 
 The Fluid Ardule runtime UI intentionally does not provide a general-purpose text entry system for entering arbitrary SSIDs or Wi-Fi passwords. Network configuration is considered a system administration task rather than a musical performance function.
 
-Additional Wi-Fi networks may be added manually through the Raspberry Pi OS networking configuration. Once configured, Fluid Ardule can select and prioritize known networks through its runtime interface.
+Additional Wi-Fi networks may initially be added while NetworkManager is still available, for example with `nmcli` or `nmtui`. Their saved connection profiles can then be migrated to the Fluid Ardule `wpa_supplicant` configuration before NetworkManager is disabled.
+
+Once the known networks have been migrated, Fluid Ardule can select and prioritize them through its runtime interface.
 
 This separation is intentional:
 
@@ -43,33 +45,35 @@ This approach avoids captive portals, temporary access-point modes, on-screen ke
 
 ---
 
-## 2. Recommended Raspberry Pi OS Approach
+## 3. Recommended Networking Approach
 
-Recent Raspberry Pi OS installations commonly use the interface-specific systemd service:
+Raspberry Pi OS Bookworm and later use NetworkManager as the default network manager. Fluid Ardule intentionally replaces that default stack with `dhcpcd` and a directly managed `wpa_supplicant` instance.
+
+Fluid Ardule explicitly uses the interface-specific systemd service:
 
 ```bash
 wpa_supplicant@wlan0.service
 ```
 
-In this mode, the active configuration file is typically:
+The Debian systemd template for this service starts `wpa_supplicant` with an interface-specific configuration file. For the `wlan0` instance, the expected file is:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 ```
 
-instead of the older traditional file:
+The `-wlan0` filename is therefore **not a Raspberry Pi OS release convention** and is not a newer replacement for:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant.conf
 ```
 
-Depending on installation history and OS version, both files may exist simultaneously.
+It is a consequence of deliberately using the `wpa_supplicant@wlan0.service` systemd instance. A different startup method may use a different configuration file.
 
-Fluid Ardule currently assumes the interface-specific systemd approach because it has proven stable and predictable in headless Raspberry Pi environments.
+Fluid Ardule standardizes on `wpa_supplicant@wlan0.service` and `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` so that the service and its configuration source are explicit and reproducible.
 
 ---
 
-## 3. Determining the Active Wi-Fi Configuration
+## 4. Determining the Active Wi-Fi Configuration
 
 Check which service is actually active:
 
@@ -91,17 +95,25 @@ Typical output:
    -iwlan0
 ```
 
-This indicates that the system is using:
+This indicates that the running `wpa_supplicant` process was explicitly started with:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 ```
 
-as the active Wi-Fi configuration file.
+as its configuration file.
+
+For the systemd definition itself, inspect the service template:
+
+```bash
+systemctl cat wpa_supplicant@wlan0.service
+```
+
+The `ExecStart=` line determines the actual configuration filename. The file used by `wpa_supplicant` is selected by its `-c` option; the program does not require one universal configuration filename.
 
 ---
 
-## 4. Safe Configuration Generation
+## 5. Safe Configuration Generation
 
 Generate network configuration using:
 
@@ -123,7 +135,7 @@ sudo chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 
 ---
 
-## 5. Wi-Fi Priority Example
+## 6. Wi-Fi Priority Example
 
 Example configuration:
 
@@ -147,7 +159,7 @@ This mechanism is heavily used by Fluid Ardule because it provides robust automa
 
 ---
 
-## 6. Fluid Ardule Wi-Fi Selector Behavior
+## 7. Fluid Ardule Wi-Fi Selector Behavior
 
 Fluid Ardule does not directly manipulate low-level Wi-Fi hardware.
 
@@ -168,7 +180,7 @@ Advantages:
 
 ---
 
-## 7. Manual Wi-Fi Bring-Up (Debug / Recovery)
+## 8. Manual Wi-Fi Bring-Up (Debug / Recovery)
 
 If automatic configuration fails:
 
@@ -188,9 +200,9 @@ It is not recommended for normal operation because it may interfere with systemd
 
 ---
 
-## 8. dhcpcd Role
+## 9. dhcpcd Role
 
-`dhcpcd` assigns IP addresses after Wi-Fi connection.
+`dhcpcd` manages IPv4/IPv6 network configuration after the Wi-Fi link has been established. In the normal Fluid Ardule setup, it obtains the IP address, default route, and DNS information by DHCP.
 
 Ensure:
 
@@ -200,7 +212,7 @@ sudo systemctl enable dhcpcd
 
 ---
 
-## 9. Diagnostics
+## 10. Diagnostics
 
 ### Quick Network Status
 
@@ -306,7 +318,7 @@ rather than direct `wpa_cli select_network` control.
 
 ---
 
-## 10. Recommended Setup for Fluid Ardule
+## 11. Recommended Setup for Fluid Ardule
 
 Recommended:
 
@@ -324,7 +336,7 @@ This approach has proven stable for:
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 - NetworkManager is intentionally avoided
 - `dhcpcd` handles IP assignment
