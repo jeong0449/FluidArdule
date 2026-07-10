@@ -1,6 +1,6 @@
 # Networking Guide
 
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 
 This document explains the networking configuration used in Fluid Ardule, focusing on a lightweight and predictable setup.
@@ -45,11 +45,11 @@ This approach avoids captive portals, temporary access-point modes, on-screen ke
 
 ---
 
-## 3. Recommended Networking Approach
+## 3. Current Fluid Ardule Networking Approach
 
-Raspberry Pi OS Bookworm and later use NetworkManager as the default network manager. Fluid Ardule intentionally replaces that default stack with `dhcpcd` and a directly managed `wpa_supplicant` instance.
+Raspberry Pi OS Bookworm and later use NetworkManager as the default network manager. Fluid Ardule replaces that default stack with `dhcpcd` and `wpa_supplicant` to reduce unnecessary service overhead and keep networking simple.
 
-Fluid Ardule explicitly uses the interface-specific systemd service:
+The current Fluid Ardule system uses the interface-specific systemd service:
 
 ```bash
 wpa_supplicant@wlan0.service
@@ -61,15 +61,17 @@ The Debian systemd template for this service starts `wpa_supplicant` with an int
 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 ```
 
-The `-wlan0` filename is therefore **not a Raspberry Pi OS release convention** and is not a newer replacement for:
+The `-wlan0` filename is **not a Raspberry Pi OS release convention** and is not a newer replacement for:
 
 ```plaintext
 /etc/wpa_supplicant/wpa_supplicant.conf
 ```
 
-It is a consequence of deliberately using the `wpa_supplicant@wlan0.service` systemd instance. A different startup method may use a different configuration file.
+`wpa_supplicant` itself does not require one universal configuration filename. The active file is determined by the `-c` option used when the process is started.
 
-Fluid Ardule standardizes on `wpa_supplicant@wlan0.service` and `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` so that the service and its configuration source are explicit and reproducible.
+Fluid Ardule originally used the traditional `wpa_supplicant.conf` during manual Wi-Fi setup. The interface-specific filename was adopted when Wi-Fi startup was moved to the `wpa_supplicant@wlan0.service` systemd service, whose template expects a configuration file corresponding to the interface instance.
+
+The current setup retains `wpa_supplicant@wlan0.service` and `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf` because this arrangement is already used by the Fluid Ardule Wi-Fi management code and has proven stable in the reference system. A different `wpa_supplicant` startup method could use a different configuration filename.
 
 ---
 
