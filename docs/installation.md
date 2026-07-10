@@ -115,20 +115,16 @@ For detailed configuration and troubleshooting, see the [Networking Guide](netwo
 You can also review and disable other services to further optimize boot time:
 
 ```bash
-sudo systemctl disable bluetooth
-sudo systemctl disable avahi-daemon
-sudo systemctl disable triggerhappy
-sudo systemctl disable hciuart
-sudo systemctl disable apt-daily.service
-sudo systemctl disable apt-daily-upgrade.service
-sudo systemctl disable apt-daily.timer
-sudo systemctl disable apt-daily-upgrade.timer
-sudo systemctl stop apt-daily.service
-sudo systemctl stop apt-daily-upgrade.service
+sudo systemctl disable --now bluetooth
+sudo systemctl disable --now avahi-daemon
+sudo systemctl disable --now triggerhappy
+sudo systemctl disable --now hciuart
+sudo systemctl disable --now apt-daily.timer
+sudo systemctl disable --now apt-daily-upgrade.timer
 
 # Desktop version only:
 sudo systemctl set-default multi-user.target
-sudo systemctl disable lightdm
+sudo systemctl disable --now lightdm
 ```
 
 > Note: Some services may not be installed on your system.
