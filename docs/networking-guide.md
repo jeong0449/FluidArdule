@@ -466,10 +466,13 @@ It is not recommended for normal operation because it may interfere with systemd
 
 `dhcpcd` manages IPv4/IPv6 network configuration after the Wi-Fi link has been established. In the normal Fluid Ardule setup, it obtains the IP address, default route, and DNS information by DHCP.
 
-Ensure:
+`dhcpcd.service` is enabled as part of the NetworkManager replacement procedure described in Section 4.
+
+Its current state can be verified with:
 
 ```bash
-sudo systemctl enable dhcpcd
+systemctl is-enabled dhcpcd.service
+systemctl is-active dhcpcd.service
 ```
 
 ---
