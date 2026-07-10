@@ -5,6 +5,8 @@ Updated: 2026-07-10
 
 This document explains the networking configuration used in Fluid Ardule, focusing on a lightweight and predictable setup.
 
+> **Quick setup:** If you only want to replace NetworkManager with the simplified Fluid Ardule networking stack and do not need the background explanation, skip directly to [Section 4. Manual NetworkManager Replacement](#4-manual-networkmanager-replacement). Sections 1–3 explain the design rationale, the networking state of a fresh Raspberry Pi OS installation, and why Fluid Ardule uses `wpa_supplicant@wlan0.service`.
+
 ---
 
 ## 1. Overview
