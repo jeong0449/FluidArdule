@@ -44,8 +44,7 @@ The Fluid Ardule runtime interface is intentionally focused on musical operation
 
 This design avoids adding a complex on-device network setup system and keeps the runtime environment lightweight and predictable.
 
-This guide assumes the default Raspberry Pi OS user account `pi`.
-
+This guide assumes the Raspberry Pi OS user account `pi` and the hostname `Fluidule`, as configured for the Fluid Ardule reference system.
 
 #### Environment (reference system)
 
