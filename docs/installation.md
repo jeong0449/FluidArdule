@@ -135,8 +135,12 @@ For detailed configuration and troubleshooting, see the [Networking Guide](netwo
 You can also review and disable other services to further optimize boot time:
 
 ```bash
+
+# To use Bluetooth devices, change the first two commands from
+# "disable --now" to "enable --now".
 sudo systemctl disable --now bluetooth
 sudo systemctl disable --now avahi-daemon
+
 sudo systemctl disable --now triggerhappy
 sudo systemctl disable --now hciuart
 sudo systemctl disable --now apt-daily.timer
