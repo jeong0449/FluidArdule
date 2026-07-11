@@ -57,7 +57,11 @@ External MIDI output can also be handled directly via USB MIDI interfaces withou
 
 ## 🎬 Demo
 
-[![Watch Demo](https://img.youtube.com/vi/FQxRp7cAwEk/0.jpg)](https://www.youtube.com/watch?v=FQxRp7cAwEk)
+[![Watch Demo](https://img.youtube.com/vi/t64LnDstLVA/0.jpg)](https://youtu.be/t64LnDstLVA)
+
+Previous demo:
+
+[![Legacy Demo](https://img.youtube.com/vi/FQxRp7cAwEk/0.jpg)](https://www.youtube.com/watch?v=FQxRp7cAwEk)
 
 ---
 
