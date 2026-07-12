@@ -6,6 +6,29 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 260712b — Restore reliable Yoshimi live loading path resolution
+
+### Fixed
+- Restored the path-selection logic used by stable Yoshimi live loading.
+- Preferred space-free local Yoshimi instrument paths before falling back to original source paths.
+- Prevented premature selection of source_path entries containing whitespace.
+- Preserved restart fallback only when no suitable live-load path is available.
+- Returned the Yoshimi CLI to the root context before issuing live instrument load commands.
+
+### Notes
+- Compared the Yoshimi implementation across 260702f, 260703g, 260706b, 260707h, and 260710e.
+- Confirmed that the original symlink/copy preservation introduced in 260706b had not been removed.
+- Identified the regression as a path-selection priority issue rather than a loss of the live-loading architecture.
+
+### Verification
+- Pending:
+  - Live loading with copied Yoshimi patch paths.
+  - No unnecessary Yoshimi restart during patch changes.
+  - Arpeggio Speed adjustment followed by successful live patch loading.
+
+---
+
+
 ## 260710d
 
 - Added `Console` to the Power menu for switching the TFT from the Fluid Ardule UI to the Linux framebuffer console.
