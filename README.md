@@ -186,6 +186,25 @@ This rendering model follows the philosophy of dedicated hardware synthesizers, 
 
 The UI subsystem is also designed to tolerate temporary controller-side instability and recover gracefully without requiring SSH access whenever possible.
 
+### Persistent Yoshimi Runtime
+
+Fluid Ardule treats Yoshimi as a persistent synthesis engine rather than
+a process that should be restarted whenever an instrument changes.
+
+Whenever possible, instrument changes are performed through the running
+Yoshimi CLI. This minimizes latency, avoids unnecessary audio
+interruption, and preserves the responsive feel expected from a hardware
+instrument.
+
+To make reliable live loading possible, the instrument resolver always
+prefers existing whitespace-free local patch paths before considering
+the original factory locations. Original paths remain available only as
+a fallback when a full restart is unavoidable.
+
+This priority is intentional. Seemingly simpler path-selection logic can
+silently disable live loading and reintroduce unnecessary Yoshimi
+restarts.
+
 ---
 
 ## Installation / Build
