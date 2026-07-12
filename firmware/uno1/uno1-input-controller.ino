@@ -11,12 +11,13 @@
 //   BTN:LEFT_LP / UP_LP / DOWN_LP / RIGHT_LP / SEL_LP
 //   ENC:+N / ENC:-N
 //   POT:<0-1023>
-//   ACCEL:<1-3>
+//   ACCEL:<0-3>
 //
 // Pi -> Uno protocol:
 //   HELLO
 //   HB
 //   UI:READY / UI:BUSY
+//   ACCELSET:<0-3>
 //   ACK:BTN / ACK:ENC
 //   ACT:MIDI
 //   PLAY:OFF / PLAY:ON / PLAY:BLINK
@@ -28,7 +29,7 @@
 //   D11 : activity LED for MIDI pulse and local button/encoder/pot input
 //   1602 LCD : local input monitor only
 //   Line 1 rightmost 6 chars : last button event (e.g. L-SP / L-LP)
-//   Line 2 rightmost 2 chars : current encoder acceleration profile (P1/P2/P3)
+//   Line 2 rightmost 2 chars : current encoder acceleration profile (P0/P1/P2/P3)
 //   Encoder long press : acceleration profile cycle
 //   SELECT long press : Pi-side power menu, unchanged
 //   Encoder + SELECT simultaneous long press : keypad calibration entry
@@ -1042,6 +1043,9 @@ void setAccelDraftDelta(int delta) {
 }
 
 int calcAccelMultiplier(unsigned long dt, uint8_t profile) {
+  // P0 is the Pi-selected precise mode: no acceleration.
+  if (profile == 0) return 1;
+
   const AccelProfile &p = ACCEL_TABLE[profile - 1];
   if (dt <= p.tFast) return 3;
   if (dt <= p.tMedium) return 2;
@@ -1505,6 +1509,27 @@ void handleIncomingLine(String s) {
       } else {
         setCurrentStatusLine2();
       }
+    }
+    return;
+  }
+
+  if (s.startsWith("ACCELSET:")) {
+    notePiSeen();
+    restartShutdownWaitIfPowerOk();
+
+    int requested = s.substring(9).toInt();
+    if (requested < 0) requested = 0;
+    if (requested > 3) requested = 3;
+
+    accelProfile = (uint8_t)requested;
+    accelDraft = accelProfile;
+    accelSettingMode = false;
+    sendAccelProfile();
+
+    if (powerState == POWER_NORMAL && !keypadCalMode) {
+      setCurrentStatusLine2();
+      drawStatus();
+      lastLcdRefreshMs = millis();
     }
     return;
   }
