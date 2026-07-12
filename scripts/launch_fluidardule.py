@@ -4432,6 +4432,15 @@ def first_nonempty_value(item: dict, keys: list[str]) -> str:
             return text
     return ""
 
+# IMPORTANT
+# Yoshimi live loading depends on using whitespace-free local patch paths.
+#
+# Do NOT return source_path before checking local copy/symlink paths.
+# Otherwise the live loader falls back to restarting Yoshimi because the
+# Yoshimi CLI cannot reliably load instrument filenames containing spaces.
+#
+# This path-selection priority was stabilized in 260712b after tracking
+# a regression introduced during later refactoring.
 
 def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: Path | None = None) -> str:
     """Return an absolute .xiz path from a Yoshimi v2 patch/instrument item.
