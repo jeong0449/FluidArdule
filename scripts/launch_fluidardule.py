@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260710e_console-mode"
+SCRIPT_VERSION = "260712b"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -396,7 +396,7 @@ SOUND_EDIT_CC_DEBUG = False
 ENCODER_TRACE = False
 # Encoder acceleration profile sync diagnostics. Enable temporarily to see
 # Pi -> UNO ACCELSET:n decisions when UI context changes or serial reconnects.
-ACCEL_PROFILE_TRACE = False
+ACCEL_PROFILE_TRACE = True
 # If True, ACCEL:n reports from UNO-1 also produce a short TFT footer message.
 # Keep False for normal context-specific profile switching because UNO LCD
 # already shows the active P0/P1/P2/P3 profile.
@@ -4436,42 +4436,67 @@ def first_nonempty_value(item: dict, keys: list[str]) -> str:
 def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: Path | None = None) -> str:
     """Return an absolute .xiz path from a Yoshimi v2 patch/instrument item.
 
-    Prefer canonical nested v2 fields such as:
-      item["yoshimi"]["patch_path"]
-      item["yoshimi"]["bank_path"] + item["yoshimi"]["patch_file"]
-    Flat legacy keys remain supported as fallback.
+    Prefer an existing space-free path so Yoshimi live loading can use its CLI
+    without restarting. Original factory paths containing spaces remain
+    available only as a fallback for the reliable ``-L`` restart path.
     """
     y = item.get("yoshimi") or {}
     if not isinstance(y, dict):
         y = {}
 
+    bank_name = bank_name or str(
+        y.get("bank_name") or item.get("bank_name") or item.get("category") or ""
+    ).strip()
+
+    explicit_values: list[str] = []
+
+    def collect_value(value) -> None:
+        text = str(value or "").strip()
+        if text and text not in explicit_values:
+            explicit_values.append(text)
+
     for key in (
-        "patch_path", "path", "source_path", "file_path", "xiz_path",
-        "instrument_path", "full_path",
+        "patch_path", "path", "file_path", "xiz_path",
+        "instrument_path", "full_path", "source_path",
     ):
-        value = y.get(key)
-        if value:
-            text = str(value).strip()
-            if text:
-                return text
+        collect_value(y.get(key))
+
+    for key in (
+        "patch_path", "path", "file_path", "xiz_path", "filepath",
+        "instrument_path", "instrument_file", "full_path", "source_path",
+    ):
+        collect_value(item.get(key))
 
     bank_path = str(y.get("bank_path") or "").strip()
-    patch_file = str(y.get("patch_file") or y.get("file") or y.get("filename") or "").strip()
+    patch_file = str(
+        y.get("patch_file") or y.get("file") or y.get("filename") or ""
+    ).strip()
     if bank_path and patch_file:
-        return str(Path(bank_path) / patch_file)
+        collect_value(Path(bank_path) / patch_file)
+
+    for text in explicit_values:
+        try:
+            candidate = Path(text)
+            if candidate.exists() and candidate.is_file() and " " not in str(candidate):
+                return str(candidate.absolute())
+        except Exception:
+            pass
 
     raw = first_nonempty_value(item, [
-        "patch_path", "path", "source_path", "file_path", "xiz_path", "file",
+        "patch_path", "path", "file_path", "xiz_path", "file",
         "filepath", "filename", "file_name", "instrument_path",
-        "instrument_file", "full_path", "patch_file", "basename",
+        "instrument_file", "full_path", "patch_file", "basename", "source_path",
     ])
 
     candidates: list[Path] = []
-    bank_name = bank_name or str(y.get("bank_name") or item.get("bank_name") or item.get("category") or "").strip()
-    bank_dir = Path(bank_path) if bank_path else (Path(YOSHIMI_DEFAULT_ROOT) / bank_name if bank_name else Path(YOSHIMI_DEFAULT_ROOT))
+    bank_dir = (
+        Path(bank_path)
+        if bank_path
+        else (Path(YOSHIMI_DEFAULT_ROOT) / bank_name if bank_name else Path(YOSHIMI_DEFAULT_ROOT))
+    )
 
     def add_candidate(path_like) -> None:
-        text = str(path_like).strip()
+        text = str(path_like or "").strip()
         if not text:
             return
         candidate = Path(text)
@@ -4486,6 +4511,22 @@ def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: 
                 candidates.append(bank_dir / candidate)
             candidates.append(Path(YOSHIMI_DEFAULT_ROOT) / candidate)
 
+    source_names: list[str] = []
+    for text in explicit_values:
+        name = Path(text).name
+        if name:
+            source_names.extend([name, name.replace(" ", "_")])
+    if patch_file:
+        source_names.extend([patch_file, patch_file.replace(" ", "_")])
+
+    if json_path is not None and bank_name:
+        for mirror_dir in ("yoshimi_patches", "yoshimi_links"):
+            root = json_path.parent / mirror_dir / bank_name
+            for filename in source_names:
+                candidates.append(root / filename)
+
+    for text in explicit_values:
+        add_candidate(text)
     if raw:
         add_candidate(raw)
 
@@ -4514,6 +4555,9 @@ def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: 
                     ])
         for filename in inferred_names:
             candidates.append(bank_dir / filename)
+            if json_path is not None:
+                candidates.append(json_path.parent / "yoshimi_patches" / bank_name / filename)
+                candidates.append(json_path.parent / "yoshimi_links" / bank_name / filename)
 
         for pat in [
             f"*{name}*.xiz",
@@ -4542,21 +4586,27 @@ def resolve_yoshimi_instrument_path(item: dict, bank_name: str = "", json_path: 
             pass
 
     seen: set[str] = set()
+
     for c in candidates:
         try:
             key = str(c)
             if key in seen:
                 continue
             seen.add(key)
-            if c.exists() and c.is_file():
-                # Preserve a space-free symlink path for Yoshimi live-load.
-                # Path.resolve() follows the symlink back into the factory bank,
-                # where filenames may contain spaces and Yoshimi CLI parsing fails.
-                # absolute() makes the path absolute without dereferencing it.
+            if c.exists() and c.is_file() and " " not in key:
                 return str(c.absolute())
         except Exception:
             continue
 
+    for c in candidates:
+        try:
+            if c.exists() and c.is_file():
+                return str(c.absolute())
+        except Exception:
+            continue
+
+    if explicit_values:
+        return explicit_values[0]
     if candidates:
         return str(candidates[0])
     return ""
@@ -5482,7 +5532,12 @@ def live_load_yoshimi_instrument(xiz_path: str) -> bool:
         log(f"Yoshimi live load skipped; path contains spaces: {xiz_path}")
         return False
 
-    if not send_yoshimi_cli_command(f"load instrument {xiz_path}"):
+    # Arpeggio Speed editing leaves the CLI inside an effect context. Return
+    # to the root before issuing the top-level load instrument command.
+    if not send_yoshimi_cli_block([
+        "/",
+        f"load instrument {xiz_path}",
+    ]):
         return False
 
     # There is no simple synchronous OK response here because stdout/stderr are
