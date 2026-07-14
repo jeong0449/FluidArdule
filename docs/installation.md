@@ -1,6 +1,6 @@
 # Installation Guide
 
-Updated: 2026-07-10
+Updated: 2026-07-14
 
 🚧 This document is currently under construction and may contain errors or incomplete instructions.
 
@@ -136,15 +136,24 @@ You can also review and disable other services to further optimize boot time:
 
 ```bash
 
-# To use Bluetooth devices, change the first two commands from
-# "disable --now" to "enable --now".
-sudo systemctl disable --now bluetooth
-sudo systemctl disable --now avahi-daemon
+# Optional services
 
+sudo systemctl disable --now bluetooth
 sudo systemctl disable --now triggerhappy
-sudo systemctl disable --now hciuart
 sudo systemctl disable --now apt-daily.timer
 sudo systemctl disable --now apt-daily-upgrade.timer
+
+# Bluetooth can also be disabled at the firmware level by adding
+# the following line to /boot/firmware/config.txt:
+#
+# dtoverlay=disable-bt
+#
+# If this firmware setting is used, remove or comment out the line
+# before re-enabling Bluetooth.
+#
+# Recent Raspberry Pi OS Trixie installations typically have
+# avahi-daemon already disabled, and hciuart.service is no longer
+# present, so no additional action is normally required.
 
 # Desktop version only:
 sudo systemctl set-default multi-user.target
