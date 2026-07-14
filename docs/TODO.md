@@ -81,7 +81,7 @@ Focus areas:
 -   Add a Bluetooth audio receiver mode under Media Player.
 -   Use BlueALSA with previously paired/trusted devices.
 -   Start Bluetooth audio on entry and restore the previous sound engine on exit.
--   Keep device pairing outside the runtime UI initially.
+-   Keep device pairing and removal as manual Console operations using `bluetoothctl`.
 
 ### SoundFont Readiness Detection
 
