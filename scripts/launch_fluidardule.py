@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260712b"
+SCRIPT_VERSION = "260714b"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -1549,7 +1549,8 @@ def wifi_menu_options() -> list[tuple[str, bool]]:
     rows = [(f"Wi-Fi: {'On' if state.wifi_enabled else 'Off'}", state.wifi_enabled)]
     rows.append(("Scan known networks", False))
     if state.wifi_scan_results:
-        rows.extend((ssid, ssid == state.wifi_current_ssid) for ssid in state.wifi_scan_results)
+        rows.extend((f"    {ssid}", ssid == state.wifi_current_ssid)
+                    for ssid in state.wifi_scan_results)
     else:
         rows.append(("No configured network found", False))
     return rows
