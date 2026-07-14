@@ -25,6 +25,8 @@ Entries are grouped by development date (KST), which may differ from the corresp
   - Live loading with copied Yoshimi patch paths.
   - No unnecessary Yoshimi restart during patch changes.
   - Arpeggio Speed adjustment followed by successful live patch loading.
+ 
+> Corresponding commit: [973bb20](https://github.com/jeong0449/FluidArdule/commit/973bb20a8ffe13abcf2739537640bee800a45a9a)
 
 ---
 
