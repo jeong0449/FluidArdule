@@ -76,6 +76,13 @@ Focus areas:
 -   Improve active Combi indication.
 -   Prepare for layer mute/solo.
 
+### Bluetooth Audio Receiver
+
+-   Add a Bluetooth audio receiver mode under Media Player.
+-   Use BlueALSA with previously paired/trusted devices.
+-   Start Bluetooth audio on entry and restore the previous sound engine on exit.
+-   Keep device pairing outside the runtime UI initially.
+
 ### SoundFont Readiness Detection
 
 Replace fixed startup delays with state-based readiness detection.
