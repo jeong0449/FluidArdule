@@ -171,6 +171,19 @@ Fluid Ardule minimizes background activity wherever possible, but preserves ligh
 
 Likewise, physical controls should behave like those of dedicated hardware instruments. Features such as soft takeover prevent abrupt parameter changes when hardware positions and internal states differ, allowing smooth and predictable interaction during live performance.
 
+### Simplicity over Audio Middleware
+
+Fluid Ardule intentionally uses direct ALSA audio paths instead of audio
+middleware such as JACK, PulseAudio, or PipeWire.
+
+While these frameworks provide powerful routing and desktop integration,
+they also introduce additional complexity, latency, and recovery
+scenarios that are unnecessary for the project's goals.
+
+By keeping the runtime architecture simple and deterministic, Fluid
+Ardule prioritizes predictable behavior, low latency, and reliable live
+performance over maximum flexibility.
+
 ### Real-Time Safe Rendering
 
 Fluid Ardule prioritizes audio performance over display updates.
