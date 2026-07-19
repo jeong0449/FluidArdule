@@ -27,7 +27,7 @@ Version identifiers such as `260715f` refer to the version of the main Fluid Ard
 - Bluetooth pairing and trust management remain intentionally manual through `bluetoothctl` (Console/SSH).
 - The implementation preserves Fluid Ardule's design philosophy by keeping Bluetooth Audio as a dedicated media playback mode rather than introducing a desktop-style audio mixer.
 
-> Repository snapshot when runtime version 260715f was completed:[7141586](https://github.com/jeong0449/FluidArdule/tree/71415868bb7e0404f8ca63302aad0a5cd0608917)
+> Repository snapshot when runtime version 260715f was completed: [7141586](https://github.com/jeong0449/FluidArdule/tree/71415868bb7e0404f8ca63302aad0a5cd0608917)
 
 ---
 
