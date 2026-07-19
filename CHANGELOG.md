@@ -6,6 +6,30 @@ Entries are grouped by development date (KST), which may differ from the corresp
 
 ---
 
+## 2026-07-15 (260715f)
+
+### Added
+- Added **Bluetooth Audio** as a dedicated Media Player mode.
+- Integrated BlueALSA-based A2DP audio reception.
+- Display the connected or trusted Bluetooth device name during Bluetooth Audio playback.
+
+### Changed
+- Suspend the internal synthesis engine automatically when entering Bluetooth Audio mode.
+- Restore the previous audio engine automatically when exiting Bluetooth Audio mode.
+- LEFT button now exits Bluetooth Audio and returns to the previous sound state.
+- Removed Play/Pause control from the RIGHT button, leaving transport control to the Bluetooth source device.
+- Updated installation documentation to include Bluetooth Audio support.
+- Promoted Bluetooth Audio from an experimental feature to an officially documented component.
+
+### Notes
+- Bluetooth pairing and trust management remain intentionally manual through `bluetoothctl` (Console/SSH).
+- The implementation preserves Fluid Ardule's design philosophy by keeping Bluetooth Audio as a dedicated media playback mode rather than introducing a desktop-style audio mixer.
+
+> Repository snapshot for version 260715f: [b95622c]
+(https://github.com/jeong0449/FluidArdule/tree/b95622c4de7837ad4f0b1273014930b85bb7ed0d)
+
+---
+
 ## 260712b — Restore reliable Yoshimi live loading path resolution
 
 ### Fixed
@@ -29,7 +53,6 @@ Entries are grouped by development date (KST), which may differ from the corresp
 > Repository snapshot for version 260712b: [973bb20](https://github.com/jeong0449/FluidArdule/tree/973bb20a8ffe13abcf2739537640bee800a45a9a)
 
 ---
-
 
 ## 260710d
 
