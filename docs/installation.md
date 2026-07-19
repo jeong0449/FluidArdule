@@ -1,6 +1,6 @@
 # Installation Guide
 
-Updated: 2026-07-14
+Updated: 2026-07-19
 
 🚧 This document is currently under construction and may contain errors or incomplete instructions.
 
@@ -138,18 +138,13 @@ You can also review and disable other services to further optimize boot time:
 
 # Optional services
 
-sudo systemctl disable --now bluetooth
 sudo systemctl disable --now triggerhappy
 sudo systemctl disable --now apt-daily.timer
 sudo systemctl disable --now apt-daily-upgrade.timer
 
-# Bluetooth can also be disabled at the firmware level by adding
-# the following line to /boot/firmware/config.txt:
-#
-# dtoverlay=disable-bt
-#
-# If this firmware setting is used, remove or comment out the line
-# before re-enabling Bluetooth.
+# Bluetooth is required for the Bluetooth Audio feature and should
+# normally remain enabled. Do not add dtoverlay=disable-bt to
+# /boot/firmware/config.txt.
 #
 # Recent Raspberry Pi OS Trixie installations typically have
 # avahi-daemon already disabled, and hciuart.service is no longer
@@ -476,7 +471,44 @@ These tools are useful for quick testing or low-overhead playback.
 
 ---
 
-### 3.2 FluidSynth and MIDI Test
+### 3.2 Bluetooth Audio
+
+Fluid Ardule can operate as a Bluetooth audio receiver through **Media Player → Bluetooth Audio**.
+
+Install the required Bluetooth and BlueALSA packages:
+
+```bash
+sudo apt update
+sudo apt install bluez bluez-alsa-utils
+```
+
+Make sure Bluetooth has not been disabled in `/boot/firmware/config.txt`. If the following line is present, remove it or comment it out:
+
+```plaintext
+dtoverlay=disable-bt
+```
+
+Then enable and start the required services:
+
+```bash
+sudo systemctl enable --now bluetooth.service
+sudo systemctl enable --now bluealsa.service
+```
+
+Verify that both services are active:
+
+```bash
+systemctl is-active bluetooth.service
+systemctl is-active bluealsa.service
+```
+
+Both commands should report `active`.
+
+Bluetooth device pairing and trust configuration are performed manually through Console or SSH. See [Bluetooth Audio Setup and Pairing](bluetooth-audio-setup.md) for the complete procedure.
+
+---
+
+### 3.3 FluidSynth and MIDI Test
 
 This section verifies that FluidSynth is working correctly with the I2S DAC configured as the default ALSA device.
 
@@ -575,7 +607,7 @@ Play the keyboard — sound should be produced immediately.
 
 ---
 
-### 3.3 Directory Structure
+### 3.4 Directory Structure
 
 The Fluid Ardule system uses a simple directory layout under `/home/pi`:
 
@@ -610,7 +642,7 @@ mv ~/FluidArdule/scripts ~/
 
 ---
 
-### 3.4 Build and Pre-test MIDI Bridge
+### 3.5 Build and Pre-test MIDI Bridge
 
 Before relying on the compiled bridge in the main Fluid Ardule workflow, verify that UNO-2 is correctly sending MIDI data over USB serial.  
 The required build tools must be installed to compile the MIDI bridge.
@@ -672,7 +704,7 @@ When UNO-2 is selected as the MIDI input device, the bridge binary is started au
 
 ---
 
-### 3.5 Pre-Service Configuration
+### 3.6 Pre-Service Configuration
 
 Before enabling the main service, several device-specific settings in [`launch_fluidardule.py`](/scripts/launch_fluidardule.py) must be adjusted:
 
