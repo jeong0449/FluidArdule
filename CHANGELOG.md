@@ -25,8 +25,7 @@ Entries are grouped by development date (KST), which may differ from the corresp
 - Bluetooth pairing and trust management remain intentionally manual through `bluetoothctl` (Console/SSH).
 - The implementation preserves Fluid Ardule's design philosophy by keeping Bluetooth Audio as a dedicated media playback mode rather than introducing a desktop-style audio mixer.
 
-> Repository snapshot for version 260715f: [b95622c]
-(https://github.com/jeong0449/FluidArdule/tree/b95622c4de7837ad4f0b1273014930b85bb7ed0d)
+> Repository snapshot for version 260715f: [b95622c](https://github.com/jeong0449/FluidArdule/tree/b95622c4de7837ad4f0b1273014930b85bb7ed0d)
 
 ---
 
