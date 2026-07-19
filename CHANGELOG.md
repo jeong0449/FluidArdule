@@ -4,6 +4,8 @@ All notable changes to the Fluid Ardule project will be documented in this file.
 
 Entries are grouped by development date (KST), which may differ from the corresponding Git commit date.
 
+Version identifiers such as `260715f` refer to the version of the main Fluid Ardule runtime script, not to Git tags or GitHub releases.
+
 ---
 
 ## 2026-07-15 (260715f)
