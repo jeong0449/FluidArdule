@@ -28,6 +28,7 @@ As of June 2026, the project had evolved into a mature Python application exceed
 - Accept MIDI input from USB or DIN (DIN I/O via the UNO-2 MIDI bridge)
 - Play Standard MIDI Files through FluidSynth
 - Play audio files (MP3, OGG, WAV, WMA, and other common formats)
+- Receive Bluetooth audio (A2DP) from phones and tablets through the integrated **Bluetooth Audio** mode
 - Output audio through either an I2S DAC or a USB DAC
 - Mirror internal MIDI performance (live playing and MIDI file playback) to external MIDI devices
 - Support external MIDI modules such as the Roland SC-D70 with port-aware routing (Part A / Part B / MIDI)
