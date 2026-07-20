@@ -110,6 +110,8 @@ Instead, it uses:
 - `dhcpcd` (IP management)
 - `wpa_supplicant` (Wi-Fi)
 
+Bluetooth Audio uses the standard Linux Bluetooth stack (BlueZ/BlueALSA) and is unaffected by the NetworkManager replacement described here.
+
 Consider disabling or removing unnecessary services to improve boot performance:
 
 ```bash
@@ -473,7 +475,7 @@ These tools are useful for quick testing or low-overhead playback.
 
 ### 3.2 Bluetooth Audio
 
-Fluid Ardule can operate as a Bluetooth audio receiver through **Media Player → Bluetooth Audio**.
+Fluid Ardule can operate as a Bluetooth audio receiver through **Media Player → Bluetooth Audio**. Unlike Wi-Fi, Bluetooth Audio does not require NetworkManager and remains fully functional with the lightweight networking stack used by Fluid Ardule.
 
 Install the required Bluetooth and BlueALSA packages:
 
