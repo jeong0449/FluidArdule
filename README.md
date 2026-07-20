@@ -152,7 +152,7 @@ Key features:
 - Automatic device detection — only connected devices are shown in the UI
 
 This allows Fluid Ardule to function not only as a sound module,
-but also as a flexible MIDI routing and control station for external hardware modules..
+but also as a flexible MIDI routing and control station for external hardware modules.
 
 ---
 
