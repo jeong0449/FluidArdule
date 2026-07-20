@@ -32,11 +32,13 @@ As of June 2026, the project had evolved into a mature Python application exceed
 
 > **Project status**
 >
-> Fluid Ardule is under active development. Current work focuses on improving live performance, engine transition reliability, Combi workflow, and seamless integration between FluidSynth and Yoshimi.
+> Fluid Ardule is under active development. Current work focuses on improving reliability, live performance, and a hardware-oriented user experience while preserving its responsive, instrument-like behavior.
 >
 > See also: [`docs/combination-system-design.md`](docs/combination-system-design.md) — a proposed workstation-style Combination architecture based on User Presets, layering, and keyboard split.
 >
-> A major milestone was achieved in **260712b**, which re-established reliable restart-free Yoshimi live instrument loading through validated path-selection logic. Future changes should preserve this behavior unless a demonstrably more reliable implementation is available.
+> A major technical milestone was achieved in **260712b**, which restored smooth, restart-free Yoshimi instrument switching through validated path-selection logic. This behavior is considered a core architectural feature and should be preserved unless a demonstrably more reliable implementation becomes available.
+>
+> The subsequent addition of **Bluetooth Audio** in **260715f** completed the planned feature set for the first public release, currently planned as **v0.0.1**.
 
 ---
 
