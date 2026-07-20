@@ -113,28 +113,13 @@ See [components.md](docs/components.md) for the parts list.
 
 ### UNO-1 Reset Stabilization Capacitor
 
-Rare cases of garbled characters were occasionally observed on the I2C LCD during power-up and, less frequently, during Raspberry Pi serial link establishment.
+Some Arduino UNO + I2C LCD combinations may occasionally display garbled characters during startup due to reset timing.
 
-Investigation suggested that the issue was related to startup timing rather than LCD hardware failure. In some situations, the Arduino UNO could begin executing `lcd.init()` before the LCD controller and PCF8574 I2C backpack had fully stabilized.
+Adding a **10 µF electrolytic capacitor** between **RESET** and **GND** on **UNO-1** significantly improves startup reliability.
 
-To improve startup reliability, a 10 µF electrolytic capacitor was added between RESET and GND on UNO-1:
+For background information and troubleshooting, see:
 
-- `+` → RESET
-- `-` → GND
-
-This slightly delays and stabilizes the release of the RESET signal during power-up, allowing the LCD subsystem to settle before initialization begins.
-
-Observed results:
-
-- Significantly reduced occurrence of garbled LCD characters
-- Improved cold-start reliability
-- More consistent LCD initialization after power-up
-
-> [!NOTE]
-> - The capacitor is connected between **RESET** and **GND**. It is **not** a power-supply decoupling capacitor.
-> - This modification may interfere with the Arduino UNO auto-reset mechanism used during sketch upload.
-> - Firmware upload may require temporarily disconnecting the capacitor, removing the UNO-1 shield, manually pressing RESET, or reconnecting USB power.
-> - The capacitor is intended as a startup stabilization measure and is not required for normal Arduino operation.
+➡ **[LCD Garbled Characters During Startup](docs/troubleshooting/2026-05-29-lcd-garbled-characters.md)**
 
 ---
 
