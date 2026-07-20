@@ -6,7 +6,7 @@
 
 Fluid Ardule is a modular DIY music workstation that combines Raspberry Pi–based audio synthesis with Arduino-powered hardware control.
 
-Designed as a dedicated musical instrument rather than a general-purpose Linux computer, Fluid Ardule provides a self-contained environment for **FluidSynth**, **Yoshimi**, MIDI playback, media playback, Internet radio, and external MIDI module integration. Its event-driven architecture emphasizes responsive operation, low CPU usage, and reliable live performance.
+Designed as a dedicated musical instrument rather than a general-purpose Linux computer, Fluid Ardule provides a self-contained environment for **FluidSynth**, **Yoshimi**, MIDI playback, media playback, Internet radio, Bluetooth audio reception, and external MIDI module integration. Its event-driven architecture emphasizes responsive operation, low CPU usage, and reliable live performance.
 
 As of June 2026, the project had evolved into a mature Python application exceeding 10,000 lines of code, marking a significant milestone in its development. Current work focuses on reliability, seamless engine switching, and a hardware-oriented user experience.
 
@@ -19,21 +19,16 @@ As of June 2026, the project had evolved into a mature Python application exceed
 - Operate as a standalone MIDI sound module — simply connect a MIDI keyboard and play
 - Support multiple synthesis engines, including **FluidSynth** (SoundFonts) and **Yoshimi**
 - Browse and load SoundFont and Yoshimi presets by category
-- Save and recall persistent User Presets across multiple synthesis engines
-- Support workstation-style **Combi** performance using layering and keyboard split
-- Control synthesis and playback through a dedicated Arduino-based hardware interface (UNO-1)
-- Automatically calibrate the 5-button analog keypad with EEPROM-persisted ADC center values
-  - Calibration remains accessible even if keypad navigation becomes unreliable
-  - **ENC + SELECT** long press enters calibration mode
-- Accept MIDI input from USB or DIN (DIN I/O via the UNO-2 MIDI bridge)
-- Play Standard MIDI Files through FluidSynth
-- Play audio files (MP3, OGG, WAV, WMA, and other common formats)
-- Receive Bluetooth audio (A2DP) from phones and tablets through the integrated **Bluetooth Audio** mode
+- Save and recall persistent **User Presets** across synthesis engines
+- Support workstation-style **Combi** performance with layering and keyboard split
+- Accept MIDI input from USB or DIN (via the optional **UNO-2** MIDI bridge)
+- Play Standard MIDI Files and common audio formats (MP3, OGG, WAV, WMA, and more)
+- Receive Bluetooth audio (A2DP) from phones and tablets
 - Output audio through either an I2S DAC or a USB DAC
-- Mirror internal MIDI performance (live playing and MIDI file playback) to external MIDI devices
-- Support external MIDI modules such as the Roland SC-D70 with port-aware routing (Part A / Part B / MIDI)
-- Dynamically display only connected MIDI devices using a device-driven user interface
-- Provide a hardware-oriented workflow with quick-access menus, persistent User Presets, sound refresh, MIDI Panic, and context-aware navigation
+- Mirror live MIDI performance and MIDI file playback to external MIDI sound modules
+- Automatically calibrate the 5-button analog keypad with EEPROM-persisted settings
+- Control the entire system through a dedicated Arduino-based hardware interface (**UNO-1**)
+- Provide a hardware-oriented workflow with quick-access menus, MIDI Panic, sound refresh, and context-aware navigation
 
 > **Project status**
 >
@@ -85,7 +80,10 @@ flowchart LR
 
     BRIDGE -->|ALSA MIDI| PI
 
-    PI --> FS[FluidSynth / Yoshimi / Player]
+    BT[Phone / Tablet<br/>Bluetooth A2DP] -->|Bluetooth| PI
+
+    PI --> FS[FluidSynth / Yoshimi / Player /<br/>Bluetooth Audio]
+
     PI --> TFT[TFT-LCD]
 
     CTRL[Buttons / Encoder / Potentiometer] --> UNO1[UNO-1<br/>UI Controller]
@@ -227,12 +225,11 @@ restarts.
 
 ## Installation / Build
 
-🚧 Work in progress  
-
-An installation guide for OS and software setup is currently being prepared.  
-Hardware assembly can be inferred from the system overview and components documentation.
+The installation guide covers Raspberry Pi OS setup, required software, system services, audio configuration, networking, and Fluid Ardule startup.
 
 👉 [Installation Guide](docs/installation.md)
+
+Hardware construction remains a DIY process and should be adapted to the builder's enclosure, controls, DAC, and power-supply arrangement.
 
 ---
 
