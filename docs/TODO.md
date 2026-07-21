@@ -1,6 +1,6 @@
 # Fluid Ardule TODO
 
-**Last updated:** 2026-07-15 (SCRIPT_VERSION 260714b)
+**Last updated:** 2026-07-22
 
 ---
 
@@ -37,7 +37,43 @@ Focus areas:
 
 ---
 
+### Faster Sound Menu Initialization
+
+Reduce latency when entering **Home → Sound**.
+
+Goals:
+
+- Eliminate unnecessary preset counting during menu construction.
+- Load preset indexes only when actually required.
+- Keep top-level Sound navigation responsive.
+- Preserve current behavior of lower-level preset browsing.
+
+**Status:** Planned
+
+---
+
 ## Medium Priority
+
+### Universal GM Combi Compatibility
+
+Allow the same Combi presets to be shared across multiple GM-compatible SoundFonts.
+
+Initial targets:
+
+- FluidR3 GM
+- GeneralUser GS
+- Arachno GM
+
+Goals:
+
+- Reuse existing Combi definitions.
+- Resolve SoundFont-specific preset IDs dynamically.
+- Preserve bank/program compatibility whenever possible.
+- Minimize changes to the current Combi format.
+
+**Status:** Planned
+
+---
 
 ### Context-Aware Encoder Acceleration
 
@@ -70,6 +106,20 @@ Planned options:
 
 ---
 
+### Wi-Fi Status Improvements
+
+Enhance the Wi-Fi information screen.
+
+Goals:
+
+- Display the assigned IPv4 address.
+- Show "Obtaining IP..." while DHCP is in progress.
+- Improve SSH accessibility without requiring Console access.
+
+**Status:** Planned
+
+---
+
 ### Performance-Oriented Combi Workflow
 
 Further improve live-performance usability.
@@ -79,18 +129,6 @@ Possible future work:
 - Better active Combi indication
 - Part Mute
 - Part Solo
-
----
-
-### Bluetooth Audio Receiver
-
-Add Bluetooth audio receiver mode under Media Player.
-
-Goals:
-
-- BlueALSA playback
-- Automatic restoration of previous sound engine
-- Manual pairing/removal through Console (`bluetoothctl`)
 
 ---
 
@@ -121,6 +159,16 @@ Possible improvements:
 ---
 
 ## Recently Completed
+
+### 260715
+
+- Added Bluetooth Audio receiver mode under Media Player.
+- Integrated BlueALSA playback.
+- Restored the previous sound engine automatically on exit.
+- Displayed the connected/trusted Bluetooth device name.
+- Refined Bluetooth playback workflow.
+
+---
 
 ### 260714
 
