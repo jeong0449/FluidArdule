@@ -37,7 +37,7 @@ Focus areas:
 
 ---
 
-### Faster Sound Menu Initialization
+### Faster Sound Menu Initialization *(2026-07-22)*
 
 Reduce latency when entering **Home → Sound**.
 
@@ -54,7 +54,7 @@ Goals:
 
 ## Medium Priority
 
-### Universal GM Combi Compatibility
+### Universal GM Combi Compatibility *(2026-07-22)*
 
 Allow the same Combi presets to be shared across multiple GM-compatible SoundFonts.
 
@@ -106,7 +106,7 @@ Planned options:
 
 ---
 
-### Wi-Fi Status Improvements
+### Wi-Fi Status Improvements *(2026-07-22)*
 
 Enhance the Wi-Fi information screen.
 
