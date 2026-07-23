@@ -57,7 +57,7 @@ const unsigned long READY_REPEAT_UNLINKED_MS = 500;
 const unsigned long READY_REPEAT_CAL_MS = 1000;  // Keep Pi-side serial watchdog calm during local calibration
 const unsigned long LCD_REFRESH_MS = 120;
 const unsigned long POT_SEND_MS = 60;
-const unsigned long LINK_TIMEOUT_MS = 3000;
+const unsigned long LINK_TIMEOUT_MS = 6000;
 const unsigned long POWER_SAFE_DELAY_MS = 10000;  // Wait after Pi heartbeat/link is lost following PWR:SHUTDOWN
 // 60 seconds is intentionally conservative because USB serial can disappear
 // before Raspberry Pi has fully completed filesystem sync and poweroff.
