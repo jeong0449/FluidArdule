@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260715f"
+SCRIPT_VERSION = "260722i"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -48,6 +48,7 @@ SERIAL_OUTPUT_HOLDOFF_AFTER_OPEN_SEC = 2.0
 SOUNDFONTS = [
     ("/home/pi/sf2/SalC5Light2.sf2", "SalC5"),
     ("/home/pi/sf2/FluidR3_GM.sf2", "FluidR3"),
+    ("/home/pi/sf2/Arachno_GM.sf2", "Arachno"),
     ("/home/pi/sf2/GeneralUser_GS.sf2", "GUserGS"),
     # Yoshimi is exposed through the same SoundFont menu as a synth-engine source.
     # The JSON file should follow Fluid Ardule instrument-list v2 and contain
@@ -203,6 +204,7 @@ FIX_VOLUME_AT_100 = False
 POT_VOLUME_ENABLED = True
 VOLUME_STATE_PATH = "/tmp/fluidardule_last_volume_percent"
 DEFAULT_STARTUP_VOLUME_PERCENT = 85
+BLUETOOTH_OUTPUT_VOLUME_PERCENT = 95
 # At startup the saved/default volume is only a temporary safety value.
 # The physical POT position should own the real startup volume as soon as
 # UNO-1 is ready.  Some firmware builds report POT only on movement, so the
@@ -321,6 +323,12 @@ USB_LABEL = "USB"
 
 USER_PRESET_PATH = "/home/pi/sf2/user_presets.json"
 USER_COMBI_PATH = "/home/pi/sf2/user_combis.json"
+COMBI_SOUNDFONT_OPTIONS = [
+    ("FluidR3_GM", "FluidR3_GM.sf2"),
+    ("GeneralUser_GS", "GeneralUser_GS.sf2"),
+    ("Arachno_GM", "Arachno_GM.sf2"),
+]
+COMBI_SOUNDFONT_LABEL_COLOR = (80, 175, 235)
 COMBI_INPUT_CHANNEL = 1
 COMBI_PREVIEW_FOOTER_HOLD_SEC = 1.5
 USER_PRESET_PREVIEW_ON_HIGHLIGHT = True
@@ -554,6 +562,7 @@ class RuntimeState:
 
     wifi_enabled: bool = True
     wifi_current_ssid: str = ""
+    wifi_ipv4_address: str = ""
     wifi_scan_results: list[str] = field(default_factory=list)
     wifi_known_ssids: list[str] = field(default_factory=list)
 
@@ -618,6 +627,8 @@ class RuntimeState:
     player_notice_until: float = 0.0
     last_bluetooth_status_poll_time: float = 0.0
     bluetooth_stop_return_at: float = 0.0
+    bluetooth_saved_volume_percent: int | None = None
+    bluetooth_volume_override_active: bool = False
 
     pending_resume_after_sf_apply: bool = False
 
@@ -631,6 +642,9 @@ class RuntimeState:
     current_user_preset_name: str | None = None
     current_user_preset_kind: str | None = None
     combi_entries: list[dict] = field(default_factory=list)
+    combi_soundfont_index: int = 0
+    current_combi_id: str | None = None
+    current_combi_soundfont_key: str | None = None
     current_combi_name: str | None = None
     combi_active: bool = False
     combi_parts: list[dict] = field(default_factory=list)
@@ -833,8 +847,29 @@ def load_saved_volume_state(default: int = 60) -> int:
         return max(0, min(100, int(default)))
 
 
+def enable_bluetooth_volume_override() -> None:
+    """Use a fixed line level while Bluetooth source volume owns loudness."""
+    if state.bluetooth_volume_override_active:
+        return
+    state.bluetooth_saved_volume_percent = int(state.volume_percent)
+    state.bluetooth_volume_override_active = True
+    set_output_volume(BLUETOOTH_OUTPUT_VOLUME_PERCENT, announce=False)
+
+
+def restore_bluetooth_volume_override() -> None:
+    """Restore the pre-Bluetooth system volume and POT ownership."""
+    if not state.bluetooth_volume_override_active:
+        return
+    restore_percent = state.bluetooth_saved_volume_percent
+    state.bluetooth_saved_volume_percent = None
+    state.bluetooth_volume_override_active = False
+    if restore_percent is not None:
+        set_output_volume(restore_percent, announce=False)
+    state.pot_volume_captured = False
+
+
 def handle_pot_value(raw_value: str) -> None:
-    if not POT_VOLUME_ENABLED:
+    if not POT_VOLUME_ENABLED or state.bluetooth_volume_override_active:
         return
     try:
         raw = int(raw_value)
@@ -1348,6 +1383,7 @@ def start_bluetooth_audio_receiver() -> None:
 
     stop_player_only()
     stop_fluidsynth()
+    enable_bluetooth_volume_override()
 
     cmd = [BLUETOOTH_APLAY_EXECUTABLE, "-D", state.audio_device]
     log(f"BLUETOOTH cmd={' '.join(cmd)}")
@@ -1365,6 +1401,7 @@ def start_bluetooth_audio_receiver() -> None:
             raise RuntimeError("bluealsa-aplay exited immediately")
     except FileNotFoundError:
         player_proc = None
+        restore_bluetooth_volume_override()
         restart_engine(state.sf_index, state.dac_index, manage_modal=False)
         restore_current_preset_after_engine_restart()
         clear_modal_message()
@@ -1373,6 +1410,7 @@ def start_bluetooth_audio_receiver() -> None:
         return
     except Exception as exc:
         player_proc = None
+        restore_bluetooth_volume_override()
         restart_engine(state.sf_index, state.dac_index, manage_modal=False)
         restore_current_preset_after_engine_restart()
         clear_modal_message()
@@ -1494,6 +1532,15 @@ def wifi_current_ssid() -> str:
     return ""
 
 
+def wifi_ipv4_address() -> str:
+    """Return the DHCP-assigned IPv4 address of the Wi-Fi interface."""
+    code, out = run_cmd(["ip", "-4", "-o", "addr", "show", "dev", WIFI_INTERFACE, "scope", "global"])
+    if code != 0 or not out:
+        return ""
+    match = re.search(r"\binet\s+(\d+(?:\.\d+){3})/\d+", out)
+    return match.group(1) if match else ""
+
+
 def refresh_wifi_status(*, force: bool = False) -> None:
     """Refresh Wi-Fi status with a short cache for UI redraw safety."""
     global _wifi_status_cache_until
@@ -1502,6 +1549,7 @@ def refresh_wifi_status(*, force: bool = False) -> None:
         return
     state.wifi_enabled = wifi_is_enabled()
     state.wifi_current_ssid = wifi_current_ssid() if state.wifi_enabled else ""
+    state.wifi_ipv4_address = wifi_ipv4_address() if state.wifi_current_ssid else ""
     state.wifi_known_ssids = parse_wpa_supplicant_networks(force=force)
     _wifi_status_cache_until = now + WIFI_STATUS_CACHE_SEC
 
@@ -1511,6 +1559,12 @@ def wifi_status_label(*, short: bool = False) -> str:
     if not state.wifi_enabled:
         return "Off"
     if state.wifi_current_ssid:
+        if state.wifi_ipv4_address:
+            return (
+                f"{state.wifi_current_ssid}: {state.wifi_ipv4_address}"
+                if short
+                else f"Connected: {state.wifi_current_ssid} / {state.wifi_ipv4_address}"
+            )
         return state.wifi_current_ssid if short else f"Connected: {state.wifi_current_ssid}"
     return "On" if short else "On / not connected"
 
@@ -2260,6 +2314,7 @@ class TFTDisplay:
         browser_displays = tuple(entry.get("display", "") for entry in state.browser_entries)
         return {
             "ui_mode": state.ui_mode,
+            "sf_name": state.sf_name,
             "menu_index": state.menu_index,
             "submenu_index": state.submenu_index,
             "submenu_key": state.submenu_key,
@@ -2291,6 +2346,7 @@ class TFTDisplay:
             "modal_submessage": state.modal_submessage,
             "wifi_enabled": state.wifi_enabled,
             "wifi_current_ssid": state.wifi_current_ssid,
+            "wifi_ipv4_address": state.wifi_ipv4_address,
             "header_version_label": self._display_script_version(),
             "header_wifi_label": self._header_wifi_text(),
             "wifi_scan_results": tuple(state.wifi_scan_results),
@@ -2512,6 +2568,8 @@ class TFTDisplay:
 
     def _render_file_browser_incremental(self, prev_snapshot: dict) -> bool:
         if self.prev_image is None:
+            return False
+        if prev_snapshot.get("sf_name") != state.sf_name:
             return False
         if prev_snapshot.get("browser_path") != state.browser_path:
             return False
@@ -2916,6 +2974,22 @@ class TFTDisplay:
             box_bottom - 6,
             show_current_marks=True,
         )
+        # Show the selected Combi SoundFont only on the highlighted row.
+        # RIGHT changes this target without loading; SELECT performs the load.
+        if options:
+            start_idx, max_rows, _ = self._list_window_state(
+                state.submenu_index, len(options), top_y, row_h, box_bottom - 6
+            )
+            if start_idx <= state.submenu_index < start_idx + max_rows:
+                visible_row = state.submenu_index - start_idx
+                row_top = top_y + visible_row * row_h
+                sf_text = f"[{current_combi_soundfont_key()}]"
+                bbox = draw.textbbox((0, 0), sf_text, font=self.font_small)
+                sf_w = bbox[2] - bbox[0]
+                draw_right_vcentered_text(
+                    draw, self.width - 30, row_top, row_h, sf_text,
+                    self.font_small, COMBI_SOUNDFONT_LABEL_COLOR
+                )
         # Paint the whole Combi legend strip every frame.  Without this, the
         # partial framebuffer update can leave alternating BOX_BG/BACKGROUND
         # pixels behind the hint text when preview state changes, making the
@@ -2925,11 +2999,12 @@ class TFTDisplay:
         draw.rectangle((12, legend_top, self.width - 12, legend_bottom), fill=BACKGROUND)
         draw.rounded_rectangle((18, legend_top, self.width - 18, legend_bottom), radius=8, fill=BOX_BG)
         draw.line((28, hint_y - 6, self.width - 28, hint_y - 6), fill=(42, 48, 62), width=1)
-        if state.combi_preview_active and state.current_combi_name:
-            hint = "PREVIEW   SEL:Load   L:Cancel"
-            fill = ACCENT
+        if state.combi_entries:
+            item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
+            hint = "R:SoundFont   SEL:Open   L:Exit" if combi_item_is_loaded(item) else "R:SoundFont   SEL:Load   L:Exit"
+            fill = ACCENT if combi_item_is_loaded(item) else DIM
         else:
-            hint = "R:Preview   SEL:Load   L:Exit"
+            hint = "R:SoundFont   SEL:Load   L:Exit"
             fill = DIM
         draw.text((30, hint_y), hint, font=self.font_small, fill=fill)
         draw.text((30, hint_y + 22), "Layer only / Split off", font=self.font_small, fill=DIM)
@@ -3187,9 +3262,25 @@ class TFTDisplay:
                             fill=DIM,
                         )
 
+    def _draw_media_context_line(self, draw, left_text: str = "", *, left_fill=DIM) -> None:
+        """Draw the Media Player subtitle row with the actual playback SoundFont."""
+        display_sf_name = state.sf_name
+        if state.player_proc_kind == "midi_file" and (
+            is_yoshimi_source(state.sf_index) or state.current_engine == "yoshimi"
+        ):
+            display_sf_name = source_name_for_index(generaluser_soundfont_index())
+        sf_text = self._fit_text_to_width(draw, display_sf_name, self.font_small, 120)
+        sf_bbox = draw.textbbox((0, 0), sf_text, font=self.font_small)
+        sf_w = sf_bbox[2] - sf_bbox[0]
+        sf_x = self.width - 18 - sf_w
+        if left_text:
+            fitted_left = self._fit_text_to_width(draw, left_text, self.font_small, max(0, sf_x - 30))
+            draw.text((18, 40), fitted_left, font=self.font_small, fill=left_fill)
+        draw.text((sf_x, 40), sf_text, font=self.font_small, fill=ACCENT)
+
     def _draw_file_source(self, draw):
         self._draw_submenu_title(draw, "Media Player", usb_status_text())
-        draw.text((18, 40), "Select source", font=self.font_small, fill=DIM)
+        self._draw_media_context_line(draw, "Select source")
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in get_file_source_entries()] or ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 40, self.height - 50)
@@ -3198,8 +3289,8 @@ class TFTDisplay:
         title = "Radio Favorites" if state.radio_view_mode == "favorites" else "Internet Radio"
         scope = "Fav" if state.radio_view_mode == "favorites" else "All"
         self._draw_submenu_title(draw, title, f"{scope}:{len(state.radio_entries)}")
-        hint = "SELECT: enter/play  RIGHT: favorite  LEFT: back"
-        draw.text((18, 40), hint, font=self.font_small, fill=DIM)
+        hint = "SELECT: play  RIGHT: favorite  LEFT: back"
+        self._draw_media_context_line(draw, hint)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = radio_display_labels() if state.radio_entries else ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.radio_index, 70, 36, self.height - 50)
@@ -3209,7 +3300,7 @@ class TFTDisplay:
         path_text = state.browser_path
         if len(path_text) > 42:
             path_text = "..." + path_text[-39:]
-        draw.text((18, 40), path_text, font=self.font_small, fill=DIM)
+        self._draw_media_context_line(draw, path_text)
         draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         labels = [entry["display"] for entry in state.browser_entries] or ["(empty)"]
         self._draw_scrolled_rows(draw, labels, state.browser_index, 70, 36, self.height - 50)
@@ -3217,6 +3308,7 @@ class TFTDisplay:
     def _draw_player(self, draw):
         if state.player_proc_kind == "bluetooth" or state.player_return_mode == "file_source":
             self._draw_submenu_title(draw, "Bluetooth Audio", "Receiver")
+            self._draw_media_context_line(draw)
             name = state.player_path or "Waiting for device..."
             status = state.player_status or "Waiting"
 
@@ -3240,7 +3332,7 @@ class TFTDisplay:
         else:
             name = state.player_path if state.player_proc_kind == "radio" else (Path(state.player_path).name if state.player_path else "No file")
             kind = "RADIO" if state.player_proc_kind == "radio" else (state.player_proc_kind.upper() if state.player_proc_kind else "-")
-        draw.text((18, 42), f"{kind}  {state.player_status}", font=self.font_small, fill=DIM)
+        self._draw_media_context_line(draw, f"{kind}  {state.player_status}")
 
         left_label = "LIST" if state.player_status == "Stopped" else "STOP"
         if state.player_proc_kind == "bluetooth" or state.player_return_mode == "file_source":
@@ -3586,7 +3678,8 @@ class TFTDisplay:
 
         now = time.time()
         transient_active = bool(state.transient_footer_text) and now < state.transient_footer_until
-        left_text = state.transient_footer_text if transient_active else (footer_hint or self._normal_footer_left_text(now))
+        bluetooth_volume_hint = "VOL: Source" if state.bluetooth_volume_override_active else None
+        left_text = state.transient_footer_text if transient_active else (footer_hint or bluetooth_volume_hint or self._normal_footer_left_text(now))
         draw.text((12, self.height - 34), left_text, font=self.font_small, fill=ACCENT if transient_active else DIM)
 
         if not footer_hint and not transient_active:
@@ -4578,11 +4671,24 @@ def first_fluidsynth_sf2_path() -> str:
     return "/home/pi/sf2/FluidR3_GM.sf2"
 
 
+def generaluser_soundfont_index() -> int:
+    """Return the configured GeneralUser GS SoundFont index."""
+    for i, (path, name) in enumerate(SOUNDFONTS):
+        if Path(path).name.lower() == "generaluser_gs.sf2" or name.lower() == "gusergs":
+            return i
+    # Keep a safe fallback if the configured display name/path changes.
+    for i, (path, _name) in enumerate(SOUNDFONTS):
+        if Path(path).suffix.lower() == ".sf2":
+            return i
+    return 0
+
+
 def current_soundfont_path() -> str:
     # MIDI file playback still needs an SF2 file. If the live engine is Yoshimi,
-    # fall back to the first configured SF2 for MIDI-file rendering.
-    if is_yoshimi_source(state.sf_index):
-        return first_fluidsynth_sf2_path()
+    # use the compact GeneralUser GS GM set for fast temporary playback. The
+    # Yoshimi state itself is left intact and is restored when Media Player exits.
+    if is_yoshimi_source(state.sf_index) or state.current_engine == "yoshimi":
+        return source_path_for_index(generaluser_soundfont_index())
     return source_path_for_index(state.sf_index)
 
 
@@ -5979,6 +6085,7 @@ def normalize_combi(item: dict) -> dict | None:
     return {
         "id": str(item.get("id") or name),
         "name": name,
+        "combi_soundfont_key": str(item.get("combi_soundfont_key") or ""),
         "description": str(item.get("description") or ""),
         "sf2": str(item.get("sf2") or item.get("source_file") or "FluidR3_GM.sf2"),
         "input_channel": max(1, min(16, _safe_int(item.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL))),
@@ -5986,19 +6093,43 @@ def normalize_combi(item: dict) -> dict | None:
     }
 
 
-def load_user_combis() -> list[dict]:
-    path = Path(USER_COMBI_PATH)
+def current_combi_soundfont_key() -> str:
+    idx = clamp_index(state.combi_soundfont_index, len(COMBI_SOUNDFONT_OPTIONS))
+    return COMBI_SOUNDFONT_OPTIONS[idx][0]
+
+
+def combi_file_path_for_soundfont(soundfont_key: str) -> Path:
+    specific = Path(f"/home/pi/sf2/user_combis.{soundfont_key}.json")
+
+    # Dedicated-file mode starts as soon as any supported SoundFont-specific
+    # Combi file exists.  In that mode, a missing file means that the selected
+    # SoundFont has no Combi definitions; do not silently borrow user_combis.json.
+    dedicated_paths = [
+        Path(f"/home/pi/sf2/user_combis.{key}.json")
+        for key, _sf2 in COMBI_SOUNDFONT_OPTIONS
+    ]
+    if any(path.exists() for path in dedicated_paths):
+        return specific
+
+    # Backward compatibility for older installations: use the legacy common
+    # file only when none of the dedicated files exists at all.
+    return Path(USER_COMBI_PATH)
+
+
+def load_user_combis(soundfont_key: str | None = None) -> list[dict]:
+    key = str(soundfont_key or current_combi_soundfont_key())
+    path = combi_file_path_for_soundfont(key)
     if not path.exists():
-        log(f"user_combis.json missing: {path}")
+        log(f"user combi file missing: {path}")
         return []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log(f"user_combis.json load failed: {exc}")
+        log(f"user combi file load failed ({path.name}): {exc}")
         return []
 
     if isinstance(payload, dict):
-        default_sf2 = str(payload.get("source_file") or payload.get("sf2") or "FluidR3_GM.sf2")
+        default_sf2 = str(payload.get("source_file") or payload.get("sf2") or dict(COMBI_SOUNDFONT_OPTIONS).get(key, "FluidR3_GM.sf2"))
         default_input = _safe_int(payload.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL)
         items = payload.get("combinations") or payload.get("combis") or []
         if isinstance(items, list):
@@ -6008,11 +6139,17 @@ def load_user_combis() -> list[dict]:
                     merged = dict(item)
                     merged.setdefault("sf2", default_sf2)
                     merged.setdefault("input_channel", default_input)
+                    merged["combi_soundfont_key"] = key
                     raw_items.append(merged)
         else:
             raw_items = []
     elif isinstance(payload, list):
-        raw_items = payload
+        raw_items = []
+        for item in payload:
+            if isinstance(item, dict):
+                merged = dict(item)
+                merged["combi_soundfont_key"] = key
+                raw_items.append(merged)
     else:
         raw_items = []
 
@@ -6036,7 +6173,47 @@ def combi_label(index: int, item: dict) -> str:
     return f"{index + 1:02d} {name}"
 
 
+def combi_item_is_loaded(item: dict) -> bool:
+    return (
+        state.combi_active
+        and str(item.get("id") or "") == str(state.current_combi_id or "")
+        and str(item.get("combi_soundfont_key") or current_combi_soundfont_key())
+        == str(state.current_combi_soundfont_key or "")
+    )
+
+
+def select_initial_combi_soundfont() -> None:
+    preferred = str(state.current_combi_soundfont_key or "")
+    if not preferred and 0 <= state.sf_index < len(SOUNDFONTS):
+        preferred = Path(SOUNDFONTS[state.sf_index][0]).stem
+    for i, (key, _sf2) in enumerate(COMBI_SOUNDFONT_OPTIONS):
+        if key == preferred:
+            state.combi_soundfont_index = i
+            return
+    state.combi_soundfont_index = 0
+
+
+def cycle_combi_soundfont() -> None:
+    old_id = ""
+    if state.combi_entries:
+        old_item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
+        old_id = str(old_item.get("id") or "")
+    state.combi_soundfont_index = (state.combi_soundfont_index + 1) % len(COMBI_SOUNDFONT_OPTIONS)
+    state.combi_entries = load_user_combis()
+    target = 0
+    if old_id:
+        for i, item in enumerate(state.combi_entries):
+            if str(item.get("id") or "") == old_id:
+                target = i
+                break
+    state.submenu_index = clamp_index(target, len(state.combi_entries))
+    state.previewed_combi_index = None
+    invalidate_full_display()
+    mark_dirty(f"Combi SF: {current_combi_soundfont_key()}")
+
+
 def enter_combi_load_menu(return_mode: str | None = None) -> None:
+    select_initial_combi_soundfont()
     state.combi_entries = load_user_combis()
     state.ui_mode = "submenu"
     state.submenu_key = "combi_load"
@@ -6464,6 +6641,8 @@ def make_combi_browse_snapshot() -> dict:
         "current_preset_program": state.current_preset_program,
         "current_preset_name": state.current_preset_name,
         "current_instrument_path": state.current_instrument_path,
+        "current_combi_id": state.current_combi_id,
+        "current_combi_soundfont_key": state.current_combi_soundfont_key,
         "current_combi_name": state.current_combi_name,
         "combi_active": state.combi_active,
         "combi_parts": list(state.combi_parts or []),
@@ -6486,6 +6665,8 @@ def restore_combi_browse_snapshot() -> None:
     stop_combi_router()
     state.combi_active = bool(snap.get("combi_active", False))
     state.combi_parts = list(snap.get("combi_parts") or [])
+    state.current_combi_id = snap.get("current_combi_id")
+    state.current_combi_soundfont_key = snap.get("current_combi_soundfont_key")
     state.current_combi_name = snap.get("current_combi_name")
     state.combi_input_channel = _safe_int(snap.get("combi_input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL)
     state.midi_mode = str(snap.get("midi_mode") or state.midi_mode)
@@ -6589,6 +6770,8 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
 
     clear_current_user_preset_state()
     reset_sound_edit_to_defaults()
+    state.current_combi_id = str(combi.get("id") or combi.get("name") or "Combi")
+    state.current_combi_soundfont_key = str(combi.get("combi_soundfont_key") or current_combi_soundfont_key())
     state.current_combi_name = str(combi.get("name") or "Combi")
     state.combi_parts = list(combi.get("parts") or [])
     state.combi_input_channel = _safe_int(combi.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL)
@@ -6637,14 +6820,19 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         # configuration, so show the active parts/layers immediately.
         enter_combi_detail_screen(f"Combi loaded: {label}" if router_ok else (f"Combi set: {label}" if ok else "Combi setup queued"))
     else:
-        # Stay on the Combi list after R/Preview, but make the successful
-        # preview much more visible than the subtle "*" mark alone.
-        # This reuses the existing transient footer mechanism, so the normal
-        # footer automatically returns after a short hold time.
-        if router_ok:
-            show_footer_message(f"Preview loaded: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
+        # Stay on the Combi list. RIGHT only chooses the target SoundFont;
+        # SELECT performs the actual load, and a second SELECT opens details.
+        if preview:
+            if router_ok:
+                show_footer_message(f"Preview loaded: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
+            else:
+                show_footer_message(f"Preview setup: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
         else:
-            show_footer_message(f"Preview setup: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
+            state.combi_preview_active = False
+            if router_ok:
+                show_footer_message(f"Combi loaded: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
+            else:
+                show_footer_message(f"Combi set: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
 
 
 def preview_combi_at_index(index: int) -> None:
@@ -6664,6 +6852,8 @@ def clear_combi_state_for_explicit_sound_load() -> None:
     stop_combi_router()
     state.combi_active = False
     state.combi_parts = []
+    state.current_combi_id = None
+    state.current_combi_soundfont_key = None
     state.current_combi_name = None
     state.combi_preview_active = False
     state.previewed_combi_index = None
@@ -8598,7 +8788,7 @@ def get_submenu_options() -> list[tuple[str, bool]]:
     if key == "combi_load":
         if not state.combi_entries:
             state.combi_entries = load_user_combis()
-        return [(combi_label(i, item), str(item.get("name", "")) == str(state.current_combi_name or "")) for i, item in enumerate(state.combi_entries)] or [("No combis", False)]
+        return [(combi_label(i, item), combi_item_is_loaded(item)) for i, item in enumerate(state.combi_entries)] or [("No combis", False)]
     if key == "combi_detail":
         rows = []
         for i, part in enumerate(state.combi_parts or []):
@@ -8914,18 +9104,18 @@ def apply_current_submenu_selection() -> None:
             state.previewed_user_preset_index = None
         return
     if key == "combi_load":
-        combis = load_user_combis()
+        combis = state.combi_entries or load_user_combis()
         if not combis:
             leave_submenu("No combis")
             return
         idx = clamp_index(state.submenu_index, len(combis))
         item = combis[idx]
-        if state.previewed_combi_index == idx and state.combi_active:
+        if combi_item_is_loaded(item):
             label = shorten_text(str(item.get("name") or "Combi"), 20)
             finish_combi_browse_session()
             enter_combi_detail_screen(f"Combi loaded: {label}")
         else:
-            apply_combi(item, leave_after=True, preview=False)
+            apply_combi(item, leave_after=False, preview=False)
         return
     leave_submenu("Not implemented yet")
 
@@ -9050,7 +9240,7 @@ def warn_combi_quick_blocked() -> None:
 
 
 def enter_quick_menu() -> None:
-    if combi_locked():
+    if combi_locked() and not combi_workflow_active():
         warn_combi_quick_blocked()
         return
     if state.ui_mode not in {"quick_menu", "power_menu"} and not state.usb_eject_confirm:
@@ -9128,15 +9318,22 @@ def quick_menu_select() -> None:
     if item == "Now Playing":
         enter_now_playing()
         return
+    if item == "USB Eject":
+        request_usb_eject()
+        return
+
+    # Leaving the Media Player workflow for an instrument/home function must
+    # restore the live sound first. Now Playing and USB Eject remain media-side
+    # actions and therefore intentionally keep the media session unchanged.
+    if item in {"Home", "Sound", "Save User Preset", "Arpeggio Speed"} and quick_snapshot_is_media():
+        restore_sound_when_leaving_media("Sound restored")
+
     if item == "Home":
         enter_home()
         return
     if item == "Sound":
         enter_submenu("soundfont")
         mark_dirty("Sound")
-        return
-    if item == "USB Eject":
-        request_usb_eject()
         return
     if item == "Save User Preset":
         enter_user_preset_save_menu()
@@ -9349,10 +9546,32 @@ def resume_internal_sound_after_playback(event: str = "Stopped") -> None:
     mark_dirty(event)
 
 
-def stop_player_keep_player(event: str = "Stopped") -> None:
+def quick_snapshot_is_media() -> bool:
+    """Return True when Quick Menu was opened from the Media Player workflow."""
+    snap = state.quick_resume_snapshot or {}
+    return snap.get("ui_mode") in {"file_source", "file_browser", "radio_browser", "player"}
+
+
+def restore_sound_when_leaving_media(event: str = "Sound restored") -> None:
+    """Stop any media transport and restore the live instrument engine."""
     state.player_stop_requested = True
     stop_player_only()
+    restore_bluetooth_volume_override()
+    state.bluetooth_stop_return_at = 0.0
+    state.player_status = "Stopped"
+    state.player_paused = False
+    state.player_proc_kind = None
+    set_play_led("OFF")
     resume_internal_sound_after_playback(event)
+
+
+def stop_player_keep_player(event: str = "Stopped") -> None:
+    state.player_stop_requested = True
+    was_bt = (state.player_return_mode == "file_source")
+    stop_player_only()
+    restore_bluetooth_volume_override()
+    if was_bt:
+        resume_internal_sound_after_playback(event)
     state.ui_mode = "player"
     invalidate_full_display()
     state.player_status = "Stopped"
@@ -9465,7 +9684,7 @@ def handle_button_event(btn_value: str) -> None:
         mark_dirty(f"BTN ignored: {btn}")
         return
 
-    if btn == "RIGHT_LP" and combi_locked():
+    if btn == "RIGHT_LP" and combi_locked() and not combi_workflow_active():
         pulse_button_activity()
         midi_panic()
         return
@@ -9485,11 +9704,40 @@ def handle_button_event(btn_value: str) -> None:
         enter_user_preset_manage_menu()
         return
 
+    # Combi list escape must be handled before the global LEFT long action.
+    # Otherwise LEFT_LP is consumed by toggle_pot_mode() below and this
+    # context-specific escape path can never run.
+    if state.ui_mode == "submenu" and state.submenu_key == "combi_load" and btn == "LEFT_LP":
+        pulse_button_activity()
+        apply_soundfont_with_default_preset(0)
+        finish_combi_browse_session()
+        return_to_sound_submenu("Salamander C5 Lite loaded", index=0)
+        return
+
     # DOWN long is a soft sound refresh.  MIDI Panic remains available
     # from the top of the Quick Menu for true emergency stuck-note cases.
     if btn == "DOWN_LP" and state.ui_mode != "power_menu":
         pulse_button_activity()
-        refresh_current_sound()
+        media_context = state.ui_mode in {"file_source", "file_browser", "radio_browser", "player"}
+        if state.ui_mode == "quick_menu":
+            media_context = quick_snapshot_is_media()
+        if media_context:
+            # DOWN long inside Media Player is an explicit GM sound refresh, not
+            # a return to the pre-player Yoshimi patch. Stop transport, load
+            # GeneralUser GS as the live engine, then open the Sound menu.
+            state.player_stop_requested = True
+            stop_player_only()
+            restore_bluetooth_volume_override()
+            state.bluetooth_stop_return_at = 0.0
+            state.player_status = "Stopped"
+            state.player_paused = False
+            state.player_proc_kind = None
+            set_play_led("OFF")
+            apply_soundfont_with_default_preset(generaluser_soundfont_index())
+            enter_submenu("soundfont")
+            mark_dirty("GeneralUser GS reloaded")
+        else:
+            refresh_current_sound()
         return
 
     if state.ui_mode == "quick_menu":
@@ -9747,6 +9995,7 @@ def handle_button_event(btn_value: str) -> None:
             file_source_select(); return
         if btn == "LEFT":
             pulse_button_activity()
+            restore_sound_when_leaving_media("Sound restored")
             state.ui_mode = "main"
             state.browser_index = 0
             invalidate_full_display()
@@ -10037,24 +10286,20 @@ def handle_button_event(btn_value: str) -> None:
             if state.combi_entries:
                 idx = clamp_index(state.submenu_index, len(state.combi_entries))
                 item = state.combi_entries[idx]
-                if state.previewed_combi_index == idx and state.combi_active:
-                    # SELECT commits the already playable preview.  Do not
-                    # rebuild/reapply the same Combi after RIGHT already loaded it.
+                if combi_item_is_loaded(item):
+                    # First SELECT loads the selected Combi/SoundFont pair.
+                    # A second SELECT on the same pair opens the existing detail screen.
                     label = shorten_text(str(item.get("name") or "Combi"), 20)
                     finish_combi_browse_session()
                     enter_combi_detail_screen(f"Combi loaded: {label}")
                 else:
-                    apply_combi(item, leave_after=True, preview=False)
+                    apply_combi(item, leave_after=False, preview=False)
             else:
                 mark_dirty("No combis")
             return
         if btn == "RIGHT":
             pulse_button_activity()
-            if state.combi_entries:
-                item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
-                apply_combi(item, leave_after=False, preview=True)
-            else:
-                mark_dirty("No combis")
+            cycle_combi_soundfont()
             return
         if btn == "LEFT":
             pulse_button_activity()
@@ -10075,7 +10320,10 @@ def handle_button_event(btn_value: str) -> None:
     if state.ui_mode == "submenu" and state.submenu_key == "combi_detail":
         if btn == "LEFT":
             pulse_button_activity()
-            return_to_sound_submenu("Combi still active")
+            # Combi detail is the deepest level of the Combi browser.
+            # LEFT returns one level to the Combi list instead of jumping
+            # directly to the Sound menu. The active Combi remains loaded.
+            enter_combi_load_menu(return_mode="sound")
             return
         if btn == "SEL":
             pulse_button_activity()
