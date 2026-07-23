@@ -46,18 +46,11 @@ line-based ASCII protocol.
 The protocol distinguishes three different concepts that should not be
 confused.
 
-  -----------------------------------------------------------------------
-  Concept                 Meaning                 Typical Message
-  ----------------------- ----------------------- -----------------------
-  LINK                    Serial connection is    `HELLO`, `HB`,
-                          alive                   `UNO_READY`
-
-  UI                      Raspberry Pi UI can     `UI:READY`, `UI:BUSY`
-                          process input           
-                          
-  ACK                     Raspberry Pi has        `ACK:BTN`, `ACK:ENC`,
-                          received an input event `ACK:POT`
-  -----------------------------------------------------------------------
+| Concept | Meaning | Typical Message |
+|---------|---------|-----------------|
+| LINK | Serial connection is alive | `HELLO`, `HB`, `UNO_READY` |
+| UI | Raspberry Pi UI can process input | `UI:READY`, `UI:BUSY` |
+| ACK | Raspberry Pi has received an input event | `ACK:BTN`, `ACK:ENC`, `ACK:POT` |
 
 Previous limitation:
 
