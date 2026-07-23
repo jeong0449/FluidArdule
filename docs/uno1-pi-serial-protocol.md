@@ -54,7 +54,7 @@ confused.
 
   UI                      Raspberry Pi UI can     `UI:READY`, `UI:BUSY`
                           process input           
-
+                          
   ACK                     Raspberry Pi has        `ACK:BTN`, `ACK:ENC`,
                           received an input event `ACK:POT`
   -----------------------------------------------------------------------
