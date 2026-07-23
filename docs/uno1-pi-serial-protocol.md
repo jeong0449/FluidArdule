@@ -23,37 +23,23 @@ Major changes:
 -   Protocol updated to support context-aware navigation while
     maintaining backward compatibility.
 
-  -----------------
-  \## 1. Overview
+------------------------------------------------------------------------
 
-  UNO-1 and
-  Raspberry Pi
-  communicate via
-  USB serial (CDC)
-  using a simple
-  line-based ASCII
-  protocol.
+## 1. Overview
 
-  \- Baud rate:
-  `115200` -
-  Encoding: ASCII -
-  Framing: 1
-  message per line,
-  terminated by
-  `\n` - Direction:
-  bidirectional -
-  Primary
-  purpose: - Send
-  hardware input
-  events from UNO-1
-  to Raspberry Pi -
-  Send link, UI,
-  playback, power,
-  and activity
-  state from
-  Raspberry Pi to
-  UNO-1
-  -----------------
+UNO-1 and Raspberry Pi communicate via USB serial (CDC) using a simple
+line-based ASCII protocol.
+
+-   Baud rate: `115200`
+-   Encoding: ASCII
+-   Framing: 1 message per line, terminated by ``
+-   Direction: Bidirectional
+-   Primary purpose:
+    -   Send hardware input events from UNO-1 to Raspberry Pi
+    -   Send link, UI, playback, power, and activity state from
+        Raspberry Pi to UNO-1
+
+------------------------------------------------------------------------
 
 ## 2. Core Concept
 
