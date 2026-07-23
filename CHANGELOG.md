@@ -8,6 +8,67 @@ Version identifiers such as `260715f` refer to the version of the main Fluid Ard
 
 ---
 
+## 2026-07-22 — Combi and Media Player Workflow Update (260722i)
+
+### Added
+
+- Added **Arachno GM** to the available SoundFont sources.
+- Added SoundFont-specific Combi definition support:
+  - `user_combis.FluidR3_GM.json`
+  - `user_combis.GeneralUser_GS.json`
+  - `user_combis.Arachno_GM.json`
+- Added target SoundFont selection to the Combi list.
+  - **RIGHT** cycles through the supported Combi SoundFonts.
+  - **SELECT** loads the selected Combi/SoundFont pair.
+  - Selecting an already loaded pair opens its detail view.
+- Added the connected Wi-Fi IPv4 address to the Wi-Fi status display.
+- Added the active playback SoundFont to Media Player title bars.
+
+### Changed
+
+- Combi definitions are now resolved from the file associated with the
+  selected GM-compatible SoundFont.
+- The currently loaded Combi and its SoundFont are tracked together and
+  remain visibly marked in the Combi browser.
+- Loading a Combi now keeps the user in the Combi list instead of leaving
+  the workflow immediately.
+- **LEFT** from the Combi detail view now returns to the Combi list.
+- **LEFT long press** from the Combi list loads Salamander C5 Lite and
+  exits the otherwise locked Combi state.
+- Global Combi-lock shortcuts no longer override controls while the user
+  is actively browsing or inspecting Combis.
+- MIDI-file playback now uses **GeneralUser GS** temporarily when Yoshimi
+  is the current sound engine.
+- The selected Yoshimi patch remains saved while the user browses and
+  plays multiple files within Media Player.
+- The original Yoshimi patch is restored only when the user leaves the
+  Media Player workflow.
+- During temporary MIDI playback, the Now Playing title bar displays
+  **GUserGS** instead of Yoshimi.
+- **DOWN long press** in Media Player explicitly loads GeneralUser GS
+  before opening the Sound menu rather than restoring Yoshimi.
+- Leaving Media Player through Home, Sound, Quick Menu, or related
+  instrument functions now restores the internal sound engine
+  consistently.
+- Bluetooth Audio now uses a fixed output level while source-device
+  volume controls loudness.
+- The previous system volume and potentiometer control are restored when
+  Bluetooth Audio ends.
+- Exiting Bluetooth Audio now resumes the internal sound engine
+  consistently.
+
+### Fixed
+
+- Fixed RIGHT long press being interpreted as MIDI Panic inside the
+  Combi workflow.
+- Fixed Combi detail navigation jumping directly out of the Combi browser.
+- Fixed Media Player exits that could leave the internal sound engine
+  stopped or the temporary playback state active.
+- Fixed the Media Player title bar showing Yoshimi while GeneralUser GS
+  was actually handling MIDI-file playback.
+
+---
+
 ## 2026-07-15 (260715f)
 
 ### Added
