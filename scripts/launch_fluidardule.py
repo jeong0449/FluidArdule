@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260722i"
+SCRIPT_VERSION = "260723a"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -5999,6 +5999,9 @@ def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = Tru
         and fluid_proc is not None
         and fluid_proc.poll() is None
     ):
+        # Same-SF2 Combi switch: keep the running FluidSynth instance and
+        # apply only the new bank/program, controller, layer, and split setup.
+        log(f"Combi reusing loaded SoundFont: {required}")
         return True
 
     target_index = find_soundfont_index_by_basename(required)
