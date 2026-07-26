@@ -23,6 +23,7 @@ As of June 2026, the project had evolved into a mature Python application exceed
 - Support workstation-style **Combi** performance with layering and keyboard split
 - Accept MIDI input from USB or DIN (via the optional **UNO-2** MIDI bridge)
 - Play Standard MIDI Files and common audio formats (MP3, OGG, WAV, WMA, and more)
+- Play repeating drum accompaniment from compact **ADP (APS Drum Pattern)** files while performing live on a MIDI keyboard
 - Receive Bluetooth audio (A2DP) from phones and tablets
 - Output audio through either an I2S DAC or a USB DAC
 - Mirror live MIDI performance and MIDI file playback to external MIDI sound modules
