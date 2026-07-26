@@ -8,7 +8,7 @@ Fluid Ardule is a modular DIY music workstation that combines Raspberry Pi–bas
 
 Designed as a dedicated musical instrument rather than a general-purpose Linux computer, Fluid Ardule provides a self-contained environment for **FluidSynth**, **Yoshimi**, MIDI playback, media playback, Internet radio, Bluetooth audio reception, and external MIDI module integration. Its event-driven architecture emphasizes responsive operation, low CPU usage, and reliable live performance.
 
-As of June 2026, the project had evolved into a mature Python application exceeding 10,000 lines of code, marking a significant milestone in its development. Current work focuses on reliability, seamless engine switching, and a hardware-oriented user experience.
+As of July 2026, the project had evolved into a mature Python application exceeding 12,000 lines of code, marking a significant milestone in its development. Current work focuses on reliability, seamless engine switching, and a hardware-oriented user experience.
 
 <img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
 
