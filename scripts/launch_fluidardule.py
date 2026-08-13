@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260723a"
+SCRIPT_VERSION = "260813a"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -291,6 +291,7 @@ QUICK_MENU_ITEMS = [
     "Home",
     "Now Playing",
     "Sound",
+    "Play with Drums",
     "USB Eject",
     "Save User Preset",
     "Arpeggio Speed",
@@ -341,6 +342,48 @@ FLUIDSYNTH_LARGE_SF2_NAMES = {"FluidR3_GM.sf2", "GeneralUser_GS.sf2"}
 
 RADIO_STATIONS_PATH = "/home/pi/sf2/radio_stations.json"
 RADIO_FAVORITES_PATH = "/home/pi/sf2/radio_favorites.json"
+
+# ADP v2.3 Final drum-pattern playback (Quick Menu > Play with Drums).
+# Runtime support is intentionally ADP-only and ORN is ignored. Registered slot
+# maps and the 6-accent representative velocities are resolved from JSON files
+# kept beside the SoundFonts. INLINE slot maps (ID 255) are not used by this
+# minimal runtime because they require parsing a companion ADT file.
+ADP_PATTERN_DIR = "/home/pi/sf2/ADP"
+ADP_SLOT_MAP_PATH = "/home/pi/sf2/slot_map_definitions.json"
+ADP_ACCENT_LEVELS_PATH = "/home/pi/sf2/accent_levels.json"
+ADP_DEFAULT_BPM = 120
+ADP_NOTE_LENGTH_SEC = 0.040
+ADP_TAP_MIN_BPM = 40
+ADP_TAP_MAX_BPM = 300
+ADP_TAP_HISTORY = 5
+ADP_TAP_HIHAT_NOTE = 42
+ADP_TAP_HIHAT_VELOCITY = 105
+ADP_TAP_HIHAT_LENGTH_SEC = 0.035
+ADP_GENRES = [
+    ("RCK", "Rock"),
+    ("BNV", "Bossa Nova"),
+    ("FNK", "Funk"),
+    ("JZZ", "Jazz"),
+    ("BLU", "Blues"),
+    ("POP", "Pop"),
+    ("BAL", "Ballad"),
+    ("LAT", "Latin"),
+    ("AFC", "Afro-Cuban"),
+    ("SMB", "Samba"),
+    ("WLZ", "Waltz"),
+    ("SWG", "Swing"),
+    ("SHF", "Shuffle"),
+    ("REG", "Reggae"),
+    ("MTL", "Metal"),
+    ("HHP", "Hip-Hop"),
+    ("RNB", "R&B"),
+    ("EDM", "EDM"),
+    ("HSE", "House"),
+    ("TNO", "Techno"),
+    ("DRM", "Drums"),
+]
+ADP_GENRE_NAME = dict(ADP_GENRES)
+ADP_FIELD_NAMES = ("genre", "pattern", "kit")
 
 WIFI_INTERFACE = "wlan0"
 WPA_SUPPLICANT_CONF = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
@@ -429,6 +472,8 @@ UI_ACCEL_PROFILE_BY_CONTEXT = {
     "file_browser": 1,
     "radio_browser": 1,
     "quick_menu": 0,
+    "play_with_drums": 2,
+    "adp_tap_tempo": 0,
     "player": 0,
     "power_menu": 0,
     "restart_wait": 0,
@@ -630,6 +675,37 @@ class RuntimeState:
     bluetooth_saved_volume_percent: int | None = None
     bluetooth_volume_override_active: bool = False
 
+    adp_path: str | None = None
+    adp_name: str = "No ADP pattern"
+    adp_grid_code: int = 0
+    adp_slot_map_id: int = 0
+    adp_slot_notes: list[int] = field(default_factory=list)
+    adp_accent_velocities: list[int] = field(default_factory=list)
+    adp_steps: list[list[tuple[int, int]]] = field(default_factory=list)
+    adp_bpm: int = ADP_DEFAULT_BPM
+    adp_playing: bool = False
+    adp_error: str = ""
+    adp_drum_kits: list[dict] = field(default_factory=list)
+    adp_drum_kit_index: int = 0
+    adp_pending_drum_kit_index: int | None = None
+    adp_patterns_by_genre: dict[str, list[str]] = field(default_factory=dict)
+    adp_genre_codes: list[str] = field(default_factory=list)
+    adp_genre_index: int = 0
+    adp_pattern_index: int = 0
+    adp_selected_field: int = 0
+    adp_pending_pattern: dict | None = None
+    adp_source_sf_name: str = ""
+    adp_source_preset_name: str = ""
+    adp_tap_times: list[float] = field(default_factory=list)
+    adp_tap_measured_bpm: int | None = None
+    adp_tap_original_bpm: int = ADP_DEFAULT_BPM
+    adp_tap_resume_playback: bool = False
+    adp_tap_route_disconnected: bool = False
+    # RAW MIDI devices are normally opened directly by FluidSynth and cannot be
+    # monitored concurrently by amidi.  Tap Tempo temporarily restarts
+    # FluidSynth with the ALSA sequencer driver so Python can own the RAW device,
+    # suppress the original key notes, and interpret every Note On as a tap.
+
     pending_resume_after_sf_apply: bool = False
 
     user_preset_entries: list[dict] = field(default_factory=list)
@@ -691,6 +767,8 @@ midi_activity_thread_handle = None
 combi_router_proc = None
 combi_router_thread_handle = None
 combi_router_generation = 0
+adp_play_thread = None
+adp_stop_event = threading.Event()
 _wifi_status_cache_until = 0.0
 _wifi_known_ssids_cache_until = 0.0
 _wifi_known_ssids_cache: list[str] = []
@@ -993,6 +1071,575 @@ def file_source_select() -> None:
     state.ui_mode = "file_browser"
     invalidate_full_display()
     mark_dirty(item["display"])
+
+
+def scan_adp_patterns() -> None:
+    """Cache flat ADP files grouped by their three-letter filename prefix."""
+    root = Path(ADP_PATTERN_DIR)
+    grouped: dict[str, list[str]] = {}
+    try:
+        files = sorted(
+            (p for p in root.iterdir() if p.is_file() and p.suffix.lower() == ".adp"),
+            key=lambda p: p.name.lower(),
+        )
+    except Exception as exc:
+        state.adp_error = str(exc)
+        files = []
+
+    for path in files:
+        code = path.stem[:3].upper() or "DRM"
+        grouped.setdefault(code, []).append(str(path))
+
+    canonical = [code for code, _name in ADP_GENRES if code in grouped]
+    unknown = sorted(code for code in grouped if code not in ADP_GENRE_NAME)
+    state.adp_patterns_by_genre = grouped
+    state.adp_genre_codes = canonical + unknown
+    state.adp_genre_index = clamp_index(state.adp_genre_index, len(state.adp_genre_codes))
+    state.adp_pattern_index = 0
+
+
+def current_adp_genre_code() -> str:
+    if not state.adp_genre_codes:
+        return "DRM"
+    return state.adp_genre_codes[clamp_index(state.adp_genre_index, len(state.adp_genre_codes))]
+
+
+def current_adp_genre_name() -> str:
+    code = current_adp_genre_code()
+    return ADP_GENRE_NAME.get(code, code)
+
+
+def current_adp_pattern_paths() -> list[str]:
+    return state.adp_patterns_by_genre.get(current_adp_genre_code(), [])
+
+
+def find_first_adp_file() -> Path | None:
+    """Return the first cached ADP file in genre/pattern order."""
+    paths = current_adp_pattern_paths()
+    return Path(paths[0]) if paths else None
+
+def crc16_ccitt(data: bytes) -> int:
+    """CRC16-CCITT used by ADP v2.3 Final (poly 0x1021, init 0xFFFF)."""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= int(byte) << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc
+
+
+def load_adp_slot_map(slot_map_id: int) -> list[int]:
+    """Resolve one registered ADP slot map to representative GM MIDI notes."""
+    if int(slot_map_id) == 255:
+        raise ValueError("INLINE slot map is not supported by Fluid Ardule")
+    try:
+        maps = json.loads(Path(ADP_SLOT_MAP_PATH).read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Cannot read slot map JSON: {exc}") from exc
+    if not isinstance(maps, list):
+        raise ValueError("Invalid slot map JSON: top level must be a list")
+    selected = next((m for m in maps if int(m.get("slot_map_id", -1)) == int(slot_map_id)), None)
+    if not isinstance(selected, dict):
+        raise ValueError(f"Unknown SLOT_MAP_ID: {slot_map_id}")
+    slots = selected.get("slots")
+    if not isinstance(slots, list) or not slots:
+        raise ValueError(f"SLOT_MAP_ID {slot_map_id} has no slots")
+    ordered = sorted(slots, key=lambda item: int(item.get("slot", -1)))
+    notes: list[int] = []
+    for expected, item in enumerate(ordered):
+        if int(item.get("slot", -1)) != expected:
+            raise ValueError(f"SLOT_MAP_ID {slot_map_id} has non-contiguous slots")
+        note = int(item.get("representative_midi", -1))
+        if not 0 <= note <= 127:
+            raise ValueError(f"SLOT_MAP_ID {slot_map_id} has invalid MIDI note")
+        notes.append(note)
+    if len(notes) > 16:
+        raise ValueError("ADP slot map exceeds 16 slots")
+    return notes
+
+
+def load_adp_accent_velocities() -> list[int]:
+    """Load ADP levels 0..5 from the 6-accent scheme in accent_levels.json."""
+    try:
+        data = json.loads(Path(ADP_ACCENT_LEVELS_PATH).read_text(encoding="utf-8"))
+        levels = data["schemes"]["6-accent"]["levels"]
+    except Exception as exc:
+        raise ValueError(f"Cannot read 6-accent JSON: {exc}") from exc
+    velocities = [None] * 6
+    for item in levels:
+        idx = int(item.get("index", -1))
+        if 0 <= idx <= 5:
+            velocity = int(item.get("representative_velocity", -1))
+            if not 0 <= velocity <= 127:
+                raise ValueError(f"Invalid representative velocity for accent {idx}")
+            velocities[idx] = velocity
+    if any(v is None for v in velocities):
+        raise ValueError("6-accent JSON must define levels 0..5")
+    return [int(v) for v in velocities]
+
+
+def load_adp_pattern(path: str | Path) -> tuple[list[list[tuple[int, int]]], dict]:
+    """Decode and validate one ADP v2.3 Final file."""
+    p = Path(path)
+    data = p.read_bytes()
+    if len(data) < 12:
+        raise ValueError("ADP header is truncated")
+    if data[:4] != b"ADP3":
+        raise ValueError("Unsupported ADP magic")
+    version = data[4]
+    if version != 23:
+        raise ValueError(f"Unsupported ADP version: {version}")
+    grid_code = data[5]
+    if grid_code not in {0, 1, 2, 3}:
+        raise ValueError(f"Unsupported ADP SUBDIV code: {grid_code}")
+    step_count = data[6]
+    if step_count == 0:
+        raise ValueError("ADP LENGTH must not be zero")
+    slot_map_id = data[7]
+    payload_bytes = int.from_bytes(data[8:10], "little")
+    expected_crc = int.from_bytes(data[10:12], "little")
+    payload = data[12:]
+    if payload_bytes != len(payload):
+        raise ValueError("ADP payload length mismatch")
+    actual_crc = crc16_ccitt(payload)
+    if actual_crc != expected_crc:
+        raise ValueError(f"ADP CRC mismatch: {actual_crc:04X}!={expected_crc:04X}")
+
+    slot_notes = load_adp_slot_map(slot_map_id)
+    accent_velocities = load_adp_accent_velocities()
+    pos = 0
+    steps: list[list[tuple[int, int]]] = []
+    for _ in range(step_count):
+        if pos >= len(payload):
+            raise ValueError("ADP payload ended before all steps")
+        hit_count = payload[pos]
+        pos += 1
+        hits: list[tuple[int, int]] = []
+        seen_slots: set[int] = set()
+        for _ in range(hit_count):
+            if pos >= len(payload):
+                raise ValueError("ADP hit data is truncated")
+            packed = payload[pos]
+            pos += 1
+            if packed & 0x80:
+                raise ValueError("ADP packed hit uses reserved bit 7")
+            slot = packed >> 3
+            accent = packed & 0x07
+            if slot >= len(slot_notes):
+                raise ValueError(f"ADP slot {slot} is outside SLOT_MAP_ID {slot_map_id}")
+            if accent not in {1, 2, 3, 4, 5}:
+                raise ValueError(f"Invalid ADP accent level: {accent}")
+            if slot in seen_slots:
+                raise ValueError(f"Duplicate ADP slot {slot} in one step")
+            seen_slots.add(slot)
+            hits.append((slot, accent))
+        steps.append(hits)
+    if pos != len(payload):
+        raise ValueError("ADP payload has trailing bytes")
+    return steps, {
+        "grid_code": grid_code,
+        "slot_map_id": slot_map_id,
+        "slot_notes": slot_notes,
+        "accent_velocities": accent_velocities,
+        "step_count": step_count,
+    }
+
+def prepare_adp_pattern(path: str | Path) -> dict:
+    steps, info = load_adp_pattern(path)
+    p = Path(path)
+    return {"path": str(p), "name": p.stem, "steps": steps, "info": info}
+
+
+def apply_prepared_adp_pattern(prepared: dict, *, announce: bool = True) -> None:
+    state.adp_path = str(prepared["path"])
+    state.adp_name = str(prepared["name"])
+    state.adp_steps = prepared["steps"]
+    info = prepared["info"]
+    state.adp_grid_code = int(info["grid_code"])
+    state.adp_slot_map_id = int(info["slot_map_id"])
+    state.adp_slot_notes = list(info["slot_notes"])
+    state.adp_accent_velocities = list(info["accent_velocities"])
+    # ADP v2.3 Final deliberately does not store tempo. Keep the user's current
+    # Play with Drums tempo when browsing patterns; the page starts at 120 BPM.
+    state.adp_pending_pattern = None
+    if announce:
+        mark_dirty(f"Pattern: {state.adp_name}")
+
+
+def select_adp_pattern(path: str | Path) -> None:
+    try:
+        prepared = prepare_adp_pattern(path)
+    except Exception as exc:
+        state.adp_error = str(exc)
+        mark_dirty("ADP load failed")
+        return
+    if state.adp_playing:
+        state.adp_pending_pattern = prepared
+        mark_dirty(f"Next bar: {prepared['name']}")
+    else:
+        apply_prepared_adp_pattern(prepared)
+
+
+def move_adp_genre(delta: int) -> None:
+    if not state.adp_genre_codes:
+        mark_dirty("No ADP genres")
+        return
+    state.adp_genre_index = (state.adp_genre_index + int(delta)) % len(state.adp_genre_codes)
+    state.adp_pattern_index = 0
+    paths = current_adp_pattern_paths()
+    if paths:
+        select_adp_pattern(paths[0])
+
+
+def move_adp_pattern(delta: int) -> None:
+    paths = current_adp_pattern_paths()
+    if not paths:
+        mark_dirty("No patterns in genre")
+        return
+    state.adp_pattern_index = (state.adp_pattern_index + int(delta)) % len(paths)
+    select_adp_pattern(paths[state.adp_pattern_index])
+
+
+def cycle_adp_field() -> None:
+    state.adp_selected_field = (state.adp_selected_field + 1) % len(ADP_FIELD_NAMES)
+    mark_dirty(f"Select {ADP_FIELD_NAMES[state.adp_selected_field]}")
+
+
+def move_adp_selected_value(delta: int) -> None:
+    field_name = ADP_FIELD_NAMES[state.adp_selected_field]
+    if field_name == "genre":
+        move_adp_genre(delta)
+    elif field_name == "pattern":
+        move_adp_pattern(delta)
+    else:
+        move_adp_drum_kit(delta)
+
+
+def adp_genre_position_label() -> str:
+    total = len(state.adp_genre_codes)
+    return f"[{clamp_index(state.adp_genre_index, total) + 1}/{total}]" if total else "[0/0]"
+
+
+def adp_pattern_position_label() -> str:
+    paths = current_adp_pattern_paths()
+    total = len(paths)
+    return f"[{clamp_index(state.adp_pattern_index, total) + 1}/{total}]" if total else "[0/0]"
+
+
+def adp_kit_position_label(index: int | None = None) -> str:
+    total = len(state.adp_drum_kits)
+    if not total:
+        return "[0/0]"
+    idx = state.adp_drum_kit_index if index is None else int(index)
+    return f"[{idx % total + 1}/{total}]"
+
+
+def adp_step_interval_sec(grid_code: int, bpm: int) -> float:
+    quarter = 60.0 / max(1, int(bpm))
+    # ADP v2.3 Final: 16, 32, 8T, 16T = 4, 8, 3, 6 steps/quarter.
+    divisor = {0: 4.0, 1: 8.0, 2: 3.0, 3: 6.0}.get(int(grid_code), 4.0)
+    return quarter / divisor
+
+
+def send_adp_note(slot: int, accent: int, on: bool) -> bool:
+    if not (0 <= int(slot) < len(state.adp_slot_notes)):
+        return False
+    note = state.adp_slot_notes[int(slot)]
+    if on:
+        if not (1 <= int(accent) <= 5 and len(state.adp_accent_velocities) >= 6):
+            return False
+        velocity = state.adp_accent_velocities[int(accent)]
+    else:
+        velocity = 0
+    command = f"noteon 9 {note} {velocity}" if on else f"noteoff 9 {note}"
+    return send_fluidsynth_command(command)
+
+
+
+
+def _play_adp_tap_hihat() -> None:
+    """Play a short closed hi-hat without forwarding the tapped keyboard note."""
+    send_fluidsynth_command(f"noteon 9 {ADP_TAP_HIHAT_NOTE} {ADP_TAP_HIHAT_VELOCITY}")
+
+    def _off() -> None:
+        time.sleep(ADP_TAP_HIHAT_LENGTH_SEC)
+        send_fluidsynth_command(f"noteoff 9 {ADP_TAP_HIHAT_NOTE}")
+
+    threading.Thread(target=_off, name="adp-tap-hihat", daemon=True).start()
+
+
+def register_adp_tap(now: float | None = None) -> None:
+    """Record one MIDI-key tap and update the candidate BPM."""
+    if state.ui_mode != "adp_tap_tempo":
+        return
+    tap_time = time.monotonic() if now is None else float(now)
+    if state.adp_tap_times and tap_time - state.adp_tap_times[-1] > 2.5:
+        state.adp_tap_times.clear()
+        state.adp_tap_measured_bpm = None
+    state.adp_tap_times.append(tap_time)
+    state.adp_tap_times = state.adp_tap_times[-ADP_TAP_HISTORY:]
+    if len(state.adp_tap_times) >= 2:
+        intervals = [b - a for a, b in zip(state.adp_tap_times, state.adp_tap_times[1:]) if b > a]
+        if intervals:
+            bpm = int(round(60.0 / (sum(intervals) / len(intervals))))
+            state.adp_tap_measured_bpm = max(ADP_TAP_MIN_BPM, min(ADP_TAP_MAX_BPM, bpm))
+    _play_adp_tap_hihat()
+    mark_dirty("Tap")
+
+
+def enter_adp_tap_tempo() -> None:
+    """Enter Tap Tempo for ALSA Sequencer MIDI inputs only.
+
+    USB Direct RAW is intentionally excluded.  FluidSynth owns the RAW device
+    directly, and temporarily taking that device over through amidi adds enough
+    process/IPC latency to make the audible tap feedback feel late.  ALSA SEQ
+    inputs can be observed without restarting the engine, so their Note On
+    events are used as the low-latency Tap Tempo source.
+    """
+    if state.midi_mode == "usb_direct_raw":
+        show_timed_modal_message(
+            "Tap Tempo unavailable",
+            hold_sec=1.4,
+            subtext="Select an ALSA MIDI mode",
+        )
+        return
+
+    state.adp_tap_original_bpm = int(state.adp_bpm)
+    state.adp_tap_resume_playback = bool(state.adp_playing)
+    state.adp_tap_times.clear()
+    state.adp_tap_measured_bpm = None
+    if state.adp_playing:
+        stop_adp_playback(announce=False)
+
+    state.ui_mode = "adp_tap_tempo"
+    state.adp_tap_route_disconnected = False
+    if not state.combi_active:
+        _disconnect_direct_midi_route()
+        state.adp_tap_route_disconnected = True
+
+    invalidate_full_display()
+    mark_dirty("Tap Tempo")
+
+
+def leave_adp_tap_tempo(*, apply: bool) -> None:
+    """Apply/cancel the tempo, restore the ALSA MIDI route, and optionally resume."""
+    if apply and state.adp_tap_measured_bpm is not None:
+        state.adp_bpm = int(state.adp_tap_measured_bpm)
+    else:
+        state.adp_bpm = int(state.adp_tap_original_bpm)
+    resume = bool(state.adp_tap_resume_playback)
+    state.adp_tap_times.clear()
+    state.adp_tap_measured_bpm = None
+    state.adp_tap_resume_playback = False
+
+    state.ui_mode = "play_with_drums"
+    if state.adp_tap_route_disconnected:
+        reconnect_midi_to_fluidsynth(force_draw=False)
+
+    state.adp_tap_route_disconnected = False
+    invalidate_full_display()
+    mark_dirty("Tempo applied" if apply else "Tap canceled")
+    if resume:
+        start_adp_playback()
+
+def supported_adp_soundfont() -> bool:
+    """Return True for the three GM SoundFonts supported by Play with Drums."""
+    try:
+        base = Path(SOUNDFONTS[state.sf_index][0]).name.lower()
+    except Exception:
+        return False
+    return base in {"fluidr3_gm.sf2", "generaluser_gs.sf2", "arachno_gm.sf2"}
+
+
+def load_adp_drum_kits() -> None:
+    """Build the CH10 drum-kit list from the active SoundFont preset JSON."""
+    kits = [p for p in load_presets_for_sf2(state.sf_index)
+            if int(p.get("bank", 0)) == 128 or bool(p.get("is_drum"))]
+    if not kits:
+        kits = [{"name": "GM Standard", "bank": 128, "program": 0, "engine": "fluidsynth", "is_drum": True}]
+    state.adp_drum_kits = kits
+    state.adp_drum_kit_index = 0
+    state.adp_pending_drum_kit_index = None
+
+
+def adp_drum_kit_name(index: int | None = None) -> str:
+    kits = state.adp_drum_kits
+    if not kits:
+        return "GM Standard"
+    idx = state.adp_drum_kit_index if index is None else int(index)
+    idx %= len(kits)
+    return str(kits[idx].get("name", "Drum Kit"))
+
+
+def apply_adp_drum_kit(index: int, *, announce: bool = True) -> bool:
+    """Apply one SoundFont drum preset to FluidSynth CH10 only."""
+    if not state.adp_drum_kits:
+        return False
+    idx = int(index) % len(state.adp_drum_kits)
+    kit = state.adp_drum_kits[idx]
+    bank = int(kit.get("bank", 128))
+    program = int(kit.get("program", 0))
+    ok = False
+    ok = send_fluidsynth_command("drums 9 on") or ok
+    ok = send_fluidsynth_command(f"bank 9 {bank}") or ok
+    ok = send_fluidsynth_command(f"prog 9 {program}") or ok
+    ok = send_fluidsynth_command(f"select 9 0 {bank} {program}") or ok
+    state.adp_drum_kit_index = idx
+    state.adp_pending_drum_kit_index = None
+    if announce:
+        mark_dirty(f"Drum Kit: {adp_drum_kit_name(idx)}")
+    return ok
+
+
+def move_adp_drum_kit(delta: int) -> None:
+    """Select a drum kit; while playing, queue it for the next bar boundary."""
+    if not state.adp_drum_kits:
+        mark_dirty("No drum kits")
+        return
+    base = state.adp_pending_drum_kit_index
+    if base is None:
+        base = state.adp_drum_kit_index
+    target = (int(base) + int(delta)) % len(state.adp_drum_kits)
+    if state.adp_playing:
+        state.adp_pending_drum_kit_index = target
+        mark_dirty(f"Next bar: {adp_drum_kit_name(target)}")
+    else:
+        apply_adp_drum_kit(target)
+
+def _adp_playback_worker() -> None:
+    try:
+        interval = adp_step_interval_sec(state.adp_grid_code, state.adp_bpm)
+        deadline = time.monotonic()
+        step_index = 0
+        while not adp_stop_event.is_set() and state.adp_steps:
+            # ADP has no time-signature field. For the existing 4/4 Play with
+            # Drums workflow, v2.3 Final uses 16/32/8T/16T = 16/32/12/24 steps/bar.
+            steps_per_bar = {0: 16, 1: 32, 2: 12, 3: 24}.get(int(state.adp_grid_code), 16)
+            if step_index % steps_per_bar == 0:
+                if state.adp_pending_pattern is not None:
+                    apply_prepared_adp_pattern(state.adp_pending_pattern, announce=False)
+                    step_index = 0
+                    steps_per_bar = {0: 16, 1: 32, 2: 12, 3: 24}.get(int(state.adp_grid_code), 16)
+                    mark_dirty(f"Pattern: {state.adp_name}")
+                if state.adp_pending_drum_kit_index is not None:
+                    apply_adp_drum_kit(state.adp_pending_drum_kit_index, announce=False)
+                    mark_dirty(f"Drum Kit: {adp_drum_kit_name()}")
+            interval = adp_step_interval_sec(state.adp_grid_code, state.adp_bpm)
+            hits = state.adp_steps[step_index]
+            active_slots = []
+            for slot, accent in hits:
+                if send_adp_note(slot, accent, True):
+                    active_slots.append(slot)
+
+            note_deadline = min(deadline + ADP_NOTE_LENGTH_SEC, deadline + interval)
+            wait_time = note_deadline - time.monotonic()
+            if wait_time > 0 and adp_stop_event.wait(wait_time):
+                break
+            for slot in active_slots:
+                send_adp_note(slot, 0, False)
+
+            step_index = (step_index + 1) % len(state.adp_steps)
+            deadline += interval
+            wait_time = deadline - time.monotonic()
+            if wait_time > 0:
+                if adp_stop_event.wait(wait_time):
+                    break
+            elif wait_time < -interval:
+                # If the Pi was briefly delayed, resynchronize without adding a
+                # pause at the loop boundary or rapidly replaying missed steps.
+                deadline = time.monotonic()
+    except Exception as exc:
+        state.adp_error = str(exc)
+        log(f"ADP playback failed: {exc}")
+    finally:
+        send_fluidsynth_command("cc 9 123 0")
+        send_fluidsynth_command("cc 9 120 0")
+        state.adp_playing = False
+        mark_dirty("Drums stopped")
+
+
+def start_adp_playback() -> None:
+    global adp_play_thread
+    if state.current_engine != "fluidsynth":
+        show_timed_modal_message("FluidSynth required", hold_sec=1.2, subtext="ADP uses the loaded SoundFont")
+        return
+    if not state.adp_steps:
+        show_timed_modal_message("No ADP pattern", hold_sec=1.2, subtext=state.adp_error or ADP_PATTERN_DIR)
+        return
+    stop_adp_playback(announce=False)
+    adp_stop_event.clear()
+    state.adp_playing = True
+    adp_play_thread = threading.Thread(target=_adp_playback_worker, name="adp-playback", daemon=True)
+    adp_play_thread.start()
+    set_play_led("ON")
+    mark_dirty("Drums playing")
+
+
+def stop_adp_playback(*, announce: bool = True) -> None:
+    global adp_play_thread
+    adp_stop_event.set()
+    thread = adp_play_thread
+    if thread and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=0.5)
+    adp_play_thread = None
+    state.adp_playing = False
+    send_fluidsynth_command("cc 9 123 0")
+    send_fluidsynth_command("cc 9 120 0")
+    set_play_led("OFF")
+    if announce:
+        mark_dirty("Drums stopped")
+
+
+def enter_play_with_drums() -> None:
+    stop_adp_playback(announce=False)
+    state.adp_error = ""
+
+    # Preserve an already loaded Combi.  Its CH1 keyboard routing remains
+    # active while this page adds ADP drums on CH10.  Outside Combi mode,
+    # automatically load GeneralUser GS when the current source is not one of
+    # the supported GM SoundFonts.
+    if not state.combi_active and not supported_adp_soundfont():
+        apply_soundfont_with_default_preset(generaluser_soundfont_index())
+
+    state.adp_source_sf_name = state.sf_name or "SoundFont"
+    state.adp_source_preset_name = state.current_combi_name if state.combi_active else state.current_preset_name
+    state.adp_selected_field = 0
+    state.adp_pending_pattern = None
+    state.adp_bpm = ADP_DEFAULT_BPM
+    load_adp_drum_kits()
+    apply_adp_drum_kit(0, announce=False)
+    scan_adp_patterns()
+    path = find_first_adp_file()
+    if path is None:
+        state.adp_path = None
+        state.adp_name = "No ADP pattern"
+        state.adp_steps = []
+    else:
+        try:
+            apply_prepared_adp_pattern(prepare_adp_pattern(path), announce=False)
+        except Exception as exc:
+            state.adp_path = str(path)
+            state.adp_name = path.stem
+            state.adp_steps = []
+            state.adp_error = str(exc)
+    state.ui_mode = "play_with_drums"
+    invalidate_full_display()
+    mark_dirty("Play with Drums")
+
+
+def leave_play_with_drums() -> None:
+    stop_adp_playback(announce=False)
+    restore_quick_snapshot()
+
+
+def toggle_adp_playback() -> None:
+    if state.adp_playing:
+        stop_adp_playback()
+    else:
+        start_adp_playback()
 
 
 def ensure_radio_files_on_demand() -> None:
@@ -2056,7 +2703,12 @@ def pulse_button_activity() -> None:
 def get_midi_activity_monitor_spec() -> tuple[list[str] | None, str]:
     if not MIDI_ACTIVITY_MONITOR_ENABLED:
         return None, ""
-    # Keep MIDI activity LED only for SEQ-style sources.
+
+    # RAW MIDI is intentionally not monitored for Tap Tempo. FluidSynth owns
+    # the RAW device directly, and taking it over through amidi caused perceptible
+    # feedback latency. SEQ-style inputs can be observed with aseqdump. During
+    # Tap Tempo the direct aconnect route is disconnected, so the observed key
+    # does not also reach FluidSynth as a piano note.
     if state.midi_mode in {"alsa_midi", "uno2_bridge_seq", "external_midi_seq"}:
         port = state.midi_src_port
         if port and port not in {"-", "", "seq"}:
@@ -2186,6 +2838,8 @@ def midi_activity_monitor_thread() -> None:
                 continue
 
             if midi_activity_line_has_note_on(line):
+                if state.ui_mode == "adp_tap_tempo":
+                    register_adp_tap()
                 maybe_pulse_led()
 
         except Exception as exc:
@@ -2635,6 +3289,10 @@ class TFTDisplay:
             self._draw_restart_wait(draw)
         elif state.ui_mode == "quick_menu":
             self._draw_quick_menu(draw)
+        elif state.ui_mode == "play_with_drums":
+            self._draw_play_with_drums(draw)
+        elif state.ui_mode == "adp_tap_tempo":
+            self._draw_adp_tap_tempo(draw)
         elif state.ui_mode == "sound_edit":
             self._draw_sound_edit(draw)
         if state.usb_eject_confirm:
@@ -3588,6 +4246,142 @@ class TFTDisplay:
         labels = [(item, False) for item in QUICK_MENU_ITEMS]
         draw.rounded_rectangle((12, 52, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
         self._draw_scrolled_rows(draw, labels, state.quick_menu_index, 52, 34, self.height - 50)
+
+    def _draw_adp_pattern_thumbnail(self, draw, x0=320, y0=146, x1=452, y1=181):
+        """Draw a label-free static dot-matrix preview in the spare TFT area."""
+        steps = state.adp_steps or []
+        if not steps:
+            return
+        active_slots = sorted({slot for hits in steps for slot, _accent in hits})
+        if not active_slots:
+            return
+
+        width = max(1, x1 - x0)
+        height = max(1, y1 - y0)
+        cols = len(steps)
+        rows = len(active_slots)
+        row_index = {slot: i for i, slot in enumerate(active_slots)}
+
+        # No grid lines or text: only hits. For a 64-step pattern (the
+        # 32-step-per-bar x 2-bar case), reserve a tiny blank gap between the
+        # two bars so the A/B structure remains visible on the small TFT.
+        bar_gap = 4 if cols == 64 else 0
+        usable_width = max(1, width - bar_gap)
+        half = cols // 2
+        for step_idx, hits in enumerate(steps):
+            cx = x0 + int(round((step_idx + 0.5) * usable_width / cols))
+            if bar_gap and step_idx >= half:
+                cx += bar_gap
+            for slot, accent in hits:
+                r = row_index.get(slot)
+                if r is None:
+                    continue
+                cy = y0 + int(round((r + 0.5) * height / rows))
+                # Preserve all five accent levels in playback; the thumbnail uses
+                # only two visual sizes because the 480x320 TFT is very small.
+                radius = 0 if int(accent) <= 3 else 1
+                draw.rectangle((cx - radius, cy - radius, cx + radius, cy + radius), fill=ACCENT)
+
+    def _draw_play_with_drums(self, draw):
+        # Two-line source information keeps the main page free of redundant
+        # keyboard/channel text.
+        draw.text((16, 6), "Play with Drums", font=self.font_title, fill=ACCENT)
+        source_font = shorten_text(state.adp_source_sf_name or state.sf_name or "SoundFont", 17)
+        source_preset = shorten_text(state.adp_source_preset_name or state.current_preset_name or "Preset", 22)
+        for row, text in enumerate((source_font, source_preset)):
+            bbox = draw.textbbox((0, 0), text, font=self.font_small)
+            draw.text((self.width - 16 - (bbox[2] - bbox[0]), 5 + row * 20), text, font=self.font_small, fill=ACCENT)
+
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+
+        genre_code = current_adp_genre_code()
+        genre_name = current_adp_genre_name()
+        pattern_name = shorten_text(state.adp_name or "No ADP pattern", 18)
+        kit_index = state.adp_pending_drum_kit_index
+        kit_name = shorten_text(adp_drum_kit_name(kit_index), 22)
+        status = "PLAYING" if state.adp_playing else "STOPPED"
+
+        def body_text_y(center_y, text):
+            bbox = draw.textbbox((0, 0), text, font=self.font_body)
+            return center_y - (bbox[3] - bbox[1]) / 2 - bbox[1]
+
+        def field_text(x, center_y, text, selected):
+            bbox = draw.textbbox((0, 0), text, font=self.font_body)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            text_y = center_y - text_h / 2 - bbox[1]
+            if selected:
+                pad_x, pad_y = 4, 3
+                draw.rounded_rectangle(
+                    (x - pad_x, text_y + bbox[1] - pad_y,
+                     x + text_w + pad_x, text_y + bbox[3] + pad_y),
+                    radius=5,
+                    fill=SELECT_BG,
+                )
+            draw.text((x, text_y), text, font=self.font_body, fill=FG)
+            return x + text_w + 12
+
+        # The main information area is always exactly three rows:
+        # 1) genre + playback status, 2) pattern + tempo, 3) drum kit.
+        # Leave a visible top margin inside the panel. Rows 1 and 2 remain
+        # grouped as Pattern information, while row 3 is separated more modestly.
+        y1 = 92
+        draw.text((28, body_text_y(y1, "Pattern:")), "Pattern:", font=self.font_body, fill=FG)
+        field_text(120, y1, f"{adp_genre_position_label()} {genre_name}", state.adp_selected_field == 0)
+        status_bbox = draw.textbbox((0, 0), status, font=self.font_body)
+        status_x = self.width - 28 - (status_bbox[2] - status_bbox[0])
+        draw.text((status_x, body_text_y(y1, status)), status, font=self.font_body, fill=FG)
+
+        y2 = 126
+        field_text(120, y2, f"{adp_pattern_position_label()} {pattern_name}", state.adp_selected_field == 1)
+        bpm_text = f"{state.adp_bpm} BPM"
+        bpm_bbox = draw.textbbox((0, 0), bpm_text, font=self.font_body)
+        bpm_x = self.width - 28 - (bpm_bbox[2] - bpm_bbox[0])
+        draw.text((bpm_x, body_text_y(y2, bpm_text)), bpm_text, font=self.font_body, fill=FG)
+
+        y3 = 162
+        draw.text((28, body_text_y(y3, "Kit:")), "Kit:", font=self.font_body, fill=FG)
+        field_text(82, y3, f"{adp_kit_position_label(kit_index)} {kit_name}", state.adp_selected_field == 2)
+
+        # Compact, label-free ADP pattern preview in the previously unused area.
+        self._draw_adp_pattern_thumbnail(draw)
+
+        if state.adp_error:
+            draw.text((28, 180), shorten_text(state.adp_error, 50), font=self.font_small, fill=STATUS_BAD)
+
+        base_fill = (58, 95, 168)
+        buttons = [
+            {"label": "EXIT", "x": 18,  "y": 208, "w": 74,  "h": 44},
+            {"label": "+",    "x": 122, "y": 188, "w": 96,  "h": 38},
+            {"label": "-",    "x": 122, "y": 230, "w": 96,  "h": 38},
+            {"label": "NEXT", "x": 248, "y": 208, "w": 74,  "h": 44},
+            {"label": "STOP" if state.adp_playing else "START", "x": 350, "y": 200, "w": 108, "h": 58},
+        ]
+        for btn in buttons:
+            x, y, w, h = btn["x"], btn["y"], btn["w"], btn["h"]
+            draw.rounded_rectangle((x, y, x + w, y + h), radius=10, fill=base_fill)
+            font = self.font_body
+            bbox = draw.textbbox((0, 0), btn["label"], font=font)
+            if (bbox[2] - bbox[0]) > (w - 10):
+                font = self.font_small
+                bbox = draw.textbbox((0, 0), btn["label"], font=font)
+            tx = x + (w - (bbox[2] - bbox[0])) / 2 - bbox[0]
+            ty = y + (h - (bbox[3] - bbox[1])) / 2 - bbox[1]
+            draw.text((tx, ty), btn["label"], font=font, fill=FG)
+
+    def _draw_adp_tap_tempo(self, draw):
+        measured = f"{state.adp_tap_measured_bpm} BPM" if state.adp_tap_measured_bpm is not None else "--- BPM"
+        taps = len(state.adp_tap_times)
+        self._draw_submenu_title(draw, "Tap Tempo", f"{state.adp_bpm} BPM")
+        draw.rounded_rectangle((12, 64, self.width - 12, self.height - 48), radius=12, fill=BOX_BG)
+        draw.text((32, 88), "Tap any MIDI key", font=self.font_body, fill=FG)
+        draw.text((32, 132), f"Current: {state.adp_tap_original_bpm} BPM", font=self.font_body, fill=FG)
+        draw.text((32, 176), f"Measured: {measured}   Taps: {taps}", font=self.font_body, fill=FG if taps >= 2 else DIM)
+        hint = "SELECT: Apply   LEFT: Cancel"
+        if state.midi_mode == "usb_direct_raw" and not state.combi_active:
+            hint = "Tap requires an ALSA SEQ MIDI mode"
+        draw.text((32, 226), hint, font=self.font_small, fill=ACCENT)
+
 
     def _draw_modal_message(self, draw):
         x1, y1 = 70, 96
@@ -4589,6 +5383,8 @@ def reconnect_midi_to_fluidsynth(force_draw: bool = True) -> None:
         selected_port, selected_name = choose_raw_midi_input()
         state.midi_src_port = selected_port or '-'
         state.midi_src_name = selected_name or 'No raw MIDI'
+        # In Tap Tempo the keyboard is intentionally connected to Python/amidi,
+        # not to FluidSynth.  Treat an available port and live synth as ready.
         state.midi_connected = bool(selected_port and fluid_proc is not None and fluid_proc.poll() is None)
         refresh_midi_display_text()
     elif state.midi_mode == "uno2_bridge_seq":
@@ -5564,6 +6360,7 @@ def open_fluid_log():
 
 def stop_fluidsynth() -> None:
     global fluid_proc
+    stop_adp_playback(announce=False)
     stop_combi_router()
     if fluid_proc is None:
         return
@@ -6467,6 +7264,14 @@ def _combi_router_thread(generation: int) -> None:
                 if not parsed:
                     continue
                 kind, in_ch, a, b = parsed
+
+                # Tap Tempo temporarily owns incoming Note On events.  The
+                # tapped key itself is suppressed; register_adp_tap() emits the
+                # short CH10 closed-hi-hat feedback instead.
+                if state.ui_mode == "adp_tap_tempo":
+                    if kind == "noteon":
+                        register_adp_tap()
+                    continue
 
                 # Preserve keyboard drum pads. Many compact controllers send pads
                 # on MIDI CH10 while keys send CH1.  Since Combi mode disconnects
@@ -9243,9 +10048,8 @@ def warn_combi_quick_blocked() -> None:
 
 
 def enter_quick_menu() -> None:
-    if combi_locked() and not combi_workflow_active():
-        warn_combi_quick_blocked()
-        return
+    # Quick Menu remains available in Combi so Play with Drums can layer ADP
+    # playback on CH10 without dismantling the active CH1 Combi routing.
     if state.ui_mode not in {"quick_menu", "power_menu"} and not state.usb_eject_confirm:
         state.quick_resume_snapshot = make_quick_snapshot()
     state.ui_mode = "quick_menu"
@@ -9315,6 +10119,9 @@ def enter_now_playing() -> None:
 
 def quick_menu_select() -> None:
     item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
+    if state.combi_active and item not in {"MIDI Panic", "Play with Drums"}:
+        warn_combi_quick_blocked()
+        return
     if item == "MIDI Panic":
         midi_panic()
         return
@@ -9323,6 +10130,11 @@ def quick_menu_select() -> None:
         return
     if item == "USB Eject":
         request_usb_eject()
+        return
+    if item == "Play with Drums":
+        if quick_snapshot_is_media():
+            restore_sound_when_leaving_media("Sound restored")
+        enter_play_with_drums()
         return
 
     # Leaving the Media Player workflow for an instrument/home function must
@@ -9613,6 +10425,13 @@ def return_player_to_browser(event: str = "Back to list") -> None:
 
 def handle_button_event(btn_value: str) -> None:
     btn = btn_value.strip().upper()
+    if btn == "ENC_PUSH" and state.ui_mode == "play_with_drums":
+        pulse_button_activity()
+        enter_adp_tap_tempo()
+        return
+    if btn == "ENC_PUSH" and state.ui_mode == "adp_tap_tempo":
+        pulse_button_activity()
+        return
     if btn == "ENC_PUSH":
         btn = "SEL"
 
@@ -9647,6 +10466,40 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity(); insert_rename_space(); return
         if btn == "DOWN":
             pulse_button_activity(); delete_rename_char(); return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    if state.ui_mode == "adp_tap_tempo":
+        if btn == "LEFT":
+            pulse_button_activity(); leave_adp_tap_tempo(apply=False); return
+        if btn == "SEL":
+            pulse_button_activity(); leave_adp_tap_tempo(apply=True); return
+        if btn == "RIGHT_LP":
+            pulse_button_activity(); leave_adp_tap_tempo(apply=False); enter_quick_menu(); return
+        if btn == "SEL_LP":
+            pulse_button_activity(); leave_adp_tap_tempo(apply=False); enter_power_menu(); return
+        mark_dirty(f"BTN ignored: {btn}")
+        return
+
+    if state.ui_mode == "play_with_drums":
+        if btn == "LEFT":
+            pulse_button_activity(); leave_play_with_drums(); return
+        if btn == "SEL":
+            pulse_button_activity(); toggle_adp_playback(); return
+        if btn == "UP":
+            pulse_button_activity(); move_adp_selected_value(+1); return
+        if btn == "DOWN":
+            pulse_button_activity(); move_adp_selected_value(-1); return
+        if btn == "RIGHT":
+            pulse_button_activity(); cycle_adp_field(); return
+        if btn == "RIGHT_LP":
+            pulse_button_activity(); enter_quick_menu(); return
+        if btn == "DOWN_LP":
+            pulse_button_activity(); refresh_current_sound(); return
+        if btn == "UP_LP":
+            pulse_button_activity(); midi_panic(); return
+        if btn == "SEL_LP":
+            pulse_button_activity(); enter_power_menu(); return
         mark_dirty(f"BTN ignored: {btn}")
         return
 
@@ -9689,7 +10542,7 @@ def handle_button_event(btn_value: str) -> None:
 
     if btn == "RIGHT_LP" and combi_locked() and not combi_workflow_active():
         pulse_button_activity()
-        midi_panic()
+        enter_quick_menu()
         return
 
     if btn == "RIGHT_LP" and state.ui_mode != "power_menu":
@@ -11000,6 +11853,9 @@ def encoder_position_snapshot() -> str:
             label = QUICK_MENU_ITEMS[state.quick_menu_index] if 0 <= state.quick_menu_index < len(QUICK_MENU_ITEMS) else "-"
             return f"quick_index={state.quick_menu_index}({label})"
 
+        if state.ui_mode == "play_with_drums":
+            return f"adp=({state.adp_name}) playing={state.adp_playing} bpm={state.adp_bpm}"
+
         if state.ui_mode == "sound_edit":
             if SOUND_EDIT_PARAMS:
                 idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
@@ -11100,6 +11956,11 @@ def handle_encoder_navigation_step(step: int) -> bool:
     pulse_button_activity()
     direction = "DOWN" if step > 0 else "UP"
     edge_msg = "Last item" if step > 0 else "First item"
+
+    if state.ui_mode == "play_with_drums":
+        state.adp_bpm = max(40, min(240, int(state.adp_bpm) + int(step)))
+        mark_dirty(f"Tempo: {state.adp_bpm} BPM")
+        return True
 
     if state.ui_mode == "quick_menu":
         if QUICK_MENU_ITEMS:
