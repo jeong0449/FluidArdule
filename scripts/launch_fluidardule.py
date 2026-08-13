@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260813a"
+SCRIPT_VERSION = "260813b"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -4252,7 +4252,7 @@ class TFTDisplay:
         steps = state.adp_steps or []
         if not steps:
             return
-        active_slots = sorted({slot for hits in steps for slot, _accent in hits})
+        active_slots = sorted({slot for hits in steps for slot, _accent in hits}, reverse=True)
         if not active_slots:
             return
 
