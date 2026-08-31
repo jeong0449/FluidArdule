@@ -10,7 +10,7 @@ Designed as a dedicated musical instrument rather than a general-purpose Linux c
 
 As of July 2026, the project had evolved into a mature Python application exceeding 12,000 lines of code, marking a significant milestone in its development. Current work focuses on reliability, seamless engine switching, and a hardware-oriented user experience.
 
-<img src="images/2026-06-15-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
+<img src="images/2026-08-31-fluidardule-collage.png" alt="Fluid Ardule hardware overview" width="480">
 
 ---
 
