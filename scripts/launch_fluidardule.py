@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260813b"
+SCRIPT_VERSION = "260910m"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
+# 260910e: Sound menu is a CH1 source selector again. The title bar shows
+# CH2-16 resident SoundFont status at right; it dims while Yoshimi is active.
+# 260910b: resident Salamander + GM SoundFont retained; Yoshimi uses reliable
+#          exclusive engine handoff and restores the previous CH1 sound on return.
 # Version is defined by SCRIPT_VERSION below.
 # Detailed change history is tracked in Git.
 # =========================================================
@@ -55,6 +59,15 @@ SOUNDFONTS = [
     # Yoshimi .xiz entries grouped by bank_name.
     ("/home/pi/sf2/yoshimi.patches.json", "Yoshimi"),
 ]
+
+# 260910a resident sound architecture
+PIANO_SOUNDFONT_BASENAME = "SalC5Light2.sf2"
+GM_SOUNDFONT_CHOICES = ["Arachno_GM.sf2", "FluidR3_GM.sf2", "GeneralUser_GS.sf2"]
+GM_SOUNDFONT_STATE_PATH = "/home/pi/sf2/default_gm_soundfont.txt"
+DEFAULT_GM_SOUNDFONT_BASENAME = "Arachno_GM.sf2"
+RESIDENT_PIANO_SFID = 1
+RESIDENT_GM_SFID = 2
+
 
 YOSHIMI_EXECUTABLE = "yoshimi"
 YOSHIMI_DEFAULT_ROOT = "/usr/share/yoshimi/banks"
@@ -485,6 +498,7 @@ UI_ACCEL_PROFILE_BY_CONTEXT = {
     "submenu:combi_detail": 1,
     "submenu:external_midi_pc": 1,
     "submenu:arp_speed": 2,
+    "submenu:gm_soundfont": 0,
     "submenu:user_preset_rename": 0,
 }
 # Navigation jitter guard for the rotary encoder.
@@ -519,11 +533,18 @@ class RuntimeState:
 
     sf_index: int = 0
     sf_name: str = ""
+    gm_soundfont_basename: str = DEFAULT_GM_SOUNDFONT_BASENAME
+    fluidsynth_muted: bool = False
     current_preset_bank: int = 0
     current_preset_program: int = 0
     current_preset_name: str = "Piano"
     current_engine: str = "fluidsynth"
     current_instrument_path: str | None = None
+    # Snapshot of the FluidSynth CH1 sound before entering Yoshimi.
+    yoshimi_restore_sf_index: int | None = None
+    yoshimi_restore_bank: int = 0
+    yoshimi_restore_program: int = 0
+    yoshimi_restore_name: str = "Piano"
 
     dac_index: int = 0
     dac_name: str = DEFAULT_DAC[1]
@@ -748,6 +769,7 @@ class RuntimeState:
 state = RuntimeState(sf_index=0, sf_name=SOUNDFONTS[0][1])
 event_q: queue.Queue[str] = queue.Queue()
 fluid_proc = None
+yoshimi_proc = None
 fluid_log_handle = None
 yoshimi_log_handle = None
 player_proc = None
@@ -1486,7 +1508,7 @@ def apply_adp_drum_kit(index: int, *, announce: bool = True) -> bool:
     ok = send_fluidsynth_command("drums 9 on") or ok
     ok = send_fluidsynth_command(f"bank 9 {bank}") or ok
     ok = send_fluidsynth_command(f"prog 9 {program}") or ok
-    ok = send_fluidsynth_command(f"select 9 0 {bank} {program}") or ok
+    ok = send_fluidsynth_command(f"select 9 {RESIDENT_GM_SFID} {bank} {program}") or ok
     state.adp_drum_kit_index = idx
     state.adp_pending_drum_kit_index = None
     if announce:
@@ -2969,6 +2991,8 @@ class TFTDisplay:
         return {
             "ui_mode": state.ui_mode,
             "sf_name": state.sf_name,
+            "current_engine": state.current_engine,
+            "gm_soundfont_basename": state.gm_soundfont_basename,
             "menu_index": state.menu_index,
             "submenu_index": state.submenu_index,
             "submenu_key": state.submenu_key,
@@ -3202,8 +3226,26 @@ class TFTDisplay:
             self.prev_snapshot = self._snapshot_state()
             return True
 
+        # The Sound page has a live channel-routing status line above the list.
+        # If its source/engine changes while the cursor stays on the same row,
+        # force a body redraw so the status never becomes stale.
+        if state.submenu_key == "soundfont" and (
+            prev_snapshot.get("sf_name") != state.sf_name
+            or prev_snapshot.get("current_engine") != state.current_engine
+            or prev_snapshot.get("gm_soundfont_basename") != state.gm_soundfont_basename
+        ):
+            image = self.prev_image.copy()
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((0, 0, self.width, self.height - 40), fill=BACKGROUND)
+            self._draw_submenu(draw)
+            self._write_partial_image(image, (0, 0, self.width, self.height - 40))
+            self.prev_image = image.copy()
+            self.prev_snapshot = self._snapshot_state()
+            return True
+
         options = get_submenu_options()
         prev_index = prev_snapshot.get("submenu_index")
+
         return self._render_list_incremental_common(
             prev_snapshot=prev_snapshot,
             prev_index=prev_index,
@@ -3462,7 +3504,7 @@ class TFTDisplay:
 
         key = state.submenu_key
         if key == "soundfont":
-            return "▶" if idx <= len(SOUNDFONTS) + 1 else "•"
+            return "▶" if idx <= len(sound_menu_source_indices()) + 1 else "•"
         if key in {"preset_category", "extension", "controls", "external_midi_device"}:
             return "▶"
         if key == "user_preset_save":
@@ -3605,6 +3647,36 @@ class TFTDisplay:
             return "Local"
         return ""
 
+    def _draw_sound_ch2_16_status(self, draw):
+        """Show the resident SoundFont channel range at the far right of the Sound title bar."""
+        sf_name = source_name_for_index(gm_soundfont_index())
+
+        # If CH1 is currently using the resident SoundFont too, show CH1-16.
+        # Otherwise CH1 is occupied by SalC5/Yoshimi/etc., so the resident
+        # SoundFont applies only to CH2-16.
+        gm_idx = gm_soundfont_index()
+        ch1_uses_resident_sf = (
+            state.current_engine != "yoshimi"
+            and state.sf_index == gm_idx
+        )
+        channel_label = "CH1-16" if ch1_uses_resident_sf else "CH2-16"
+        text = f"{channel_label}: {sf_name}"
+
+        fill = DIM if (state.current_engine == "yoshimi" or is_yoshimi_source(state.sf_index)) else ACCENT
+
+        # Keep the status right aligned. If the SoundFont label is long,
+        # shorten it rather than letting it collide with the "Sound" title.
+        max_width = self.width - 165
+        text = self._fit_text_to_width(draw, text, self.font_small, max_width)
+        bbox = draw.textbbox((0, 0), text, font=self.font_small)
+        text_w = bbox[2] - bbox[0]
+        draw.text(
+            (self.width - 16 - text_w, 16),
+            text,
+            font=self.font_small,
+            fill=fill,
+        )
+
     def _draw_submenu_box(self, draw):
         draw.rounded_rectangle(
             (12, 50, self.width - 12, self.height - 48),
@@ -3632,22 +3704,6 @@ class TFTDisplay:
             box_bottom - 6,
             show_current_marks=True,
         )
-        # Show the selected Combi SoundFont only on the highlighted row.
-        # RIGHT changes this target without loading; SELECT performs the load.
-        if options:
-            start_idx, max_rows, _ = self._list_window_state(
-                state.submenu_index, len(options), top_y, row_h, box_bottom - 6
-            )
-            if start_idx <= state.submenu_index < start_idx + max_rows:
-                visible_row = state.submenu_index - start_idx
-                row_top = top_y + visible_row * row_h
-                sf_text = f"[{current_combi_soundfont_key()}]"
-                bbox = draw.textbbox((0, 0), sf_text, font=self.font_small)
-                sf_w = bbox[2] - bbox[0]
-                draw_right_vcentered_text(
-                    draw, self.width - 30, row_top, row_h, sf_text,
-                    self.font_small, COMBI_SOUNDFONT_LABEL_COLOR
-                )
         # Paint the whole Combi legend strip every frame.  Without this, the
         # partial framebuffer update can leave alternating BOX_BG/BACKGROUND
         # pixels behind the hint text when preview state changes, making the
@@ -3659,10 +3715,10 @@ class TFTDisplay:
         draw.line((28, hint_y - 6, self.width - 28, hint_y - 6), fill=(42, 48, 62), width=1)
         if state.combi_entries:
             item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
-            hint = "R:SoundFont   SEL:Open   L:Exit" if combi_item_is_loaded(item) else "R:SoundFont   SEL:Load   L:Exit"
+            hint = "UP/DN:Load   SEL:Parts   L:Exit"
             fill = ACCENT if combi_item_is_loaded(item) else DIM
         else:
-            hint = "R:SoundFont   SEL:Load   L:Exit"
+            hint = "UP/DN:Load   SEL:Parts   L:Exit"
             fill = DIM
         draw.text((30, hint_y), hint, font=self.font_small, fill=fill)
         draw.text((30, hint_y + 22), "Layer only / Split off", font=self.font_small, fill=DIM)
@@ -3705,65 +3761,55 @@ class TFTDisplay:
         )
 
     def _draw_submenu_soundfont_rows(self, draw, options):
+        """Draw Sound as a CH1 source/preset selector."""
+        sources = sound_menu_source_indices()
+        row_h = 38
+        list_top = 56
         start_idx, visible_rows, _visible_row = self._list_window_state(
-            state.submenu_index,
-            len(options),
-            56,
-            38,
-            self.height - 50,
-            page_windows=False,
+            state.submenu_index, len(options), list_top, row_h, self.height - 50, page_windows=False
         )
-
         for visible_row, idx in enumerate(range(start_idx, min(len(options), start_idx + visible_rows))):
-            top = 56 + visible_row * 38
+            top = list_top + visible_row * row_h
             text, is_current = options[idx]
-
             if idx == state.submenu_index:
                 draw.rounded_rectangle((20, top, self.width - 20, top + 32), radius=8, fill=SELECT_BG)
                 fill = FG
             else:
                 fill = FG if is_current else DIM
-
-            # Keep Sound Source visually calm as well: show the row-type glyph
-            # only on the highlighted row.  Non-highlighted rows should not all
-            # display triangles, because this screen is frequently used during
-            # performance and the full glyph column is visually noisy.
             prefix = f"{self._row_symbol_for_current_context(idx)} " if idx == state.submenu_index else "  "
             suffix = " *" if is_current else ""
-            row_text = f"{prefix}{text}{suffix}"
-            draw_left_vcentered_text_list(draw, 28, top, 38, row_text, self.font_body, fill)
-
-            if idx < len(SOUNDFONTS):
-                total, _drums = soundfont_preset_counts_cached(idx)
+            draw_left_vcentered_text_list(
+                draw, 28, top, row_h,
+                f"{prefix}{text}{suffix}",
+                self.font_body, fill
+            )
+            if idx < len(sources):
+                sfidx = sources[idx]
+                total, _ = soundfont_preset_counts_cached(sfidx)
                 if total:
-                    value = str(total)
-                    if total > 1:
-                        value += " Presets" if idx == state.submenu_index else " >"
-                    value_fill = ACCENT if idx != state.submenu_index else FG
-                    draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
-            elif idx == len(SOUNDFONTS):
+                    draw_right_vcentered_text(
+                        draw, self.width - 28, top, row_h,
+                        f"{total} Presets" if idx == state.submenu_index else f"{total} >",
+                        self.font_small, FG if idx == state.submenu_index else ACCENT
+                    )
+            elif idx == len(sources):
                 count = user_preset_count_cached()
-                if count:
-                    value = f"{count} Presets" if idx == state.submenu_index else f"{count} >"
-                else:
-                    value = "0"
-                value_fill = ACCENT if idx != state.submenu_index else FG
-                draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
-            elif idx == len(SOUNDFONTS) + 1:
+                draw_right_vcentered_text(
+                    draw, self.width - 28, top, row_h,
+                    f"{count} Presets" if idx == state.submenu_index else f"{count} >",
+                    self.font_small, FG if idx == state.submenu_index else ACCENT
+                )
+            elif idx == len(sources) + 1:
                 count = user_combi_count_cached()
-                if count:
-                    value = f"{count} Combis" if idx == state.submenu_index else f"{count} >"
-                else:
-                    value = "0"
-                value_fill = ACCENT if idx != state.submenu_index else FG
-                draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, value_fill)
-            else:
-                value = "SELECT" if idx == state.submenu_index else ""
-                if value:
-                    draw_right_vcentered_text(draw, self.width - 28, top, 38, value, self.font_small, FG)
-
-        self._draw_overflow_hints(draw, current_idx=state.submenu_index, items_len=len(options), top_y=56, row_h=38, bottom_y=self.height - 50)
-
+                draw_right_vcentered_text(
+                    draw, self.width - 28, top, row_h,
+                    f"{count} Combis" if idx == state.submenu_index else f"{count} >",
+                    self.font_small, FG if idx == state.submenu_index else ACCENT
+                )
+        self._draw_overflow_hints(
+            draw, current_idx=state.submenu_index, items_len=len(options),
+            top_y=list_top, row_h=row_h, bottom_y=self.height - 50
+        )
 
     def _draw_submenu_external_midi_pc_rows(self, draw, options):
         cat = gm_current_category_name()
@@ -3839,6 +3885,7 @@ class TFTDisplay:
             "midi": "MIDI Mode",
             "controls": "Sound Edit",
             "extension": "Extension",
+            "gm_soundfont": "GM SoundFont",
             "wifi": "Wi-Fi",
             "arp_speed": "Arpeggio Speed",
             "external_midi_device": "External MIDI Device",
@@ -3859,7 +3906,7 @@ class TFTDisplay:
         info = ""
 
         if state.submenu_key == "soundfont":
-            info = state.sf_name
+            info = ""
         elif state.submenu_key in ("preset_category", "preset"):
             info = state.category_source_name if state.submenu_key == "preset_category" else state.preset_source_name
             if state.submenu_key == "preset" and state.category_entries:
@@ -3889,6 +3936,8 @@ class TFTDisplay:
             info = f"{state.arp_bpm}"
 
         self._draw_submenu_title(draw, title, info)
+        if state.submenu_key == "soundfont":
+            self._draw_sound_ch2_16_status(draw)
 
         options = get_submenu_options()
 
@@ -4459,14 +4508,13 @@ class TFTDisplay:
                 # Keep Sound Source hints consistent:
                 #   SELECT applies a leaf/default action.
                 #   RIGHT enters a browser/submenu when one exists.
-                if state.submenu_index < len(SOUNDFONTS):
+                nsrc = len(sound_menu_source_indices())
+                if state.submenu_index < nsrc:
                     footer_hint = "SEL: Default   ▶: Presets"
-                elif state.submenu_index == len(SOUNDFONTS):
+                elif state.submenu_index == nsrc:
                     footer_hint = "SEL: Default   ▶: User"
-                elif state.submenu_index == len(SOUNDFONTS) + 1:
+                elif state.submenu_index == nsrc + 1:
                     footer_hint = "SEL: Hint   ▶: Combi"
-                elif state.submenu_index == len(SOUNDFONTS) + 2:
-                    footer_hint = "SEL: Reload"
             except Exception:
                 pass
 
@@ -5420,6 +5468,162 @@ def reconnect_midi_to_fluidsynth(force_draw: bool = True) -> None:
         mark_dirty(f"MIDI mode: {state.midi_display_text}")
 
 
+def find_soundfont_index_by_basename_simple(filename: str) -> int | None:
+    target = Path(str(filename or "")).name.lower()
+    for i, (path, _name) in enumerate(SOUNDFONTS):
+        if Path(path).name.lower() == target:
+            return i
+    return None
+
+
+def piano_soundfont_index() -> int:
+    idx = find_soundfont_index_by_basename_simple(PIANO_SOUNDFONT_BASENAME)
+    return 0 if idx is None else idx
+
+
+def yoshimi_source_index() -> int | None:
+    for i, (_path, name) in enumerate(SOUNDFONTS):
+        if name.lower() == "yoshimi":
+            return i
+    return None
+
+
+def load_saved_gm_soundfont_basename() -> str:
+    try:
+        name = Path(GM_SOUNDFONT_STATE_PATH).read_text(encoding="utf-8").strip()
+    except Exception:
+        name = DEFAULT_GM_SOUNDFONT_BASENAME
+    if name not in GM_SOUNDFONT_CHOICES or find_soundfont_index_by_basename_simple(name) is None:
+        name = DEFAULT_GM_SOUNDFONT_BASENAME
+    return name
+
+
+def save_gm_soundfont_basename(name: str) -> None:
+    name = Path(str(name or "")).name
+    if name not in GM_SOUNDFONT_CHOICES:
+        return
+    try:
+        Path(GM_SOUNDFONT_STATE_PATH).write_text(name + "\n", encoding="utf-8")
+    except Exception as exc:
+        log(f"GM SoundFont state save failed: {exc}")
+
+
+def gm_soundfont_index() -> int:
+    idx = find_soundfont_index_by_basename_simple(state.gm_soundfont_basename)
+    if idx is not None:
+        return idx
+    idx = find_soundfont_index_by_basename_simple(DEFAULT_GM_SOUNDFONT_BASENAME)
+    return piano_soundfont_index() if idx is None else idx
+
+
+def sound_menu_source_indices() -> list[int]:
+    rows = [piano_soundfont_index(), gm_soundfont_index()]
+    yi = yoshimi_source_index()
+    if yi is not None:
+        rows.append(yi)
+    return list(dict.fromkeys(rows))
+
+
+def sound_menu_source_index(row: int) -> int | None:
+    rows = sound_menu_source_indices()
+    return rows[row] if 0 <= int(row) < len(rows) else None
+
+
+def resident_sfid_for_source_index(sf_index: int) -> int | None:
+    base = Path(source_path_for_index(sf_index)).name
+    if base == PIANO_SOUNDFONT_BASENAME:
+        return RESIDENT_PIANO_SFID
+    if base == state.gm_soundfont_basename:
+        return RESIDENT_GM_SFID
+    return None
+
+
+def resident_sf2_paths() -> list[str]:
+    return [source_path_for_index(piano_soundfont_index()), source_path_for_index(gm_soundfont_index())]
+
+
+def set_fluidsynth_muted(muted: bool) -> bool:
+    if fluid_proc is None or fluid_proc.poll() is not None:
+        return False
+    ok = send_fluidsynth_command(f"gain {'0' if muted else FLUID_GAIN}")
+    if ok:
+        state.fluidsynth_muted = bool(muted)
+    return ok
+
+
+def stop_yoshimi() -> None:
+    global yoshimi_proc
+    if yoshimi_proc is None:
+        return
+    try:
+        if yoshimi_proc.poll() is None:
+            os.killpg(os.getpgid(yoshimi_proc.pid), signal.SIGTERM)
+            deadline = time.time() + 2.0
+            while yoshimi_proc.poll() is None and time.time() < deadline:
+                time.sleep(0.05)
+            if yoshimi_proc.poll() is None:
+                os.killpg(os.getpgid(yoshimi_proc.pid), signal.SIGKILL)
+    except Exception as exc:
+        log(f"stop_yoshimi exception: {exc}")
+    yoshimi_proc = None
+
+
+def return_to_resident_fluidsynth() -> None:
+    """Return from Yoshimi to the resident FluidSynth pair and restore CH1."""
+    stop_yoshimi()
+    was_yoshimi = state.current_engine == "yoshimi"
+    state.current_engine = "fluidsynth"
+
+    if fluid_proc is None or fluid_proc.poll() is not None:
+        # Yoshimi exclusive handoff stops FluidSynth.  Restart the resident pair:
+        # Salamander C5 Lite + selected GM SoundFont.
+        start_fluidsynth(source_path_for_index(piano_soundfont_index()), state.audio_device)
+    else:
+        set_fluidsynth_muted(False)
+        reconnect_midi_to_fluidsynth(force_draw=False)
+
+    if fluid_proc is None or fluid_proc.poll() is not None:
+        return
+
+    # Restore the exact CH1 source/program that was active before Yoshimi.
+    if was_yoshimi and state.yoshimi_restore_sf_index is not None:
+        restore_sf = state.yoshimi_restore_sf_index
+        if resident_sfid_for_source_index(restore_sf) is None:
+            restore_sf = piano_soundfont_index()
+        state.sf_index = restore_sf
+        state.sf_name = source_name_for_index(restore_sf)
+        state.current_preset_bank = int(state.yoshimi_restore_bank)
+        state.current_preset_program = int(state.yoshimi_restore_program)
+        state.current_preset_name = str(state.yoshimi_restore_name or "Piano")
+        sfid = resident_sfid_for_source_index(restore_sf) or RESIDENT_PIANO_SFID
+        is_drum = state.current_preset_bank == 128
+        send_fluidsynth_command(f"drums 0 {'on' if is_drum else 'off'}")
+        send_fluidsynth_command(
+            f"select 0 {sfid} {state.current_preset_bank} {state.current_preset_program}"
+        )
+        # CH10 remains the GM drum channel.
+        send_fluidsynth_command("drums 9 on")
+        state.yoshimi_restore_sf_index = None
+
+
+def choose_runtime_gm_soundfont(filename: str, *, persist: bool = False, restart: bool = True) -> bool:
+    name = Path(str(filename or "")).name
+    if name not in GM_SOUNDFONT_CHOICES:
+        mark_dirty("Unsupported GM SoundFont")
+        return False
+    idx = find_soundfont_index_by_basename_simple(name)
+    if idx is None or not Path(source_path_for_index(idx)).exists():
+        mark_dirty(f"GM SF2 missing: {name}")
+        return False
+    changed = name != state.gm_soundfont_basename
+    state.gm_soundfont_basename = name
+    if persist:
+        save_gm_soundfont_basename(name)
+    if restart and (changed or fluid_proc is None or fluid_proc.poll() is not None):
+        restart_engine(piano_soundfont_index(), state.dac_index)
+    return True
+
+
 # =========================================================
 # Instrument source helpers (SF2 / Yoshimi v2 JSON)
 # =========================================================
@@ -5480,22 +5684,8 @@ def generaluser_soundfont_index() -> int:
 
 
 def current_soundfont_path() -> str:
-    # MIDI file playback still needs an SF2 file. If the live engine is Yoshimi,
-    # use the compact GeneralUser GS GM set for fast temporary playback. The
-    # Yoshimi state itself is left intact and is restored when Media Player exits.
-    if is_yoshimi_source(state.sf_index) or state.current_engine == "yoshimi":
-        return source_path_for_index(generaluser_soundfont_index())
-    return source_path_for_index(state.sf_index)
-
-
-
-GM_CATEGORY_NAMES = [
-    "Piano", "Chromatic", "Organ", "Guitar",
-    "Bass", "Strings", "Ensemble", "Brass",
-    "Reed", "Pipe", "Lead", "Pad",
-    "FX", "Ethnic", "Percussive", "SFX",
-]
-
+    """GM SF2 used by MIDI file playback."""
+    return source_path_for_index(gm_soundfont_index())
 
 def categorize_preset(bank: int, program: int, name: str = "") -> str:
     if int(bank) == 128:
@@ -5961,9 +6151,9 @@ def return_to_soundfont_submenu() -> None:
     state.ui_mode = "submenu"
     state.submenu_key = "soundfont"
     category_sf = getattr(state, "category_source_sf_index", None)
-    state.submenu_index = category_sf if category_sf is not None else (
-        state.preset_sf_index if state.preset_sf_index is not None else state.sf_index
-    )
+    target_sf = category_sf if category_sf is not None else (state.preset_sf_index if state.preset_sf_index is not None else state.sf_index)
+    sources = sound_menu_source_indices()
+    state.submenu_index = sources.index(target_sf) if target_sf in sources else 0
     invalidate_full_display()
     mark_dirty("Back to SF2")
 
@@ -5978,7 +6168,7 @@ def return_to_sound_submenu(event: str = "Sound", index: int | None = None) -> N
     state.ui_mode = "submenu"
     state.submenu_key = "soundfont"
     if index is None:
-        index = len(SOUNDFONTS) + 1  # Sound > Combi row
+        index = len(sound_menu_source_indices()) + 1  # Sound > Combi row
     state.submenu_index = clamp_index(int(index), len(get_submenu_options()))
     state.submenu_return_mode = None
     invalidate_full_display()
@@ -6367,22 +6557,18 @@ def stop_fluidsynth() -> None:
     try:
         if fluid_proc.poll() is None:
             os.killpg(os.getpgid(fluid_proc.pid), signal.SIGTERM)
-            # Yoshimi writes user configuration during normal shutdown. Give it
-            # a little more time before SIGKILL to reduce the risk of a truncated
-            # ~/.config/yoshimi/config/yoshimi.config file.
-            deadline = time.time() + (2.0 if state.current_engine == "yoshimi" else 0.5)
+            deadline = time.time() + 0.6
             while fluid_proc.poll() is None and time.time() < deadline:
                 time.sleep(0.05)
             if fluid_proc.poll() is None:
                 os.killpg(os.getpgid(fluid_proc.pid), signal.SIGKILL)
-                time.sleep(0.2)
     except Exception as exc:
         log(f"stop_fluidsynth exception: {exc}")
     fluid_proc = None
     state.fluid_pid = None
     state.fluid_dst_port = "-"
     state.midi_connected = False
-
+    state.fluidsynth_muted = False
 
 def ensure_yoshimi_stopped(reason: str = "") -> None:
     """State-driven cleanup for stale Yoshimi processes.
@@ -6416,73 +6602,29 @@ def ensure_yoshimi_stopped(reason: str = "") -> None:
 
 
 def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
-    """Start Yoshimi headlessly and load one .xiz instrument at launch.
+    """Start Yoshimi using a reliable exclusive handoff from FluidSynth.
 
-    This is still the reliable cold-start path:
-        yoshimi -i -A -a -L /path/to/instrument.xiz
-
-    Unlike earlier versions, stdin is kept open so later patch changes can be
-    sent with:
-        load instrument /space/free/symlink.xiz
+    Raspberry Pi / ALSA devices may not permit FluidSynth and Yoshimi to own the
+    same audio output concurrently.  Stop FluidSynth only for the Yoshimi session;
+    on return, return_to_resident_fluidsynth() reloads the resident Salamander+GM
+    pair and restores the CH1 sound that was active before Yoshimi.
     """
-    global fluid_proc, yoshimi_log_handle
-
+    global yoshimi_proc
     xiz_path = str(xiz_path or "").strip()
-    if not xiz_path:
-        mark_dirty("Yoshimi path missing")
-        log("Yoshimi start rejected: empty instrument path")
+    if not xiz_path or not Path(xiz_path).exists():
+        mark_dirty("Yoshimi file missing")
         return False
 
-    xiz = Path(xiz_path)
-    if not xiz.exists():
-        mark_dirty(f"Yoshimi file missing: {shorten_text(xiz.name, 18)}")
-        log(f"Yoshimi instrument file missing: {xiz_path}")
-        return False
-
-    # Mute only the output level around the Yoshimi transition.  This is an
-    # experimental anti-thump strategy: avoid aplaymidi/CC123, keep the proven
-    # restart-with -L path, and hide the short audio artifact while the engine
-    # is stopped and recreated.
-
-    # Stop the currently managed engine first. This is intentionally the same
-    # process slot used by FluidSynth, because Fluid Ardule runs only one live
-    # synth engine at a time.
-    stop_fluidsynth()
-
-    # Clean up any stale Yoshimi instance left by an earlier failed test run.
-    # This keeps ALSA ports unambiguous for aconnect.
+    stop_yoshimi()
     ensure_yoshimi_stopped("before Yoshimi start")
 
-    os.makedirs(LOG_DIR, exist_ok=True)
-    if yoshimi_log_handle:
-        try:
-            yoshimi_log_handle.close()
-        except Exception:
-            pass
-        yoshimi_log_handle = None
+    # Release both the ALSA audio device and any direct RAW MIDI ownership.
+    stop_fluidsynth()
 
-    cmd = [
-        YOSHIMI_EXECUTABLE,
-        "-i",
-        "-A",
-        "-a",
-        "-L",
-        xiz_path,
-    ]
-
-    log(f"Starting Yoshimi with {xiz.name} / {audio_device}")
-    # Yoshimi can repeatedly emit interactive prompts such as
-    # "yoshimi> @ Top" even when used as a headless engine. Keep stdout/stderr
-    # suppressed, but keep stdin open for restart-free live instrument loading.
+    cmd = [YOSHIMI_EXECUTABLE, "-i", "-A", "-a", "-L", xiz_path]
+    log(f"Starting Yoshimi exclusive handoff with {Path(xiz_path).name} / {audio_device}")
     try:
-        with open(YOSHIMI_LOG_PATH, "w", buffering=1) as yh:
-            yh.write("CMD: " + " ".join(cmd) + "\n")
-            yh.write("NOTE: Yoshimi stdout/stderr suppressed to avoid CLI prompt spam.\n")
-    except Exception:
-        pass
-
-    try:
-        fluid_proc = subprocess.Popen(
+        yoshimi_proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -6490,57 +6632,44 @@ def start_yoshimi_instrument(xiz_path: str, audio_device: str) -> bool:
             preexec_fn=os.setsid,
             text=True,
         )
-    except FileNotFoundError:
-        mark_dirty("Yoshimi missing")
-        return False
     except Exception as exc:
+        yoshimi_proc = None
         mark_dirty(f"Yoshimi start failed: {exc}")
-        log(f"Yoshimi start exception: {exc}")
+        # Recover FluidSynth immediately if Yoshimi could not be launched.
+        state.current_engine = "yoshimi"
+        return_to_resident_fluidsynth()
         return False
 
     time.sleep(1.2)
-    if fluid_proc.poll() is None:
-        state.fluid_pid = fluid_proc.pid
+    if yoshimi_proc.poll() is None:
         state.current_engine = "yoshimi"
+        state.current_instrument_path = xiz_path
         reconnect_midi_to_fluidsynth(force_draw=True)
         return True
 
-    rc = fluid_proc.returncode
-    fluid_proc = None
-    state.fluid_pid = None
+    rc = yoshimi_proc.returncode
+    yoshimi_proc = None
     mark_dirty(f"Yoshimi failed rc={rc}")
-    log(f"Yoshimi failed to start; returncode={rc}. See {YOSHIMI_LOG_PATH}")
+    # Restore FluidSynth if the Yoshimi process dies during startup.
+    state.current_engine = "yoshimi"
+    return_to_resident_fluidsynth()
     return False
 
-
 def yoshimi_process_alive() -> bool:
-    return (
-        state.current_engine == "yoshimi"
-        and fluid_proc is not None
-        and fluid_proc.poll() is None
-    )
-
+    return yoshimi_proc is not None and yoshimi_proc.poll() is None
 
 def send_yoshimi_cli_command(command: str) -> bool:
-    """Send one command to the running Yoshimi CLI through stdin."""
-    if not yoshimi_process_alive():
-        return False
-    if fluid_proc is None or fluid_proc.stdin is None:
-        log("Yoshimi CLI unavailable: stdin is not open")
+    if not yoshimi_process_alive() or yoshimi_proc is None or yoshimi_proc.stdin is None:
         return False
     try:
         if YOSHIMI_LIVE_LOAD_TRACE:
             log(f"Yoshimi CLI >>> {command}")
-        fluid_proc.stdin.write(command.rstrip("\n") + "\n")
-        fluid_proc.stdin.flush()
+        yoshimi_proc.stdin.write(command.rstrip("\n") + "\n")
+        yoshimi_proc.stdin.flush()
         return True
-    except BrokenPipeError:
-        log("Yoshimi CLI write failed: broken pipe")
-        return False
     except Exception as exc:
         log(f"Yoshimi CLI write failed: {exc}")
         return False
-
 
 def clamp_arp_bpm(value: int) -> int:
     try:
@@ -6682,53 +6811,44 @@ def fluidsynth_startup_settle_sec(sf_path: str) -> float:
     return FLUIDSYNTH_STARTUP_SETTLE_DEFAULT_SEC
 
 def start_fluidsynth(sf_path: str, audio_device: str) -> bool:
+    """Start FluidSynth with Salamander plus the selected resident GM SF2."""
     global fluid_proc
+    stop_yoshimi()
     stop_fluidsynth()
-    ensure_yoshimi_stopped("before FluidSynth start")
     log_handle = open_fluid_log()
     midi_driver = midi_mode_to_driver(state.midi_mode)
-    selected_port = None
-    selected_name = None
+    selected_port = selected_name = None
     if state.midi_mode == "usb_direct_raw":
         selected_port, selected_name = choose_raw_midi_input()
-        if not selected_port:
-            log("start_fluidsynth: no raw MIDI input found at startup; engine will start and wait for later reconnect")
+    sf_paths = resident_sf2_paths()
     cmd = [
         "fluidsynth", "-a", "alsa", "-m", midi_driver,
         "-o", f"audio.alsa.device={audio_device}",
-        *( ["-o", f"midi.alsa.device={selected_port}"] if selected_port else [] ),
-        "-o", "synth.sample-rate=48000",
-        "-o", "audio.period-size=256",
-        "-o", "audio.periods=4",
-        "-o", f"synth.gain={FLUID_GAIN}",
-        "-o", "synth.cpu-cores=1",
-        "-o", "synth.polyphony=96",
-        "-o", "synth.reverb.active=1",
-        "-o", "synth.reverb.room-size=0.48",
-        "-o", "synth.reverb.damp=0.22",
-        "-o", "synth.reverb.width=0.75",
-        "-o", "synth.reverb.level=0.30",
-        "-o", "synth.chorus.active=1",
-        sf_path,
+        *(["-o", f"midi.alsa.device={selected_port}"] if selected_port else []),
+        "-o", "synth.sample-rate=48000", "-o", "audio.period-size=256",
+        "-o", "audio.periods=4", "-o", f"synth.gain={FLUID_GAIN}",
+        "-o", "synth.cpu-cores=1", "-o", "synth.polyphony=96",
+        "-o", "synth.reverb.active=1", "-o", "synth.reverb.room-size=0.48",
+        "-o", "synth.reverb.damp=0.22", "-o", "synth.reverb.width=0.75",
+        "-o", "synth.reverb.level=0.30", "-o", "synth.chorus.active=1",
+        *sf_paths,
     ]
-    raw_suffix = f" / {selected_port} ({selected_name})" if selected_port else ""
-    log(f"Starting fluidsynth {midi_driver.upper()} with {Path(sf_path).name} / {audio_device}{raw_suffix}")
+    log(f"Starting resident FluidSynth: {' + '.join(Path(p).name for p in sf_paths)} / {audio_device}")
     try:
         fluid_proc = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle, stdin=subprocess.PIPE, preexec_fn=os.setsid, text=True)
     except Exception as exc:
         mark_dirty(f"fluidsynth start failed: {exc}")
         return False
-    time.sleep(fluidsynth_startup_settle_sec(sf_path))
+    time.sleep(max(fluidsynth_startup_settle_sec(p) for p in sf_paths))
     if fluid_proc.poll() is None:
         state.fluid_pid = fluid_proc.pid
         state.current_engine = "fluidsynth"
+        state.fluidsynth_muted = False
         state.player_proc_kind = None
         reconnect_midi_to_fluidsynth(force_draw=False)
         return True
     mark_dirty("fluidsynth failed to start")
     return False
-
-
 
 def send_fluidsynth_command(command: str) -> bool:
     global fluid_proc
@@ -6779,45 +6899,14 @@ def find_soundfont_index_by_basename(filename: str) -> int | None:
 
 
 def ensure_combi_soundfont_loaded(required_sf2: str, *, manage_modal: bool = True, force_restart: bool = False) -> bool:
-    """Load the Combi-required SF2 only when the current source differs.
-
-    This keeps Combi selection fast when FluidR3_GM.sf2 is already active, but
-    automatically switches to the required SF2 when the device is currently on
-    another SoundFont such as SalC5Light2.sf2.
-    """
     required = Path(str(required_sf2 or "")).name
-    if not required:
-        return True
-    current = _combi_source_file()
-    if (
-        not force_restart
-        and current == required
-        and state.current_engine == "fluidsynth"
-        and fluid_proc is not None
-        and fluid_proc.poll() is None
-    ):
-        # Same-SF2 Combi switch: keep the running FluidSynth instance and
-        # apply only the new bank/program, controller, layer, and split setup.
-        log(f"Combi reusing loaded SoundFont: {required}")
-        return True
-
-    target_index = find_soundfont_index_by_basename(required)
-    if target_index is None:
-        log(f"Combi required SF2 not found in SOUNDFONTS: {required}")
-        mark_dirty(f"SF2 missing: {required}")
-        return False
-
-    log(f"Combi loading required SoundFont: {required} (current={current or '-'})")
-    if manage_modal:
-        show_modal_message("Loading Combi SF2...", required)
-    restart_engine(target_index, state.dac_index, manage_modal=manage_modal)
-    if manage_modal:
-        clear_modal_message()
-    ok = (state.current_engine == "fluidsynth" and fluid_proc is not None and fluid_proc.poll() is None)
-    if not ok:
-        log("Combi SF2 load failed: FluidSynth is not running after restart_engine")
-        mark_dirty("Combi SF2 load failed")
-        return False
+    if required in GM_SOUNDFONT_CHOICES and required != state.gm_soundfont_basename:
+        state.gm_soundfont_basename = required
+        force_restart = True
+    if state.current_engine == "yoshimi":
+        return_to_resident_fluidsynth()
+    if force_restart or fluid_proc is None or fluid_proc.poll() is not None:
+        return restart_engine(piano_soundfont_index(), state.dac_index, manage_modal=manage_modal)
     return True
 
 def _extract_bank_program_from_preset_id(preset_id: str) -> tuple[int | None, int | None]:
@@ -6885,9 +6974,7 @@ def normalize_combi(item: dict) -> dict | None:
     return {
         "id": str(item.get("id") or name),
         "name": name,
-        "combi_soundfont_key": str(item.get("combi_soundfont_key") or ""),
         "description": str(item.get("description") or ""),
-        "sf2": str(item.get("sf2") or item.get("source_file") or "FluidR3_GM.sf2"),
         "input_channel": max(1, min(16, _safe_int(item.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL))),
         "parts": parts,
     }
@@ -6898,27 +6985,9 @@ def current_combi_soundfont_key() -> str:
     return COMBI_SOUNDFONT_OPTIONS[idx][0]
 
 
-def combi_file_path_for_soundfont(soundfont_key: str) -> Path:
-    specific = Path(f"/home/pi/sf2/user_combis.{soundfont_key}.json")
-
-    # Dedicated-file mode starts as soon as any supported SoundFont-specific
-    # Combi file exists.  In that mode, a missing file means that the selected
-    # SoundFont has no Combi definitions; do not silently borrow user_combis.json.
-    dedicated_paths = [
-        Path(f"/home/pi/sf2/user_combis.{key}.json")
-        for key, _sf2 in COMBI_SOUNDFONT_OPTIONS
-    ]
-    if any(path.exists() for path in dedicated_paths):
-        return specific
-
-    # Backward compatibility for older installations: use the legacy common
-    # file only when none of the dedicated files exists at all.
-    return Path(USER_COMBI_PATH)
-
-
 def load_user_combis(soundfont_key: str | None = None) -> list[dict]:
-    key = str(soundfont_key or current_combi_soundfont_key())
-    path = combi_file_path_for_soundfont(key)
+    """Load the single SoundFont-independent Combi definition file."""
+    path = Path(USER_COMBI_PATH)
     if not path.exists():
         log(f"user combi file missing: {path}")
         return []
@@ -6929,27 +6998,17 @@ def load_user_combis(soundfont_key: str | None = None) -> list[dict]:
         return []
 
     if isinstance(payload, dict):
-        default_sf2 = str(payload.get("source_file") or payload.get("sf2") or dict(COMBI_SOUNDFONT_OPTIONS).get(key, "FluidR3_GM.sf2"))
         default_input = _safe_int(payload.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL)
         items = payload.get("combinations") or payload.get("combis") or []
+        raw_items = []
         if isinstance(items, list):
-            raw_items = []
             for item in items:
                 if isinstance(item, dict):
                     merged = dict(item)
-                    merged.setdefault("sf2", default_sf2)
                     merged.setdefault("input_channel", default_input)
-                    merged["combi_soundfont_key"] = key
                     raw_items.append(merged)
-        else:
-            raw_items = []
     elif isinstance(payload, list):
-        raw_items = []
-        for item in payload:
-            if isinstance(item, dict):
-                merged = dict(item)
-                merged["combi_soundfont_key"] = key
-                raw_items.append(merged)
+        raw_items = [dict(item) for item in payload if isinstance(item, dict)]
     else:
         raw_items = []
 
@@ -6977,8 +7036,6 @@ def combi_item_is_loaded(item: dict) -> bool:
     return (
         state.combi_active
         and str(item.get("id") or "") == str(state.current_combi_id or "")
-        and str(item.get("combi_soundfont_key") or current_combi_soundfont_key())
-        == str(state.current_combi_soundfont_key or "")
     )
 
 
@@ -7013,7 +7070,6 @@ def cycle_combi_soundfont() -> None:
 
 
 def enter_combi_load_menu(return_mode: str | None = None) -> None:
-    select_initial_combi_soundfont()
     state.combi_entries = load_user_combis()
     state.ui_mode = "submenu"
     state.submenu_key = "combi_load"
@@ -7031,6 +7087,14 @@ def enter_combi_load_menu(return_mode: str | None = None) -> None:
     state.submenu_index = clamp_index(target_index, len(state.combi_entries))
     begin_combi_browse_session()
 
+    # Entering the Combi browser is itself a selection action.  Load the
+    # highlighted item immediately so the audible state always matches the
+    # highlight, just like subsequent UP/DOWN navigation.
+    if state.combi_entries:
+        idx = clamp_index(state.submenu_index, len(state.combi_entries))
+        state.previewed_combi_index = idx
+        apply_combi(state.combi_entries[idx], leave_after=False, preview=True)
+
     invalidate_full_display()
     mark_dirty(f"Combi: {len(state.combi_entries)} saved")
 
@@ -7040,19 +7104,12 @@ def _send_channel_setup_for_part(part: dict) -> bool:
     bank = _safe_int(part.get("bank", 0), 0)
     program = _safe_int(part.get("program", 0), 0)
     volume = max(0, min(127, _safe_int(part.get("volume", 100), 100)))
-    label = str(part.get("label") or part.get("name") or part.get("preset_id") or f"{bank}:{program}")
+    sfid = RESIDENT_GM_SFID
     is_drum = bank == 128 or ch == 9
-    log(f"Combi part setup: CH{ch + 1} bank={bank} program={program} volume={volume} label={label}")
-    ok = False
-    ok = send_fluidsynth_command(f"drums {ch} {'on' if is_drum else 'off'}") or ok
-    ok = send_fluidsynth_command(f"bank {ch} {bank}") or ok
-    ok = send_fluidsynth_command(f"prog {ch} {program}") or ok
-    ok = send_fluidsynth_command(f"select {ch} 0 {bank} {program}") or ok
+    ok = send_fluidsynth_command(f"drums {ch} {'on' if is_drum else 'off'}")
+    ok = send_fluidsynth_command(f"select {ch} {sfid} {bank} {program}") or ok
     ok = send_fluidsynth_command(f"cc {ch} 7 {volume}") or ok
-    if not ok:
-        log("Combi part setup warning: no FluidSynth shell command succeeded")
     return ok
-
 
 def _active_combi_parts_for_note(note: int) -> list[dict]:
     """Return active Combi parts for a note, honoring split/key ranges.
@@ -7538,15 +7595,23 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         mark_dirty("Invalid combi")
         return
 
-    label_for_modal = shorten_text(str(combi.get("name") or "Combi"), 24)
-    show_modal_message("Loading Combi...", label_for_modal)
+    # Fast path: when a Combi is already active on a healthy FluidSynth/ALSA
+    # backend, keep the existing router and engine alive.  Only replace the
+    # Combi definition and resend channel setup below.
+    fast_combi_switch = (
+        state.combi_active
+        and state.current_engine == "fluidsynth"
+        and state.midi_mode != "usb_direct_raw"
+        and fluid_proc is not None
+        and fluid_proc.poll() is None
+    )
 
-    # Stop the previous Combi router as early as possible.  Otherwise the old
-    # router thread may see state.combi_active=True while SoundFont/MIDI mode is
-    # being changed and may restart aseqdump once or twice during the new load.
-    # The new router is started once at the end after all channel setup is done.
-    stop_combi_router()
-    state.combi_active = False
+    # No modal is shown for Combi loading.  On the slow path only, stop the old
+    # router before an engine/MIDI backend transition.  The fast path keeps it
+    # running because the router reads state.combi_parts dynamically.
+    if not fast_combi_switch:
+        stop_combi_router()
+        state.combi_active = False
 
     # Combi always runs on FluidSynth with an ALSA sequencer input owned by the
     # Python router.  Switch the MIDI backend state BEFORE loading the required
@@ -7563,23 +7628,40 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         state.midi_selected_name = midi_mode_to_label("alsa_midi")
         refresh_midi_options(quiet=True)
 
-    required_sf2 = Path(str(combi.get("sf2") or "")).name
-    if not ensure_combi_soundfont_loaded(required_sf2, manage_modal=False, force_restart=midi_transition_to_alsa):
-        clear_modal_message()
-        return
+    # Combi definitions are SoundFont-independent. Use the currently selected
+    # resident general SoundFont and never switch SoundFonts from a Combi.
+    if state.current_engine == "yoshimi":
+        return_to_resident_fluidsynth()
+    if midi_transition_to_alsa or fluid_proc is None or fluid_proc.poll() is not None:
+        if not restart_engine(piano_soundfont_index(), state.dac_index, manage_modal=False):
+            return
     t_sf = time.perf_counter()
 
-    reconnect_midi_to_fluidsynth(force_draw=False)
+    if not fast_combi_switch:
+        reconnect_midi_to_fluidsynth(force_draw=False)
     if state.current_engine != "fluidsynth" or fluid_proc is None or fluid_proc.poll() is not None:
-        clear_modal_message()
         mark_dirty("Combi engine restart failed")
         return
     t_midi = time.perf_counter()
 
     clear_current_user_preset_state()
     reset_sound_edit_to_defaults()
+
+    # A loaded Combi uses the resident general SoundFont for all of its parts.
+    # Keep the logical Sound state in sync with the actual engine so that:
+    #   - Sound title shows CH1-16 for the resident SoundFont
+    #   - the Sound menu current mark (*) follows the resident SoundFont
+    gm_idx = gm_soundfont_index()
+    state.sf_index = gm_idx
+    state.sf_name = source_name_for_index(gm_idx)
+    state.bank = 0
+    state.program = 0
+    state.current_preset_bank = 0
+    state.current_preset_program = 0
+    state.current_preset_name = "Acoustic Grand Piano"
+
     state.current_combi_id = str(combi.get("id") or combi.get("name") or "Combi")
-    state.current_combi_soundfont_key = str(combi.get("combi_soundfont_key") or current_combi_soundfont_key())
+    state.current_combi_soundfont_key = None
     state.current_combi_name = str(combi.get("name") or "Combi")
     state.combi_parts = list(combi.get("parts") or [])
     state.combi_input_channel = _safe_int(combi.get("input_channel", COMBI_INPUT_CHANNEL), COMBI_INPUT_CHANNEL)
@@ -7595,7 +7677,7 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
     send_fluidsynth_command("drums 9 on")
     send_fluidsynth_command("bank 9 128")
     send_fluidsynth_command("prog 9 0")
-    send_fluidsynth_command("select 9 0 128 0")
+    send_fluidsynth_command(f"select 9 {RESIDENT_GM_SFID} 128 0")
 
     # A predictable default controller baseline for all used channels.
     for part in state.combi_parts:
@@ -7608,19 +7690,22 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
 
     t_setup = time.perf_counter()
     state.combi_active = True
-    router_ok = start_combi_router()
+    if fast_combi_switch:
+        router_ok = True
+    else:
+        router_ok = start_combi_router()
     t_router = time.perf_counter()
     log(
         "Combi apply timing: "
         f"total={(t_router - t0) * 1000:.0f} ms "
-        f"sf={(t_sf - t0) * 1000:.0f} ms "
+        f"engine={(t_sf - t0) * 1000:.0f} ms "
         f"midi={(t_midi - t_sf) * 1000:.0f} ms "
         f"setup={(t_setup - t_midi) * 1000:.0f} ms "
         f"router={(t_router - t_setup) * 1000:.0f} ms "
+        f"fast={fast_combi_switch} "
         f"parts={len(state.combi_parts)} preview={bool(preview)}"
     )
     label = shorten_text(state.current_combi_name, 20)
-    clear_modal_message()
     state.combi_preview_active = bool(preview)
     if leave_after:
         finish_combi_browse_session()
@@ -7628,8 +7713,7 @@ def apply_combi(item: dict, *, leave_after: bool = True, preview: bool = False) 
         # configuration, so show the active parts/layers immediately.
         enter_combi_detail_screen(f"Combi loaded: {label}" if router_ok else (f"Combi set: {label}" if ok else "Combi setup queued"))
     else:
-        # Stay on the Combi list. RIGHT only chooses the target SoundFont;
-        # SELECT performs the actual load, and a second SELECT opens details.
+        # Stay on the Combi list. SELECT loads the Combi; a second SELECT opens details.
         if preview:
             if router_ok:
                 show_footer_message(f"Preview loaded: {label}", COMBI_PREVIEW_FOOTER_HOLD_SEC)
@@ -7671,83 +7755,64 @@ def clear_combi_state_for_explicit_sound_load() -> None:
 def apply_preset(bank: int, program: int, name: str | None = None, *, engine: str = "fluidsynth", path: str | None = None) -> None:
     clear_combi_state_for_explicit_sound_load()
     clear_current_user_preset_state()
+    # Save the currently sounding FluidSynth CH1 voice before Yoshimi overwrites
+    # current_preset_* with its own patch metadata.  This makes Back/SalC5/Arachno
+    # return to the exact previous CH1 sound after the exclusive handoff.
+    if engine == "yoshimi" and state.current_engine != "yoshimi":
+        restore_sf = state.sf_index
+        if resident_sfid_for_source_index(restore_sf) is None:
+            restore_sf = piano_soundfont_index()
+        state.yoshimi_restore_sf_index = restore_sf
+        state.yoshimi_restore_bank = int(state.current_preset_bank)
+        state.yoshimi_restore_program = int(state.current_preset_program)
+        state.yoshimi_restore_name = str(state.current_preset_name or "Piano")
     state.current_preset_bank = int(bank)
     state.current_preset_program = int(program)
     if name:
         state.current_preset_name = name
-
-    # Preset/source changes start a fresh volatile Sound Edit baseline.
     reset_sound_edit_to_defaults()
-
     if engine == "yoshimi":
         path = str(path or state.current_instrument_path or "").strip()
-        if not path:
-            mark_dirty("Yoshimi path missing")
-            log(f"Yoshimi apply rejected: empty path for {state.current_preset_name}")
-            return
-        ok = load_or_start_yoshimi_instrument(path, state.audio_device)
-        if ok:
+        if path and load_or_start_yoshimi_instrument(path, state.audio_device):
             state.current_engine = "yoshimi"
             state.current_instrument_path = path
             if current_yoshimi_patch_is_arpeggio():
                 apply_yoshimi_arpeggio_speed(announce=False)
             mark_dirty(f"Yoshimi -> {state.current_preset_name}")
         return
-
-    is_drum = (state.current_preset_bank == 128)
-    ok = False
-    ok = send_fluidsynth_command(f"drums 0 {'on' if is_drum else 'off'}") or ok
-    ok = send_fluidsynth_command(f"bank 0 {state.current_preset_bank}") or ok
-    ok = send_fluidsynth_command(f"prog 0 {state.current_preset_program}") or ok
-    ok = send_fluidsynth_command(f"select 0 0 {state.current_preset_bank} {state.current_preset_program}") or ok
+    return_to_resident_fluidsynth()
+    sfid = resident_sfid_for_source_index(state.sf_index)
+    if sfid is None:
+        sfid = RESIDENT_PIANO_SFID
+    is_drum = state.current_preset_bank == 128
+    ok = send_fluidsynth_command(f"drums 0 {'on' if is_drum else 'off'}")
+    ok = send_fluidsynth_command(f"select 0 {sfid} {state.current_preset_bank} {state.current_preset_program}") or ok
     if is_drum:
-        ok = send_fluidsynth_command("drums 9 on") or ok
-        ok = send_fluidsynth_command(f"bank 9 {state.current_preset_bank}") or ok
-        ok = send_fluidsynth_command(f"prog 9 {state.current_preset_program}") or ok
-        ok = send_fluidsynth_command(f"select 9 0 {state.current_preset_bank} {state.current_preset_program}") or ok
+        send_fluidsynth_command("drums 9 on")
+        send_fluidsynth_command(f"select 9 {RESIDENT_GM_SFID} {state.current_preset_bank} {state.current_preset_program}")
     else:
-        ok = send_fluidsynth_command("drums 9 off") or ok
-
-    # Program Change does not necessarily clear MIDI controller state.
-    # Re-apply the Sound Edit default CC set so every preset starts from a
-    # predictable baseline instead of inheriting the previous live edits.
+        send_fluidsynth_command("drums 9 off")
     defaults_ok = apply_sound_edit_defaults_to_engine(announce=False)
-    ok = ok or defaults_ok
-
-    if ok:
-        mark_dirty(f"Preset -> {state.current_preset_name}")
-    else:
-        mark_dirty(f"Preset queued: {state.current_preset_name}")
+    mark_dirty(f"Preset -> {state.current_preset_name}" if (ok or defaults_ok) else f"Preset queued: {state.current_preset_name}")
 
 def apply_soundfont_with_default_preset(sf_index: int) -> None:
     clear_combi_state_for_explicit_sound_load()
-    presets = load_presets_for_sf2(sf_index)
+    state.sf_index = sf_index % len(SOUNDFONTS)
+    state.sf_name = source_name_for_index(state.sf_index)
+    presets = load_presets_for_sf2(state.sf_index)
     default_preset = choose_default_preset(presets)
-
-    if is_yoshimi_source(sf_index):
-        state.sf_index = sf_index % len(SOUNDFONTS)
-        state.sf_name = source_name_for_index(state.sf_index)
+    if is_yoshimi_source(state.sf_index):
         if default_preset:
-            apply_preset(
-                default_preset.get("bank", default_preset.get("bank_id", 0)),
-                default_preset.get("program", default_preset.get("slot", 0)),
-                default_preset.get("name", "Yoshimi"),
-                engine="yoshimi",
-                path=default_preset.get("path"),
-            )
-        else:
-            mark_dirty("No Yoshimi JSON")
+            apply_preset(default_preset.get("bank", 0), default_preset.get("program", 0), default_preset.get("name", "Yoshimi"), engine="yoshimi", path=default_preset.get("path"))
         return
-
-    restart_engine(sf_index, state.dac_index)
+    if resident_sfid_for_source_index(state.sf_index) is None:
+        base = Path(source_path_for_index(state.sf_index)).name
+        if base in GM_SOUNDFONT_CHOICES:
+            choose_runtime_gm_soundfont(base, persist=False, restart=True)
     if default_preset:
         apply_preset(default_preset["bank"], default_preset["program"], default_preset["name"], engine="fluidsynth")
     else:
-        state.current_preset_bank = 0
-        state.current_preset_program = 0
-        state.current_preset_name = "Default"
-        mark_dirty(f"SF loaded: {state.sf_name}")
-
+        apply_preset(0, 0, "Default", engine="fluidsynth")
 
 def restore_current_preset_after_engine_restart() -> None:
     if is_yoshimi_source(state.sf_index) or state.current_engine == "yoshimi":
@@ -7784,95 +7849,38 @@ def restart_engine(sf_index: int, dac_index: int, *, manage_modal: bool = True) 
     send_ui_status("BUSY", force=True)
     sf_index %= len(SOUNDFONTS)
     dac_index %= len(state.dac_options)
-    sf_path, sf_name = SOUNDFONTS[sf_index]
     audio_device, dac_name = state.dac_options[dac_index]
-    if state.midi_mode != "uno2_bridge_seq":
-        stop_bridge()
-
-    state.sf_index = sf_index
-    state.sf_name = sf_name
     state.dac_index = dac_index
     state.dac_name = dac_name
     state.audio_device = audio_device
-    state.dac_preview_index = state.dac_index
-
-    # 260706a: a compound sound transition (User Preset / Combi) may own the
-    # modal around a nested engine restart.  Keep the old default behavior for
-    # simple callers, but allow manage_modal=False so the outer transition does
-    # not lose its loading modal halfway through the real sound apply.
-    if manage_modal:
-        show_modal_message("Loading Sound...", f"{sf_name} / {dac_name}")
-
+    state.dac_preview_index = dac_index
     if is_yoshimi_source(sf_index):
-        presets = load_presets_for_sf2(sf_index)
-        target = None
-        current_path = str(state.current_instrument_path or "").strip()
-        if current_path:
-            for p in presets:
-                if str(p.get("path", "")).strip() == current_path:
-                    target = p
-                    break
-        if target is None:
-            for p in presets:
-                if (
-                    int(p.get("bank", p.get("bank_id", -999))) == int(state.current_preset_bank)
-                    and int(p.get("program", p.get("slot", -999))) == int(state.current_preset_program)
-                    and str(p.get("name", state.current_preset_name)) == str(state.current_preset_name)
-                ):
-                    target = p
-                    break
-        target = target or choose_default_preset(presets)
-        if not target:
-            if manage_modal:
-                clear_modal_message()
-            mark_dirty("No Yoshimi JSON")
+        state.sf_index = sf_index
+        state.sf_name = source_name_for_index(sf_index)
+        target = choose_default_preset(load_presets_for_sf2(sf_index))
+        if target:
+            apply_preset(target.get("bank", 0), target.get("program", 0), target.get("name", "Yoshimi"), engine="yoshimi", path=target.get("path"))
             send_ui_status("READY", force=True)
-            return False
-        path = str(target.get("path", current_path)).strip()
-        if not path:
-            if manage_modal:
-                clear_modal_message()
-            mark_dirty("Yoshimi path missing")
-            log(f"Yoshimi restart rejected: empty path for target={target}")
-            send_ui_status("READY", force=True)
-            return False
-        mark_dirty(f"Restarting -> Yoshimi:{target.get('name','Instrument')} / DAC:{dac_name}")
-        state.current_preset_bank = int(target.get("bank", target.get("bank_id", 0)))
-        state.current_preset_program = int(target.get("program", target.get("slot", 0)))
-        state.current_preset_name = str(target.get("name", "Yoshimi"))
-        state.current_instrument_path = path
-        ok = start_yoshimi_instrument(path, audio_device)
-        if not ok:
-            if manage_modal:
-                clear_modal_message()
-            send_ui_status("READY", force=True)
-            return False
-        reconnect_midi_to_fluidsynth(force_draw=False)
-        if manage_modal:
-            clear_modal_message()
-        if state.midi_connected:
-            mark_dirty(f"Active -> Yoshimi/{state.current_preset_name}")
-        else:
-            show_footer_message("Sound loaded / MIDI waiting", 1.5)
-        send_ui_status("READY", force=True)
-        return True
-
-    mark_dirty(f"Restarting -> SF:{sf_name} / DAC:{dac_name}")
-    ok = start_fluidsynth(sf_path, audio_device)
-    if not ok:
-        if manage_modal:
-            clear_modal_message()
+            return yoshimi_process_alive()
         send_ui_status("READY", force=True)
         return False
-    reconnect_midi_to_fluidsynth(force_draw=False)
+    base = Path(source_path_for_index(sf_index)).name
+    if base in GM_SOUNDFONT_CHOICES and base != PIANO_SOUNDFONT_BASENAME:
+        state.gm_soundfont_basename = base
+    state.sf_index = sf_index
+    state.sf_name = source_name_for_index(sf_index)
+    if manage_modal:
+        show_modal_message("Loading Sound...", f"SalC5 + {source_name_for_index(gm_soundfont_index())}")
+    ok = start_fluidsynth(source_path_for_index(piano_soundfont_index()), audio_device)
+    if ok:
+        if resident_sfid_for_source_index(state.sf_index) is None:
+            state.sf_index = piano_soundfont_index()
+            state.sf_name = source_name_for_index(state.sf_index)
+        apply_preset(state.current_preset_bank, state.current_preset_program, state.current_preset_name, engine="fluidsynth")
     if manage_modal:
         clear_modal_message()
-    if state.midi_connected:
-        mark_dirty(f"Active -> SF:{sf_name} / DAC:{dac_name}")
-    else:
-        show_footer_message("Sound loaded / MIDI waiting", 1.5)
     send_ui_status("READY", force=True)
-    return True
+    return ok
 
 def send_current_engine_panic() -> bool:
     """Send a lightweight MIDI panic to the currently running synth engine.
@@ -8239,6 +8247,23 @@ def start_player(path: str) -> None:
 
     stop_player_only()
 
+    # MIDI PLAY is an explicit mode change: from this point onward the live
+    # instrument state becomes the resident default SoundFont on CH1-16.
+    # Do not remember/restore SalC5 or Yoshimi automatically after playback.
+    if kind == "midi_file":
+        gm_idx = gm_soundfont_index()
+        if state.current_engine == "yoshimi":
+            stop_yoshimi()
+            ensure_yoshimi_stopped("MIDI file playback")
+        state.current_engine = "fluidsynth"
+        state.sf_index = gm_idx
+        state.sf_name = source_name_for_index(gm_idx)
+        state.bank = 0
+        state.program = 0
+        state.current_preset_bank = 0
+        state.current_preset_program = 0
+        state.current_preset_name = "Acoustic Grand Piano"
+
     # Media and MIDI-file playback both take exclusive control of the audio device.
     stop_fluidsynth()
 
@@ -8248,15 +8273,21 @@ def start_player(path: str) -> None:
         player_proc = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle, preexec_fn=os.setsid, text=True)
     except FileNotFoundError:
         mark_dirty(f"Player missing: {cmd[0]}")
-        if kind == "media":
+        # MIDI playback has already committed the live state to the resident
+        # SoundFont, so recover that state rather than an older SalC5/Yoshimi state.
+        if kind in {"media", "midi_file"}:
             restart_engine(state.sf_index, state.dac_index)
+            if kind == "midi_file":
+                restore_current_preset_after_engine_restart()
         clear_modal_message()
         send_ui_status("READY", force=True)
         return
     except Exception as exc:
         mark_dirty(f"Player start failed: {exc}")
-        if kind == "media":
+        if kind in {"media", "midi_file"}:
             restart_engine(state.sf_index, state.dac_index)
+            if kind == "midi_file":
+                restore_current_preset_after_engine_restart()
         clear_modal_message()
         send_ui_status("READY", force=True)
         return
@@ -9137,15 +9168,20 @@ def apply_user_preset(item: dict, *, leave_after: bool = True, preview: bool = F
         else:
             # A User Preset must recall its stored engine/source first, not merely
             # change the bank/program on whichever engine happens to be active.
-            if (
-                source_index != old_source_index
-                or state.current_engine != "fluidsynth"
-                or fluid_proc is None
-                or fluid_proc.poll() is not None
-            ):
+            resident = resident_sfid_for_source_index(source_index) is not None
+            if not resident:
+                base = Path(source_path_for_index(source_index)).name
+                if base in GM_SOUNDFONT_CHOICES:
+                    state.gm_soundfont_basename = base
+                    ok = restart_engine(source_index, state.dac_index, manage_modal=False)
+                    if not ok:
+                        return False
+            elif fluid_proc is None or fluid_proc.poll() is not None:
                 ok = restart_engine(source_index, state.dac_index, manage_modal=False)
                 if not ok:
                     return False
+            state.sf_index = source_index
+            state.sf_name = source_name_for_index(source_index)
             apply_preset(bank, program, name, engine="fluidsynth")
             apply_sound_edit_values_from_user_preset(item)
             reconnect_midi_to_fluidsynth(force_draw=False)
@@ -9259,7 +9295,7 @@ def refresh_current_combi() -> None:
         send_fluidsynth_command("drums 9 on")
         send_fluidsynth_command("bank 9 128")
         send_fluidsynth_command("prog 9 0")
-        send_fluidsynth_command("select 9 0 128 0")
+        send_fluidsynth_command(f"select 9 {RESIDENT_GM_SFID} 128 0")
 
         # Re-apply the same predictable controller baseline used by apply_combi().
         for part in state.combi_parts:
@@ -9443,10 +9479,6 @@ def leave_submenu(event: str = "Back") -> None:
     target = state.submenu_return_mode or "main"
     if state.submenu_key == "soundfont":
         state.pending_resume_after_sf_apply = False
-        if combi_locked():
-            warn_combi_quick_blocked()
-            return_to_sound_submenu("Combi active")
-            return
     if state.submenu_key == "preset":
         state.preset_entries = []
         state.preset_index = 0
@@ -9480,7 +9512,8 @@ def return_to_extension_submenu(event: str = "Extension", index: int = 0) -> Non
 def get_submenu_options() -> list[tuple[str, bool]]:
     key = state.submenu_key
     if key == "soundfont":
-        rows = [(name, i == state.sf_index) for i, (_path, name) in enumerate(SOUNDFONTS)]
+        sources = sound_menu_source_indices()
+        rows = [(source_name_for_index(i), i == state.sf_index) for i in sources]
         rows.append(("User Preset", False))
         rows.append(("Combi", bool(state.combi_active)))
         return rows
@@ -9528,8 +9561,10 @@ def get_submenu_options() -> list[tuple[str, bool]]:
         refresh_wifi_status()
         refresh_external_midi_state(quiet=True)
 
+        gm_label = source_name_for_index(gm_soundfont_index())
         rows = [
             (f"Wi-Fi [{wifi_status_label(short=True)}]", False),
+            (f"GM SoundFont [{gm_label}]", False),
             (f"Arpeggio Speed [{state.arp_bpm}]", current_yoshimi_patch_is_arpeggio()),
         ]
         if external_midi_out_available():
@@ -9542,6 +9577,13 @@ def get_submenu_options() -> list[tuple[str, bool]]:
                 (f"MIDI OUT [{device_label}]: {out_label}", False),
                 (f"PC Send [{device_label}]: {pc_label}", False),
             ])
+        return rows
+    if key == "gm_soundfont":
+        rows = []
+        for filename in GM_SOUNDFONT_CHOICES:
+            idx = find_soundfont_index_by_basename_simple(filename)
+            label = source_name_for_index(idx) if idx is not None else filename
+            rows.append((label, filename == state.gm_soundfont_basename))
         return rows
     if key == "arp_speed":
         status = "Yoshimi Arpeggio" if current_yoshimi_patch_is_arpeggio() else "Yoshimi Arpeggio only"
@@ -9615,32 +9657,18 @@ def apply_current_submenu_selection() -> None:
     if key == "soundfont":
         if block_sound_change_while_playing():
             return
-        resume_after_apply = state.pending_resume_after_sf_apply
-        state.pending_resume_after_sf_apply = False
-        if state.submenu_index == len(SOUNDFONTS):
-            # Keep the same convention as other Sound Sources:
-            # SELECT recalls a default item, RIGHT enters the full preset list.
+        sources = sound_menu_source_indices()
+        n = len(sources)
+        if state.submenu_index == n:
             apply_default_user_preset()
-            if resume_after_apply:
-                resume_selected_browser_file_after_sf_change()
             return
-        if state.submenu_index == len(SOUNDFONTS) + 1:
-            # Combi has no safe default sound.  SELECT gives an explicit hint;
-            # RIGHT is used here only to distinguish browse/enter from default apply.
+        if state.submenu_index == n + 1:
             show_timed_modal_message("Use RIGHT", hold_sec=0.9, subtext="Open Combi List")
             return
-        if state.submenu_index == len(SOUNDFONTS) + 2:
-            if combi_locked():
-                warn_combi_quick_blocked()
-                return
-            refresh_current_sound()
-            if resume_after_apply:
-                resume_selected_browser_file_after_sf_change()
-            return
-        apply_soundfont_with_default_preset(state.submenu_index)
-        leave_submenu("SoundFont applied")
-        if resume_after_apply:
-            resume_selected_browser_file_after_sf_change()
+        src_idx = sound_menu_source_index(state.submenu_index)
+        if src_idx is not None:
+            apply_soundfont_with_default_preset(src_idx)
+            leave_submenu("Sound applied")
         return
     if key == "preset":
         if block_sound_change_while_playing():
@@ -9744,13 +9772,17 @@ def apply_current_submenu_selection() -> None:
             mark_dirty("Wi-Fi")
             return
         if state.submenu_index == 1:
+            enter_submenu("gm_soundfont", return_mode="submenu")
+            mark_dirty("GM SoundFont")
+            return
+        if state.submenu_index == 2:
             enter_submenu("arp_speed", return_mode="submenu")
             mark_dirty("Arpeggio Speed")
             return
         if not external_midi_out_available():
             leave_submenu("Extension")
             return
-        if state.submenu_index == 2:
+        if state.submenu_index == 3:
             if len(list_external_midi_seq_ports()) > 1:
                 enter_submenu("external_midi_device")
                 mark_dirty("Select External MIDI")
@@ -9784,6 +9816,12 @@ def apply_current_submenu_selection() -> None:
         else:
             mark_dirty("No configured network")
         return
+    if key == "gm_soundfont":
+        idx = clamp_index(state.submenu_index, len(GM_SOUNDFONT_CHOICES))
+        filename = GM_SOUNDFONT_CHOICES[idx]
+        if choose_runtime_gm_soundfont(filename, persist=True, restart=True):
+            leave_submenu(f"GM: {source_name_for_index(gm_soundfont_index())}")
+        return
     if key == "external_midi_device":
         ports = list_external_midi_seq_ports()
         if not ports:
@@ -9810,7 +9848,7 @@ def apply_current_submenu_selection() -> None:
         state.pending_external_midi_pc_due = 0.0
         ok = send_external_midi_program_change(state.external_midi_pc_index, state.external_midi_pc_channel)
         label = gm_program_label(state.external_midi_pc_index)
-        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=3)
+        return_to_extension_submenu(f"PC set: {shorten_text(label, 20)}" if ok else "External PC send failed", index=4)
         return
     if key == "external_midi_out":
         refresh_external_midi_state(quiet=True)
@@ -9833,7 +9871,7 @@ def apply_current_submenu_selection() -> None:
                 send_external_midi_program_change(0, state.external_midi_pc_channel)
         else:
             state.external_midi_connected = False
-        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=2)
+        return_to_extension_submenu(f"{external_midi_display_name()}: {label}", index=3)
         return
     if key == "user_preset_save":
         presets = load_user_presets()
@@ -9930,14 +9968,20 @@ def apply_current_submenu_selection() -> None:
 
 def handle_main_select() -> None:
     label = MAIN_MENU[clamp_index(state.menu_index, len(MAIN_MENU))]
-    if combi_locked() and label != "Sound":
-        warn_combi_quick_blocked()
-        return
     if label == "Sound":
         if block_sound_change_while_playing():
             return
+        _t_sound0 = time.perf_counter()
         preload_sound_source_count_cache()
+        _t_sound1 = time.perf_counter()
         enter_submenu("soundfont")
+        _t_sound2 = time.perf_counter()
+        log(
+            "Sound menu entry timing: "
+            f"total={(_t_sound2 - _t_sound0) * 1000:.0f} ms "
+            f"preload={(_t_sound1 - _t_sound0) * 1000:.0f} ms "
+            f"enter={(_t_sound2 - _t_sound1) * 1000:.0f} ms"
+        )
     elif label == "Media Player":
         if file_player_active() and state.player_path:
             enter_now_playing()
@@ -10016,6 +10060,7 @@ def quick_resume_label() -> str:
             "dac": "DAC",
             "midi": "MIDI Mode",
             "extension": "Extension",
+            "gm_soundfont": "GM SoundFont",
             "wifi": "Wi-Fi",
             "arp_speed": "Arpeggio Speed",
             "external_midi_device": "External MIDI Device",
@@ -10044,7 +10089,8 @@ def combi_locked() -> bool:
 
 
 def warn_combi_quick_blocked() -> None:
-    show_timed_modal_message("Combi Mode Active", hold_sec=0.8, subtext="Load another sound")
+    # Legacy no-op. Combi is now a persistent performance state, not a UI lock.
+    return
 
 
 def enter_quick_menu() -> None:
@@ -11016,68 +11062,37 @@ def handle_button_event(btn_value: str) -> None:
 
     if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
         options = get_submenu_options()
+        sources = sound_menu_source_indices()
+        n = len(sources)
         if btn == "UP":
             pulse_button_activity()
-            if state.submenu_index > 0:
-                state.submenu_index -= 1
-                if state.submenu_index < len(SOUNDFONTS):
-                    total, drums = soundfont_preset_counts_cached(state.submenu_index)
-                    sf_name = source_name_for_index(state.submenu_index)
-                    mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
-                elif state.submenu_index == len(SOUNDFONTS):
-                    count = user_preset_count_cached()
-                    mark_dirty(f"User Preset: {count} saved")
-                elif state.submenu_index == len(SOUNDFONTS) + 1:
-                    count = user_combi_count_cached()
-                    mark_dirty(f"Combi: {count} saved")
-                else:
-                    mark_dirty("Refresh current sound")
-            else:
-                mark_dirty("First item")
+            state.submenu_index = max(0, state.submenu_index - 1)
+            mark_dirty(_soundfont_nav_status(state.submenu_index))
             return
         if btn == "DOWN":
             pulse_button_activity()
-            if state.submenu_index < len(options) - 1:
-                state.submenu_index += 1
-                if state.submenu_index < len(SOUNDFONTS):
-                    total, drums = soundfont_preset_counts_cached(state.submenu_index)
-                    sf_name = source_name_for_index(state.submenu_index)
-                    mark_dirty(f"{sf_name}: {total} presets, {drums} drums" if total else sf_name)
-                elif state.submenu_index == len(SOUNDFONTS):
-                    count = user_preset_count_cached()
-                    mark_dirty(f"User Preset: {count} saved")
-                elif state.submenu_index == len(SOUNDFONTS) + 1:
-                    count = user_combi_count_cached()
-                    mark_dirty(f"Combi: {count} saved")
-                else:
-                    mark_dirty("Refresh current sound")
-            else:
-                mark_dirty("Last item")
+            state.submenu_index = min(len(options) - 1, state.submenu_index + 1)
+            mark_dirty(_soundfont_nav_status(state.submenu_index))
             return
         if btn == "SEL":
             pulse_button_activity()
-            # Leaf selection: apply the highlighted Sound Source, then return
-            # immediately to the previous menu context. This uses the common
-            # submenu apply path so MIDI-file return/resume behavior stays
-            # consistent with other submenus.
             apply_current_submenu_selection()
             return
         if btn == "RIGHT":
             pulse_button_activity()
-            if state.submenu_index == len(SOUNDFONTS):
+            if state.submenu_index == n:
                 enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
-            elif state.submenu_index == len(SOUNDFONTS) + 1:
+            elif state.submenu_index == n + 1:
                 enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
-            elif state.submenu_index == len(SOUNDFONTS) + 2:
-                mark_dirty("SEL=Reload")
             else:
-                enter_preset_submenu(state.submenu_index)
+                target = sound_menu_source_index(state.submenu_index)
+                if target is not None:
+                    enter_preset_submenu(target)
             return
         if btn == "LEFT":
             pulse_button_activity()
             leave_submenu("Canceled")
             return
-        mark_dirty(f"BTN ignored: {btn}")
         return
 
     if state.ui_mode == "submenu" and state.submenu_key == "preset_category":
@@ -11121,9 +11136,11 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index > 0:
                 state.submenu_index -= 1
-                if state.previewed_combi_index != state.submenu_index:
-                    state.previewed_combi_index = None
+                state.previewed_combi_index = state.submenu_index
                 mark_dirty("Combi browse")
+                if state.combi_entries:
+                    item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
+                    apply_combi(item, leave_after=False, preview=True)
             else:
                 mark_dirty("First item")
             return
@@ -11131,9 +11148,11 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity()
             if state.submenu_index < len(options) - 1:
                 state.submenu_index += 1
-                if state.previewed_combi_index != state.submenu_index:
-                    state.previewed_combi_index = None
+                state.previewed_combi_index = state.submenu_index
                 mark_dirty("Combi browse")
+                if state.combi_entries:
+                    item = state.combi_entries[clamp_index(state.submenu_index, len(state.combi_entries))]
+                    apply_combi(item, leave_after=False, preview=True)
             else:
                 mark_dirty("Last item")
             return
@@ -11142,20 +11161,16 @@ def handle_button_event(btn_value: str) -> None:
             if state.combi_entries:
                 idx = clamp_index(state.submenu_index, len(state.combi_entries))
                 item = state.combi_entries[idx]
-                if combi_item_is_loaded(item):
-                    # First SELECT loads the selected Combi/SoundFont pair.
-                    # A second SELECT on the same pair opens the existing detail screen.
-                    label = shorten_text(str(item.get("name") or "Combi"), 20)
-                    finish_combi_browse_session()
-                    enter_combi_detail_screen(f"Combi loaded: {label}")
-                else:
+                if not combi_item_is_loaded(item):
                     apply_combi(item, leave_after=False, preview=False)
+                label = shorten_text(str(item.get("name") or "Combi"), 20)
+                finish_combi_browse_session()
+                enter_combi_detail_screen(f"Combi: {label}")
             else:
                 mark_dirty("No combis")
             return
         if btn == "RIGHT":
-            pulse_button_activity()
-            cycle_combi_soundfont()
+            # No special RIGHT action in Combi browser.
             return
         if btn == "LEFT":
             pulse_button_activity()
@@ -11276,11 +11291,7 @@ def handle_button_event(btn_value: str) -> None:
         if state.ui_mode == "submenu":
             leave_submenu("Canceled")
         else:
-            if combi_locked():
-                warn_combi_quick_blocked()
-                return_to_sound_submenu("Combi active")
-            else:
-                mark_dirty("Main screen")
+            mark_dirty("Main screen")
         return
 
     if btn == "RIGHT":
@@ -11804,17 +11815,17 @@ def handle_serial_line(line: str) -> None:
 
 
 def _soundfont_nav_status(index: int) -> str:
-    """Return the footer/status text for the highlighted Sound Source row."""
-    if index < len(SOUNDFONTS):
-        total, drums = soundfont_preset_counts_cached(index)
-        sf_name = source_name_for_index(index)
-        return f"{sf_name}: {total} presets, {drums} drums" if total else sf_name
-    if index == len(SOUNDFONTS):
+    sources = sound_menu_source_indices()
+    if index < len(sources):
+        sfidx = sources[index]
+        total, drums = soundfont_preset_counts_cached(sfidx)
+        name = source_name_for_index(sfidx)
+        return f"{name}: {total} presets, {drums} drums" if total else name
+    if index == len(sources):
         return f"User Preset: {user_preset_count_cached()} saved"
-    if index == len(SOUNDFONTS) + 1:
+    if index == len(sources) + 1:
         return f"Combi: {user_combi_count_cached()} saved"
-    return "Refresh current sound"
-
+    return "Sound"
 
 def _move_index_by_delta(current: int, delta: int, length: int) -> tuple[int, bool]:
     """Clamp an index movement and report whether it actually moved."""
@@ -12224,6 +12235,8 @@ def main() -> None:
     enforce_external_midi_out_policy()
     refresh_midi_options(quiet=True)
 
+    state.gm_soundfont_basename = load_saved_gm_soundfont_basename()
+    state.sf_index = piano_soundfont_index()
     sf_path, sf_name = SOUNDFONTS[state.sf_index]
     state.sf_name = sf_name
     state.audio_device = DEFAULT_DAC[0]
@@ -12301,6 +12314,7 @@ def main() -> None:
     finally:
         stop_player_only()
         stop_midi_activity_monitor()
+        stop_yoshimi()
         stop_fluidsynth()
         stop_bridge()
         global fluid_log_handle, yoshimi_log_handle, player_log_handle
