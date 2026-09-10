@@ -7,6 +7,89 @@ Entries are grouped by development date (KST), which may differ from the corresp
 Version identifiers such as `260715f` refer to the version of the main Fluid Ardule runtime script, not to Git tags or GitHub releases.
 
 ---
+## 2026-09-10 --- Sound Architecture and UI Responsiveness Update (260910u)
+
+### Added
+
+-   Added **Salamander C5 Lite** and the selected general SoundFont as
+    simultaneously resident FluidSynth SoundFonts.
+-   Added **Arachno GM** and **FluidR3 GM** as explicit general
+    SoundFont choices in the Sound menu.
+    -   **Arachno GM** is the default general SoundFont.
+    -   **FluidR3 GM** can be selected as an alternative.
+    -   The selected general SoundFont is persisted across restarts.
+-   Added reliable exclusive engine handoff between **FluidSynth** and
+    **Yoshimi**.
+-   Added the active general SoundFont to the **Combi** title bar.
+-   Added dynamic Sound title-bar channel status:
+    -   `CH1-16` when CH1 also uses the resident general SoundFont.
+    -   `CH2-16` when CH1 uses Salamander or Yoshimi.
+
+### Changed
+
+-   Reorganized the Sound menu as:
+    -   Salamander C5 Lite
+    -   Arachno GM
+    -   FluidR3 GM
+    -   Yoshimi
+    -   User Preset
+    -   Combi
+-   Reduced Sound-menu row spacing so all Sound entries, including
+    **Combi**, remain visible on one screen.
+-   MIDI-file playback now uses the **currently selected general
+    SoundFont** instead of a fixed playback SoundFont.
+-   Starting MIDI-file playback explicitly switches CH1 to the current
+    general SoundFont and leaves that state active after playback.
+-   Combi definitions are now **SoundFont-independent**.
+    -   Combis store bank/program, channel, key range, volume,
+        transpose, and routing information rather than a required
+        SoundFont.
+    -   Combis use the currently selected general SoundFont.
+    -   Per-Combi SoundFont selection and the RIGHT-button SoundFont
+        switching workflow were removed.
+-   Combi browsing now loads the highlighted Combi immediately with
+    **UP/DOWN**.
+-   Entering the Combi browser immediately loads the initially
+    highlighted Combi.
+-   **SELECT** from the Combi browser now opens the part/instrument
+    detail view instead of performing a separate load step.
+-   Combi-to-Combi changes now use a fast path without restarting
+    FluidSynth, reloading the SoundFont, or restarting the Combi router.
+-   Combi is now treated as a persistent **performance state**, not a UI
+    navigation mode.
+    -   Home and Media Player remain accessible while a Combi is active.
+    -   Leaving the Combi screen no longer cancels the loaded Combi.
+-   User Presets retain their SoundFont-specific behavior and may still
+    load a different SoundFont when required.
+-   Yoshimi uses exclusive audio-engine handoff rather than attempting
+    to run concurrently with FluidSynth.
+
+### Fixed
+
+-   Fixed a major UI responsiveness problem caused by submenu
+    transitions not being marked dirty.
+    -   Sound-menu entry is now redrawn immediately instead of waiting
+        for a later unrelated UI event.
+    -   The common submenu-entry path now explicitly requests a redraw.
+-   Removed unnecessary synchronous preset-count file access from
+    Sound-menu rendering.
+-   Removed unnecessary Combi loading modal redraws that made Combi
+    changes feel slow.
+-   Fixed Combi state synchronization after loading.
+    -   The Sound title bar now correctly reports `CH1-16` for the
+        active general SoundFont.
+    -   The Sound menu current marker now follows the actual general
+        SoundFont state.
+-   Fixed Combi mode unnecessarily blocking navigation to Home and other
+    functions.
+-   Fixed Media Player entry being blocked while a Combi was active.
+-   Fixed Yoshimi selection failing when FluidSynth retained exclusive
+    ownership of the ALSA audio device.
+-   Fixed misleading Combi timing measurements that included UI
+    rendering and router shutdown in the apparent SoundFont-loading
+    time.
+
+---
 
 ## 2026-07-22 — Combi and Media Player Workflow Update (260722i)
 
