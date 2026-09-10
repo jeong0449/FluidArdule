@@ -2,6 +2,8 @@
   "format": "fluid-ardule-combi-list",
   "version": 1,
   "engine": "fluidsynth",
+  "source_file": "FluidR3_GM.sf2",
+  "preset_index_file": "FluidR3_GM.presets.json",
   "max_parts": 4,
   "input_channel": 1,
   "combinations": [
@@ -12,6 +14,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
           "label": "Yamaha Grand Piano",
           "bank": 0,
           "program": 0,
@@ -25,6 +28,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
           "label": "Warm Pad",
           "bank": 0,
           "program": 89,
@@ -45,6 +49,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
           "label": "Rhodes EP",
           "bank": 0,
           "program": 4,
@@ -58,6 +63,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:49:Slow-Strings",
           "label": "Slow Strings",
           "bank": 0,
           "program": 49,
@@ -78,6 +84,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
           "label": "Yamaha Grand Piano",
           "bank": 0,
           "program": 0,
@@ -91,6 +98,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:48:Strings",
           "label": "Strings",
           "bank": 0,
           "program": 48,
@@ -104,6 +112,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:52:Ahh-Choir",
           "label": "Ahh Choir",
           "bank": 0,
           "program": 52,
@@ -124,6 +133,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:88:Fantasia",
           "label": "Fantasia",
           "bank": 0,
           "program": 88,
@@ -137,6 +147,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
           "label": "Warm Pad",
           "bank": 0,
           "program": 89,
@@ -150,6 +161,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:91:Space-Voice",
           "label": "Space Voice",
           "bank": 0,
           "program": 91,
@@ -163,6 +175,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:94:Halo-Pad",
           "label": "Halo Pad",
           "bank": 0,
           "program": 94,
@@ -183,6 +196,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:16:DrawbarOrgan",
           "label": "DrawbarOrgan",
           "bank": 0,
           "program": 16,
@@ -196,6 +210,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:52:Ahh-Choir",
           "label": "Ahh Choir",
           "bank": 0,
           "program": 52,
@@ -216,6 +231,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:18:Rock-Organ",
           "label": "Rock Organ",
           "bank": 0,
           "program": 18,
@@ -229,6 +245,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:29:Overdrive-Guitar",
           "label": "Overdrive Guitar",
           "bank": 0,
           "program": 29,
@@ -249,6 +266,7 @@
       "parts": [
         {
           "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
           "label": "Fingered Bass",
           "bank": 0,
           "program": 33,
@@ -262,6 +280,7 @@
         },
         {
           "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
           "label": "Yamaha Grand Piano",
           "bank": 0,
           "program": 0,
@@ -282,6 +301,7 @@
       "parts": [
         {
           "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
           "label": "Fingered Bass",
           "bank": 0,
           "program": 33,
@@ -295,6 +315,7 @@
         },
         {
           "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
           "label": "Rhodes EP",
           "bank": 0,
           "program": 4,
@@ -308,6 +329,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
           "label": "Warm Pad",
           "bank": 0,
           "program": 89,
@@ -328,6 +350,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
           "label": "Yamaha Grand Piano",
           "bank": 0,
           "program": 0,
@@ -341,6 +364,7 @@
         },
         {
           "role": "lower",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
           "label": "Fingered Bass",
           "bank": 0,
           "program": 33,
@@ -361,6 +385,7 @@
       "parts": [
         {
           "role": "base",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:4:Rhodes-EP",
           "label": "Rhodes EP",
           "bank": 0,
           "program": 4,
@@ -374,6 +399,7 @@
         },
         {
           "role": "upper",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:61:Brass-Section",
           "label": "Brass Section",
           "bank": 0,
           "program": 61,
@@ -387,6 +413,7 @@
         },
         {
           "role": "layer",
+          "preset_id": "sf2:FluidR3_GM.sf2:0:62:Synth-Brass-1",
           "label": "Synth Brass 1",
           "bank": 0,
           "program": 62,
