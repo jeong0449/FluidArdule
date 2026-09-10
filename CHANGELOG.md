@@ -7,87 +7,191 @@ Entries are grouped by development date (KST), which may differ from the corresp
 Version identifiers such as `260715f` refer to the version of the main Fluid Ardule runtime script, not to Git tags or GitHub releases.
 
 ---
-## 2026-09-10 --- Sound Architecture and UI Responsiveness Update (260910u)
+
+## 2026-09-10 --- Sound Architecture, Combi Workflow, and UI Responsiveness Update (260910u)
 
 ### Added
 
--   Added **Salamander C5 Lite** and the selected general SoundFont as
-    simultaneously resident FluidSynth SoundFonts.
+-   Added a dual-resident FluidSynth architecture:
+    -   **Salamander C5 Lite** is kept as the dedicated piano SoundFont.
+    -   One selectable **general SoundFont** is loaded alongside
+        Salamander for general instruments, drums, Combis, and MIDI-file
+        playback.
 -   Added **Arachno GM** and **FluidR3 GM** as explicit general
     SoundFont choices in the Sound menu.
-    -   **Arachno GM** is the default general SoundFont.
+    -   **Arachno GM** remains the default general SoundFont.
     -   **FluidR3 GM** can be selected as an alternative.
-    -   The selected general SoundFont is persisted across restarts.
+    -   The selected general SoundFont is persisted and reused after
+        restart.
 -   Added reliable exclusive engine handoff between **FluidSynth** and
     **Yoshimi**.
--   Added the active general SoundFont to the **Combi** title bar.
--   Added dynamic Sound title-bar channel status:
-    -   `CH1-16` when CH1 also uses the resident general SoundFont.
-    -   `CH2-16` when CH1 uses Salamander or Yoshimi.
+    -   FluidSynth releases the ALSA audio device before Yoshimi starts.
+    -   Returning from Yoshimi restarts the resident FluidSynth
+        SoundFont pair.
+-   Added dynamic Sound title-bar channel status.
+    -   `CH1-16` is shown when CH1 also uses the resident general
+        SoundFont.
+    -   `CH2-16` is shown when CH1 uses Salamander or Yoshimi.
+    -   The general SoundFont status is dimmed while Yoshimi owns the
+        audio engine.
+-   Added the active resident general SoundFont to the right side of the
+    **Combi** title bar.
+-   Added a fast path for Combi-to-Combi switching without restarting
+    the audio engine, reloading SoundFonts, reconnecting MIDI, or
+    restarting the Combi router.
 
 ### Changed
 
--   Reorganized the Sound menu as:
+-   Reorganized the Sound menu into the following fixed workflow:
     -   Salamander C5 Lite
     -   Arachno GM
     -   FluidR3 GM
     -   Yoshimi
     -   User Preset
     -   Combi
--   Reduced Sound-menu row spacing so all Sound entries, including
+-   Reduced Sound-menu row spacing so all six entries, including
     **Combi**, remain visible on one screen.
--   MIDI-file playback now uses the **currently selected general
-    SoundFont** instead of a fixed playback SoundFont.
--   Starting MIDI-file playback explicitly switches CH1 to the current
-    general SoundFont and leaves that state active after playback.
+-   Selecting **Arachno GM** or **FluidR3 GM** from the Sound menu now
+    explicitly changes the resident/default general SoundFont.
+-   MIDI-file playback now follows the **currently selected general
+    SoundFont**.
+    -   Arachno is used when Arachno is the current general SoundFont.
+    -   FluidR3 is used when FluidR3 is the current general SoundFont.
+-   MIDI-file playback is now treated as an explicit sound-state
+    transition rather than a temporary state that must be automatically
+    restored.
+    -   Starting MIDI playback switches CH1 to the current general
+        SoundFont.
+    -   Salamander or Yoshimi is not automatically restored after STOP,
+        song completion, automatic next-song playback, or leaving the
+        player.
+    -   The user can explicitly select Salamander or Yoshimi again from
+        the Sound menu when desired.
 -   Combi definitions are now **SoundFont-independent**.
     -   Combis store bank/program, channel, key range, volume,
-        transpose, and routing information rather than a required
+        transpose, mute/solo, and routing information rather than a
+        required SoundFont.
+    -   Top-level SoundFont metadata and per-part SoundFont identifiers
+        are no longer required.
+    -   Combis always use the currently selected resident general
         SoundFont.
-    -   Combis use the currently selected general SoundFont.
-    -   Per-Combi SoundFont selection and the RIGHT-button SoundFont
-        switching workflow were removed.
--   Combi browsing now loads the highlighted Combi immediately with
-    **UP/DOWN**.
--   Entering the Combi browser immediately loads the initially
-    highlighted Combi.
--   **SELECT** from the Combi browser now opens the part/instrument
-    detail view instead of performing a separate load step.
--   Combi-to-Combi changes now use a fast path without restarting
-    FluidSynth, reloading the SoundFont, or restarting the Combi router.
+    -   Per-Combi SoundFont selection and RIGHT-button SoundFont
+        switching were removed.
+-   Combi browsing now behaves like direct preset browsing.
+    -   Entering the Combi browser immediately loads the initially
+        highlighted Combi.
+    -   **UP/DOWN** changes the highlight and immediately loads the
+        newly highlighted Combi.
+    -   **SELECT** opens the Combi part/instrument detail view rather
+        than performing a separate load action.
 -   Combi is now treated as a persistent **performance state**, not a UI
     navigation mode.
-    -   Home and Media Player remain accessible while a Combi is active.
-    -   Leaving the Combi screen no longer cancels the loaded Combi.
--   User Presets retain their SoundFont-specific behavior and may still
-    load a different SoundFont when required.
--   Yoshimi uses exclusive audio-engine handoff rather than attempting
-    to run concurrently with FluidSynth.
+    -   Leaving the Combi screen does not cancel the loaded Combi.
+    -   Home, Media Player, and other UI areas remain accessible while a
+        Combi is active.
+-   Removed the previous global Combi navigation lock and the modal
+    warning that forced the user back into the Sound/Combi workflow.
+-   Removed the unnecessary **Loading Combi...** modal during normal
+    Combi changes.
+-   User Presets remain intentionally **SoundFont-specific**.
+    -   Loading a User Preset may change the resident general SoundFont
+        when that preset requires another SoundFont.
+    -   Such a SoundFont change may require a real FluidSynth/SoundFont
+        reload and therefore may take longer than a normal preset or
+        Combi change.
+-   Yoshimi remains an exclusive alternative engine rather than running
+    concurrently with FluidSynth.
+    -   Yoshimi-to-Combi and Yoshimi-to-general-SoundFont transitions
+        therefore legitimately require engine handoff and startup time.
+
+### Performance Improvements
+
+-   Eliminated unnecessary FluidSynth and SoundFont reloads during
+    Combi-to-Combi changes.
+-   Kept the running Combi router alive during fast Combi switching and
+    updated only the active Combi state and channel setup.
+-   Removed unnecessary full-screen Combi loading modal redraws on the
+    SPI TFT.
+-   Changed Sound-menu preset-count helpers to use cached values only
+    during rendering.
+    -   SoundFont preset counts no longer trigger synchronous JSON/file
+        access from the Sound-menu draw path.
+    -   User Preset and Combi counts also use cached or already loaded
+        values.
+-   Disabled unnecessary Sound-menu-entry background preloading after
+    testing showed that it was not the primary cause of the perceived
+    delay.
+-   Instrumented the Sound-menu rendering path to separate:
+    -   event-to-render delay,
+    -   drawing time,
+    -   framebuffer write time.
+-   Measurements showed that the menu drawing itself was relatively
+    small compared with SPI framebuffer transfer, while a much larger
+    unexplained delay occurred before rendering.
+-   Further event-loop instrumentation showed that the queue was not
+    blocked; `maybe_render(force=True)` was being reached almost
+    immediately but returned because `state.dirty` was still false.
+-   Fixed the root cause by making **every submenu entry explicitly mark
+    the UI dirty**.
+    -   Sound-menu entry now redraws immediately instead of waiting for
+        a later unrelated UI event.
+    -   The fix is applied in the common submenu-entry path rather than
+        as a Sound-specific workaround.
 
 ### Fixed
 
--   Fixed a major UI responsiveness problem caused by submenu
-    transitions not being marked dirty.
-    -   Sound-menu entry is now redrawn immediately instead of waiting
-        for a later unrelated UI event.
-    -   The common submenu-entry path now explicitly requests a redraw.
--   Removed unnecessary synchronous preset-count file access from
-    Sound-menu rendering.
--   Removed unnecessary Combi loading modal redraws that made Combi
-    changes feel slow.
+-   Fixed the major unexplained Sound-menu entry delay caused by submenu
+    transitions not setting `state.dirty`.
+-   Fixed Sound-menu responsiveness without requiring faster hardware, a
+    different display, or aggressive SoundFont removal.
+-   Fixed Yoshimi selection failing while FluidSynth retained exclusive
+    ownership of the ALSA audio device.
+    -   FluidSynth is now stopped before Yoshimi starts.
+    -   Yoshimi is stopped before FluidSynth is restored.
 -   Fixed Combi state synchronization after loading.
-    -   The Sound title bar now correctly reports `CH1-16` for the
-        active general SoundFont.
-    -   The Sound menu current marker now follows the actual general
-        SoundFont state.
+    -   The logical Sound state now follows the resident general
+        SoundFont actually used by the Combi.
+    -   The Sound title bar correctly reports `CH1-16` when a Combi uses
+        the general SoundFont.
+    -   The Sound menu current marker no longer incorrectly remains on
+        Salamander after loading a Combi.
+-   Fixed Combi changes appearing to spend nearly a second loading a
+    SoundFont when the measured interval actually included modal
+    rendering and Combi-router shutdown.
+-   Fixed unnecessary Combi-router stop/start cycles during normal
+    Combi-to-Combi changes.
 -   Fixed Combi mode unnecessarily blocking navigation to Home and other
     functions.
 -   Fixed Media Player entry being blocked while a Combi was active.
--   Fixed Yoshimi selection failing when FluidSynth retained exclusive
-    ownership of the ALSA audio device.
--   Fixed misleading Combi timing measurements that included UI
-    rendering and router shutdown in the apparent SoundFont-loading
-    time.
+-   Fixed the Sound menu losing a stable view of the intended general
+    SoundFont workflow when SoundFont-specific User Presets were
+    involved by making Arachno and FluidR3 explicit Sound-menu choices.
+-   Fixed Sound and Combi status displays so they report the active
+    resident general SoundFont consistently.
+
+### Design Decisions
+
+-   **Arachno GM** is the default general SoundFont, but it is no longer
+    hard-wired as the only general-purpose choice.
+-   **FluidR3 GM** remains available because its sound quality is useful
+    and, after the UI and engine-path optimizations, its size is no
+    longer considered a sufficient reason to exclude it.
+-   **Salamander C5 Lite** remains the dedicated high-quality piano
+    source.
+-   **Combi** uses the current general SoundFont rather than owning or
+    selecting a SoundFont itself.
+-   **MIDI Player** uses the current general SoundFont rather than
+    maintaining a separate temporary playback SoundFont.
+-   **User Preset** is the intentional exception: a preset may retain
+    its own SoundFont requirement and trigger a SoundFont change.
+-   Automatic restoration of every previous sound state was deliberately
+    avoided in favor of a simpler and more predictable explicit-state
+    model.
+-   Delays are now expected mainly when a real engine or SoundFont
+    transition is required, such as Yoshimi-to-FluidSynth or a User
+    Preset that changes SoundFonts; ordinary UI navigation and
+    Combi-to-Combi switching should remain responsive.
+
 
 ---
 
