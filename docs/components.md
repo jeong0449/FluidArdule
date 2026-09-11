@@ -35,6 +35,12 @@ Each button produces a unique ADC value that can be distinguished by the firmwar
 >
 > A key improvement is the firmware's self-calibration feature. During calibration, the actual ADC values are measured and stored in EEPROM, allowing the system to compensate for resistor tolerances, ADC variation, wiring differences, and long-term drift.
 >
+> **To enter self-calibration mode, stop playback and press and hold the encoder switch and SELECT button simultaneously for approximately 0.9 seconds.** Release both controls when the calibration screen appears. Then follow the LCD prompts and press the five keypad buttons in the following order:
+>
+> **LEFT → UP → DOWN → RIGHT → SELECT**
+>
+> Each button should be pressed steadily until its ADC value is captured, and released before proceeding to the next button. After all five values have been successfully measured and validated, the calibration data are automatically stored in EEPROM. **No separate save operation is required.**
+>
 > In practice, the self-calibration mechanism proved more important than the exact resistor values themselves and significantly improved long-term reliability.
 
 ### PCM5102A DAC Note
