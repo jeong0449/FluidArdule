@@ -11,7 +11,7 @@
 
 ### Custom Analog Keypad
 
-The current keypad uses five individual pushbuttons and a resistor-encoding network connected to a single Arduino ADC input.
+The current keypad uses five individual pushbuttons (momentary, normally-open, NO) and a resistor-encoding network connected to a single Arduino ADC input.
 
 ```text
 5V
