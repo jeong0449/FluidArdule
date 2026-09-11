@@ -59,4 +59,4 @@ Each button produces a unique ADC value that can be distinguished by the firmwar
 ## 🔧 Optional Components
 
 - I2C 16x2 Character LCD Module (1602 LCD with I2C backpack)
-- USB to TTL Serial Converter Module (CP2102-based)
+- USB to TTL Serial Converter Module (CP2102-based, [Windows drivers](https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads))
