@@ -1,46 +1,37 @@
-# Fluid Ardule Serial Console Access
+# Serial Console Access
 
-This document describes how to access the Raspberry Pi serial console
-using a CP2102-based USB-to-TTL serial converter from a Windows PC.
-
-The serial console provides a simple recovery path when Wi-Fi or other
-network access is unavailable. It is also useful for inspecting boot
-messages and diagnosing Fluid Ardule when the graphical display or main
-application does not respond normally.
+Fluid Ardule provides a serial console as a recovery and diagnostic
+interface. It is useful when Wi-Fi is unavailable or when the main
+application or display does not respond normally.
 
 ## Hardware
 
--   CP2102-based USB-to-TTL serial converter
--   USB cable
--   Three serial connections between the converter and Raspberry Pi:
-    -   CP2102 **TX** → Raspberry Pi **RX**
-    -   CP2102 **RX** → Raspberry Pi **TX**
-    -   CP2102 **GND** → Raspberry Pi **GND**
+A CP2102-based USB-to-TTL serial converter can be used to connect a
+Windows PC to the Raspberry Pi UART.
+
+### Wiring
+
+-   CP2102 **TX** → Raspberry Pi **RX**
+-   CP2102 **RX** → Raspberry Pi **TX**
+-   CP2102 **GND** → Raspberry Pi **GND**
 
 > \[!CAUTION\] Use **3.3 V TTL logic** for the Raspberry Pi UART. Do not
-> connect the converter's 5 V power output to the Raspberry Pi UART
-> pins.
+> connect the converter's 5 V output to the Raspberry Pi UART pins.
 
 ## Windows Driver
 
-Install the Silicon Labs CP210x Virtual COM Port (VCP) driver if Windows
-does not recognize the converter automatically:
+If necessary, install the [Silicon Labs CP210x VCP
+driver](https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads).
 
-https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads
+## Find the COM Port
 
-After installation, reconnect the CP2102 module.
-
-## Find the COM Port with PowerShell
-
-Connect the CP2102 module to the Windows PC and open PowerShell.
-
-Run:
+Connect the CP2102 module and open PowerShell:
 
 ``` powershell
 Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Description
 ```
 
-The converter should appear similar to:
+Example:
 
 ``` text
 DeviceID  Description
@@ -48,40 +39,31 @@ DeviceID  Description
 COM5      Silicon Labs CP210x USB to UART Bridge
 ```
 
-In this example, the serial port is `COM5`.
+In this example, use `COM5`.
 
-If several serial devices are listed, unplug the CP2102, run the command
-again, then reconnect it. The COM port that disappears and reappears is
-the CP2102.
+> \[!TIP\] If several COM ports are listed, unplug and reconnect the
+> CP2102. The port that disappears and reappears is the one to use.
 
 ## Connect with PuTTY
 
-Open PuTTY and select **Serial** as the connection type.
+Open **PuTTY** and select **Serial**.
 
-Use the following settings:
+Set:
 
-  Setting        Value
-  -------------- -----------------------------------
-  Serial line    COM port found above, e.g. `COM5`
-  Speed          `115200`
-  Data bits      `8`
-  Stop bits      `1`
-  Parity         `None`
-  Flow control   `None`
+-   **Serial line:** the COM port found above, e.g. `COM5`
+-   **Speed:** `115200`
 
-Click **Open** to start the serial terminal.
+The remaining serial settings can normally be left at their defaults.
 
-If the terminal window is blank even though the Raspberry Pi is running,
-press **Enter** once or twice. A login prompt should appear if the
-serial console is enabled and configured correctly.
+Click **Open**. If the terminal is blank, press **Enter** once or twice
+to display the login prompt.
 
-## Using the Console for Recovery
+## Recovery and Diagnostics
 
 After logging in, the serial console behaves like a normal Linux
 terminal.
 
-For example, the following commands are useful when Fluid Ardule appears
-to be frozen or unresponsive:
+Useful commands include:
 
 ``` bash
 uptime
@@ -92,14 +74,6 @@ ps aux | grep -E 'fluid|python'
 dmesg | tail -50
 ```
 
-These commands can help distinguish between:
-
--   a graphical display problem,
--   a stopped or failed Fluid Ardule service,
--   excessive CPU or system load,
--   and a broader Raspberry Pi or operating-system problem.
-
-> \[!NOTE\] The serial connection is intended primarily as a maintenance
-> and recovery interface. Keeping it available provides access to the
-> Raspberry Pi even when normal network-based administration is not
-> possible.
+> \[!NOTE\] The serial console is primarily a maintenance and recovery
+> interface. It provides direct access to the Raspberry Pi even when
+> network-based administration is unavailable.
