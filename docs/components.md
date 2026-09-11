@@ -8,6 +8,7 @@
 - **Rotary Encoder Module** — with push switch
 - **Potentiometer (10kΩ)** — volume control
 - **LEDs + resistors** — status indicators
+- **Mean Well LRS-50-5 (50VDC, 10A)** — power supply
 
 ### Custom Analog Keypad
 
