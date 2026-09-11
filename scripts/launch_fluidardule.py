@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260910u"
+SCRIPT_VERSION = "260911c"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -600,6 +600,9 @@ class RuntimeState:
     menu_index: int = 0
     submenu_index: int = 0
     submenu_key: str | None = None
+    # Sound submenu has two in-row choices for SoundFont/User Preset rows:
+    # 0 = Default, 1 = Presets. RIGHT switches focus; SELECT chooses it.
+    sound_row_focus: int = 0
     preset_entries: list[dict] = field(default_factory=list)
     preset_index: int = 0
     preset_sf_index: int | None = None
@@ -3655,24 +3658,41 @@ class TFTDisplay:
         return ""
 
     def _draw_sound_ch2_16_status(self, draw):
-        """Show the resident SoundFont channel range at the far right of the Sound title bar."""
-        sf_name = source_name_for_index(gm_soundfont_index())
-
-        # If CH1 is currently using the resident SoundFont too, show CH1-16.
-        # Otherwise CH1 is occupied by SalC5/Yoshimi/etc., so the resident
-        # SoundFont applies only to CH2-16.
+        """Show the most useful current sound state at the right of the Sound title bar."""
         gm_idx = gm_soundfont_index()
-        ch1_uses_resident_sf = (
-            state.current_engine != "yoshimi"
-            and state.sf_index == gm_idx
-        )
-        channel_label = "CH1-16" if ch1_uses_resident_sf else "CH2-16"
-        text = f"{channel_label}: {sf_name}"
 
-        fill = DIM if (state.current_engine == "yoshimi" or is_yoshimi_source(state.sf_index)) else ACCENT
+        # The title-bar status is contextual rather than always showing the
+        # resident GM channel range.  When Yoshimi or Combi owns the musical
+        # context, that is more useful than the background resident-SF state.
+        if state.current_engine == "yoshimi" or is_yoshimi_source(state.sf_index):
+            text = "Yoshimi"
+            fill = ACCENT
+        elif state.combi_active:
+            try:
+                _key, sf2_name = COMBI_SOUNDFONT_OPTIONS[
+                    clamp_index(state.combi_soundfont_index, len(COMBI_SOUNDFONT_OPTIONS))
+                ]
+                combi_sf_label = Path(sf2_name).stem
+                for sf_path, sf_label in SOUNDFONTS:
+                    if Path(sf_path).name == Path(sf2_name).name:
+                        combi_sf_label = sf_label
+                        break
+            except Exception:
+                combi_sf_label = source_name_for_index(gm_idx)
+            text = f"Combi: {combi_sf_label}"
+            fill = ACCENT
+        else:
+            sf_name = source_name_for_index(gm_idx)
+            # If CH1 is currently using the resident SoundFont too, show CH1-16.
+            # Otherwise CH1 is occupied by SalC5/etc., so the resident
+            # SoundFont applies only to CH2-16.
+            ch1_uses_resident_sf = state.sf_index == gm_idx
+            channel_label = "CH1-16" if ch1_uses_resident_sf else "CH2-16"
+            text = f"{channel_label}: {sf_name}"
+            fill = ACCENT
 
-        # Keep the status right aligned. If the SoundFont label is long,
-        # shorten it rather than letting it collide with the "Sound" title.
+        # Keep the status right aligned. If the label is long, shorten it rather
+        # than letting it collide with the "Sound" title.
         max_width = self.width - 165
         text = self._fit_text_to_width(draw, text, self.font_small, max_width)
         bbox = draw.textbbox((0, 0), text, font=self.font_small)
@@ -3768,7 +3788,7 @@ class TFTDisplay:
         )
 
     def _draw_submenu_soundfont_rows(self, draw, options):
-        """Draw Sound as a CH1 source/preset selector."""
+        """Draw Sound rows with an in-row Default/Presets focus."""
         sources = sound_menu_source_indices()
         # Six rows must remain visible together:
         # SalC5 / Arachno / FluidR3 / Yoshimi / User Preset / Combi.
@@ -3780,40 +3800,74 @@ class TFTDisplay:
         for visible_row, idx in enumerate(range(start_idx, min(len(options), start_idx + visible_rows))):
             top = list_top + visible_row * row_h
             text, is_current = options[idx]
-            if idx == state.submenu_index:
+            selected = idx == state.submenu_index
+            if selected:
                 draw.rounded_rectangle((20, top, self.width - 20, top + 30), radius=8, fill=SELECT_BG)
                 fill = FG
             else:
                 fill = FG if is_current else DIM
-            prefix = f"{self._row_symbol_for_current_context(idx)} " if idx == state.submenu_index else "  "
+            prefix = f"{self._row_symbol_for_current_context(idx)} " if selected else "  "
             suffix = " *" if is_current else ""
             draw_left_vcentered_text_list(
                 draw, 28, top, row_h,
                 f"{prefix}{text}{suffix}",
                 self.font_body, fill
             )
+
+            # SoundFont and User Preset rows expose two choices only while
+            # highlighted. Non-highlighted rows show just the collection count;
+            # the old trailing '>' is intentionally removed.
             if idx < len(sources):
                 sfidx = sources[idx]
                 total, _ = soundfont_preset_counts_cached(sfidx)
-                if total:
-                    draw_right_vcentered_text(
-                        draw, self.width - 28, top, row_h,
-                        f"{total} Presets" if idx == state.submenu_index else f"{total} >",
-                        self.font_small, FG if idx == state.submenu_index else ACCENT
-                    )
+                count_label = f"{total} Presets"
+                has_default = True
             elif idx == len(sources):
-                count = user_preset_count_cached()
-                draw_right_vcentered_text(
-                    draw, self.width - 28, top, row_h,
-                    f"{count} Presets" if idx == state.submenu_index else f"{count} >",
-                    self.font_small, FG if idx == state.submenu_index else ACCENT
-                )
+                total = user_preset_count_cached()
+                count_label = f"{total} Presets"
+                has_default = True
             elif idx == len(sources) + 1:
-                count = user_combi_count_cached()
+                total = user_combi_count_cached()
+                count_label = f"{total} Combis"
+                has_default = False
+            else:
+                continue
+
+            if selected and has_default:
+                # RIGHT does not move a focus chip.  Instead it swaps the two
+                # fields, while the dark action slot stays fixed on the left.
+                # This makes SELECT consistently choose the dark left-hand item
+                # and avoids visually suggesting that LEFT is part of the toggle.
+                right_x = self.width - 28
+                default_label = "Default"
+                active_label = default_label if state.sound_row_focus == 0 else count_label
+                inactive_label = count_label if state.sound_row_focus == 0 else default_label
+
+                active_bbox = draw.textbbox((0, 0), active_label, font=self.font_small)
+                active_w = active_bbox[2] - active_bbox[0]
+                inactive_bbox = draw.textbbox((0, 0), inactive_label, font=self.font_small)
+                inactive_w = inactive_bbox[2] - inactive_bbox[0]
+                gap = 12
+                active_x = right_x - inactive_w - gap - active_w
+
+                draw.rounded_rectangle(
+                    (active_x - 5, top + 5, active_x + active_w + 5, top + 27),
+                    radius=5, fill=BACKGROUND
+                )
+                draw_left_vcentered_text_list(
+                    draw, active_x, top, row_h, active_label, self.font_small, FG
+                )
                 draw_right_vcentered_text(
-                    draw, self.width - 28, top, row_h,
-                    f"{count} Combis" if idx == state.submenu_index else f"{count} >",
-                    self.font_small, FG if idx == state.submenu_index else ACCENT
+                    draw, right_x, top, row_h, inactive_label, self.font_small, FG
+                )
+            else:
+                # Keep non-highlighted Sound/Preset rows quiet: show only the
+                # numeric collection size.  The word "Presets" appears only
+                # after the row is highlighted.  Combi keeps its own label.
+                compact_label = str(total) if has_default else count_label
+                draw_right_vcentered_text(
+                    draw, self.width - 28, top, row_h, compact_label,
+                    self.font_small, FG if selected else ACCENT
                 )
         self._draw_overflow_hints(
             draw, current_idx=state.submenu_index, items_len=len(options),
@@ -4516,16 +4570,13 @@ class TFTDisplay:
         footer_hint = None
         if state.ui_mode == "submenu" and state.submenu_key == "soundfont":
             try:
-                # Keep Sound Source hints consistent:
-                #   SELECT applies a leaf/default action.
-                #   RIGHT enters a browser/submenu when one exists.
+                # Sound submenu interaction grammar:
+                # RIGHT switches the in-row focus; SELECT chooses it.
                 nsrc = len(sound_menu_source_indices())
-                if state.submenu_index < nsrc:
-                    footer_hint = "SEL: Default   ▶: Presets"
-                elif state.submenu_index == nsrc:
-                    footer_hint = "SEL: Default   ▶: User"
+                if state.submenu_index <= nsrc:
+                    footer_hint = "R: Switch   SEL: Choose"
                 elif state.submenu_index == nsrc + 1:
-                    footer_hint = "SEL: Hint   ▶: Combi"
+                    footer_hint = "SEL: Choose"
             except Exception:
                 pass
 
@@ -9395,6 +9446,8 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
     state.ui_mode = "submenu"
     invalidate_full_display()
     state.submenu_key = key
+    if key == "soundfont":
+        state.sound_row_focus = 0
     state.submenu_return_mode = return_mode
     state.submenu_index = 0
     if key == "soundfont":
@@ -9669,7 +9722,7 @@ def apply_current_submenu_selection() -> None:
             apply_default_user_preset()
             return
         if state.submenu_index == n + 1:
-            show_timed_modal_message("Use RIGHT", hold_sec=0.9, subtext="Open Combi List")
+            enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
             return
         src_idx = sound_menu_source_index(state.submenu_index)
         if src_idx is not None:
@@ -11069,27 +11122,37 @@ def handle_button_event(btn_value: str) -> None:
         if btn == "UP":
             pulse_button_activity()
             state.submenu_index = max(0, state.submenu_index - 1)
+            state.sound_row_focus = 0
             mark_dirty(_soundfont_nav_status(state.submenu_index))
             return
         if btn == "DOWN":
             pulse_button_activity()
             state.submenu_index = min(len(options) - 1, state.submenu_index + 1)
+            state.sound_row_focus = 0
             mark_dirty(_soundfont_nav_status(state.submenu_index))
-            return
-        if btn == "SEL":
-            pulse_button_activity()
-            apply_current_submenu_selection()
             return
         if btn == "RIGHT":
             pulse_button_activity()
-            if state.submenu_index == n:
-                enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
-            elif state.submenu_index == n + 1:
-                enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
-            else:
+            # SoundFont and User Preset rows have two in-row choices.
+            # Combi has only one collection action, so RIGHT does nothing there.
+            if state.submenu_index <= n:
+                state.sound_row_focus = 1 - int(bool(state.sound_row_focus))
+                mark_dirty("Presets" if state.sound_row_focus else "Default")
+            return
+        if btn == "SEL":
+            pulse_button_activity()
+            if state.submenu_index < n and state.sound_row_focus == 1:
                 target = sound_menu_source_index(state.submenu_index)
                 if target is not None:
                     enter_preset_submenu(target)
+                return
+            if state.submenu_index == n and state.sound_row_focus == 1:
+                enter_user_preset_load_menu(return_mode=state.submenu_return_mode or "main")
+                return
+            if state.submenu_index == n + 1:
+                enter_combi_load_menu(return_mode=state.submenu_return_mode or "main")
+                return
+            apply_current_submenu_selection()
             return
         if btn == "LEFT":
             pulse_button_activity()
