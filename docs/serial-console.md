@@ -4,19 +4,9 @@ Fluid Ardule provides a serial console as a recovery and diagnostic
 interface. It is useful when Wi-Fi is unavailable or when the main
 application or display does not respond normally.
 
-## Hardware
+## Hardware Connection
 
-A CP2102-based USB-to-TTL serial converter can be used to connect a
-Windows PC to the Raspberry Pi UART.
-
-### Wiring
-
--   CP2102 **TX** → Raspberry Pi **RX**
--   CP2102 **RX** → Raspberry Pi **TX**
--   CP2102 **GND** → Raspberry Pi **GND**
-
-> \[!CAUTION\] Use **3.3 V TTL logic** for the Raspberry Pi UART. Do not
-> connect the converter's 5 V output to the Raspberry Pi UART pins.
+Connect the CP2102 USB-to-TTL serial converter to the Raspberry Pi as shown in the [Fluid Ardule system wiring diagram](../images/fluid-ardule-system-wiring-diagram.png).
 
 ## Windows Driver
 
