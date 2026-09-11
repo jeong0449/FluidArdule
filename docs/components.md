@@ -62,4 +62,4 @@ Each button produces a unique ADC value that can be distinguished by the firmwar
 - USB to TTL Serial Converter Module
   (CP2102-based, [Windows drivers](https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads))
   — provides a serial recovery console when network access is unavailable.
-  See [Serial Console Access](docs/serial-console.md).
+  See [Serial Console Access](./serial-console.md).
