@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260910m"
+SCRIPT_VERSION = "260910u"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -759,6 +759,7 @@ class RuntimeState:
     # underlying User Preset list is changed.
     soundfont_count_cache: dict[int, tuple[int, int]] = field(default_factory=dict)
     user_preset_count_cache: int | None = None
+    user_combi_count_cache: int | None = None
     sound_source_cache_preload_started: bool = False
     sound_source_cache_preload_done: bool = False
 
@@ -3246,16 +3247,21 @@ class TFTDisplay:
         options = get_submenu_options()
         prev_index = prev_snapshot.get("submenu_index")
 
+        _row_h = 34 if state.submenu_key == "soundfont" else 38
         return self._render_list_incremental_common(
             prev_snapshot=prev_snapshot,
             prev_index=prev_index,
             curr_index=state.submenu_index,
             items_len=len(options),
             top_y=56,
-            row_h=38,
+            row_h=_row_h,
             bottom_y=self.height - 50,
             list_bbox=(12, 50, self.width - 12, self.height - 48),
-            row_bbox_func=lambda vis: (20, 56 + vis * 38, self.width - 20, 104 + vis * 38 + 38),
+            row_bbox_func=(
+                (lambda vis: (20, 56 + vis * 34, self.width - 20, 56 + vis * 34 + 34))
+                if state.submenu_key == "soundfont"
+                else (lambda vis: (20, 56 + vis * 38, self.width - 20, 104 + vis * 38 + 38))
+            ),
             redraw_current_view=lambda draw: (
                 draw.rounded_rectangle((12, 50, self.width - 12, self.height - 48), radius=12, fill=BOX_BG),
                 self._draw_submenu(draw)
@@ -3343,6 +3349,7 @@ class TFTDisplay:
             self._draw_modal_message(draw)
         self._draw_footer(draw)
         self._write_image(image)
+
         self.prev_snapshot = self._snapshot_state()
         state.last_render_time = time.time()
         state.dirty = False
@@ -3763,7 +3770,9 @@ class TFTDisplay:
     def _draw_submenu_soundfont_rows(self, draw, options):
         """Draw Sound as a CH1 source/preset selector."""
         sources = sound_menu_source_indices()
-        row_h = 38
+        # Six rows must remain visible together:
+        # SalC5 / Arachno / FluidR3 / Yoshimi / User Preset / Combi.
+        row_h = 34
         list_top = 56
         start_idx, visible_rows, _visible_row = self._list_window_state(
             state.submenu_index, len(options), list_top, row_h, self.height - 50, page_windows=False
@@ -3772,7 +3781,7 @@ class TFTDisplay:
             top = list_top + visible_row * row_h
             text, is_current = options[idx]
             if idx == state.submenu_index:
-                draw.rounded_rectangle((20, top, self.width - 20, top + 32), radius=8, fill=SELECT_BG)
+                draw.rounded_rectangle((20, top, self.width - 20, top + 30), radius=8, fill=SELECT_BG)
                 fill = FG
             else:
                 fill = FG if is_current else DIM
@@ -3927,7 +3936,9 @@ class TFTDisplay:
         elif state.submenu_key in {"user_preset_load", "user_preset_save", "user_preset_manage", "user_preset_delete", "user_preset_rename", "user_preset_overwrite"}:
             info = "User"
         elif state.submenu_key == "combi_load":
-            info = "Combi"
+            # Combi uses the currently resident general SoundFont.
+            # Show that actual loaded SoundFont at the right of the title bar.
+            info = source_name_for_index(gm_soundfont_index())
         elif state.submenu_key == "combi_detail":
             info = shorten_text(state.current_combi_name or "Combi", 18)
         elif state.submenu_key == "wifi":
@@ -5517,7 +5528,12 @@ def gm_soundfont_index() -> int:
 
 
 def sound_menu_source_indices() -> list[int]:
-    rows = [piano_soundfont_index(), gm_soundfont_index()]
+    """Stable Sound menu order: SalC5, Arachno, FluidR3, Yoshimi."""
+    rows: list[int] = [piano_soundfont_index()]
+    for basename in ("Arachno_GM.sf2", "FluidR3_GM.sf2"):
+        idx = find_soundfont_index_by_basename_simple(basename)
+        if idx is not None:
+            rows.append(idx)
     yi = yoshimi_source_index()
     if yi is not None:
         rows.append(yi)
@@ -5997,36 +6013,19 @@ def soundfont_preset_counts(sf_index: int) -> tuple[int, int]:
 
 
 def soundfont_preset_counts_cached(sf_index: int) -> tuple[int, int]:
-    """Return cached Sound Source preset counts for fast menu rendering."""
+    """Return cached Sound Source preset counts without UI-thread file I/O."""
     try:
         sf_index = int(sf_index)
     except Exception:
         return 0, 0
-    if sf_index in state.soundfont_count_cache:
-        return state.soundfont_count_cache.get(sf_index, (0, 0))
-
-    # During background preload, do not block the UI by reading JSON on demand.
-    # The row can briefly show no count; it will update when preload finishes.
-    if state.sound_source_cache_preload_started and not state.sound_source_cache_preload_done:
-        return 0, 0
-
-    state.soundfont_count_cache[sf_index] = soundfont_preset_counts(sf_index)
     return state.soundfont_count_cache.get(sf_index, (0, 0))
 
 
-
 def user_preset_count_cached() -> int:
-    """Return cached User Preset count for Sound Source display."""
-    if state.user_preset_count_cache is not None:
-        return int(state.user_preset_count_cache)
-
-    # During background preload, avoid blocking Sound Source entry.
-    if state.sound_source_cache_preload_started and not state.sound_source_cache_preload_done:
+    """Return cached User Preset count without UI-thread file I/O."""
+    if state.user_preset_count_cache is None:
         return 0
-
-    state.user_preset_count_cache = len(load_user_presets())
     return int(state.user_preset_count_cache)
-
 
 
 def invalidate_user_preset_cache() -> None:
@@ -6057,6 +6056,8 @@ def preload_sound_source_count_cache() -> None:
                     state.soundfont_count_cache[i] = soundfont_preset_counts(i)
             if state.user_preset_count_cache is None:
                 state.user_preset_count_cache = len(load_user_presets())
+            if state.user_combi_count_cache is None:
+                state.user_combi_count_cache = len(load_user_combis())
             state.sound_source_cache_preload_done = True
             mark_dirty("Sound cache ready")
         except Exception as exc:
@@ -6347,9 +6348,9 @@ def refresh_browser_entries(keep_name: str | None = None) -> None:
 
 
 def enter_file_browser() -> None:
-    if combi_locked():
-        warn_combi_quick_blocked()
-        return
+    # Combi is a persistent performance state, not a UI navigation lock.
+    # Media Player may be opened while a Combi is active; actual playback
+    # will perform its own explicit engine/state transition when needed.
     enter_file_source(default_usb=state.usb_mounted)
 
 
@@ -7018,13 +7019,17 @@ def load_user_combis(soundfont_key: str | None = None) -> list[dict]:
         if norm:
             combis.append(norm)
     state.combi_entries = combis
+    state.user_combi_count_cache = len(combis)
     return combis
 
 
 def user_combi_count_cached() -> int:
+    """Return cached Combi count without UI-thread JSON access."""
     if state.combi_entries:
         return len(state.combi_entries)
-    return len(load_user_combis())
+    if state.user_combi_count_cache is None:
+        return 0
+    return int(state.user_combi_count_cache)
 
 
 def combi_label(index: int, item: dict) -> str:
@@ -9469,6 +9474,7 @@ def enter_submenu(key: str, return_mode: str | None = None) -> None:
         state.combi_entries = load_user_combis()
         state.submenu_index = 0
         begin_combi_browse_session()
+    mark_dirty()
 
 
 def leave_submenu(event: str = "Back") -> None:
@@ -9667,6 +9673,12 @@ def apply_current_submenu_selection() -> None:
             return
         src_idx = sound_menu_source_index(state.submenu_index)
         if src_idx is not None:
+            src_base = Path(source_path_for_index(src_idx)).name
+            if src_base in {"Arachno_GM.sf2", "FluidR3_GM.sf2"}:
+                # Selecting a general SoundFont here makes it the resident/default
+                # general SoundFont used by CH2-16, Combi, and MIDI file playback.
+                # Persist the choice so the next boot uses the same default.
+                choose_runtime_gm_soundfont(src_base, persist=True, restart=True)
             apply_soundfont_with_default_preset(src_idx)
             leave_submenu("Sound applied")
         return
@@ -9971,17 +9983,7 @@ def handle_main_select() -> None:
     if label == "Sound":
         if block_sound_change_while_playing():
             return
-        _t_sound0 = time.perf_counter()
-        preload_sound_source_count_cache()
-        _t_sound1 = time.perf_counter()
         enter_submenu("soundfont")
-        _t_sound2 = time.perf_counter()
-        log(
-            "Sound menu entry timing: "
-            f"total={(_t_sound2 - _t_sound0) * 1000:.0f} ms "
-            f"preload={(_t_sound1 - _t_sound0) * 1000:.0f} ms "
-            f"enter={(_t_sound2 - _t_sound1) * 1000:.0f} ms"
-        )
     elif label == "Media Player":
         if file_player_active() and state.player_path:
             enter_now_playing()
