@@ -1,41 +1,60 @@
 # Fluid Ardule Combination System Design
 
-Created: 2026-05-09  
-Updated: 2026-06-03  
-Status: **v0.1 implemented / experimental**
+Created: 2026-05-09\
+Updated: 2026-09-11\
+Reference runtime: `launch_fluidardule.py`, version 260910u\
+Combi definition format: `fluid-ardule-combi-list`, version 1\
+Status: **implemented / experimental, resident-GM architecture**
 
 ## Overview
 
-This document defines the **Combination (Combi)** sound system for Fluid Ardule.
+This document defines the **Combination (Combi)** sound system for Fluid
+Ardule as implemented in the 2026-09-10 runtime series.
 
-The original goal was to extend the User Preset system into a lightweight workstation-style performance architecture while preserving the project's existing design philosophy:
+A Combi is a lightweight workstation-style performance configuration
+made from multiple MIDI parts. It supports both layered sounds and
+keyboard splits while preserving the project's design philosophy:
 
-- hardware-oriented
-- simple to operate
-- fast to access
-- musically focused
-- minimal menu depth
+-   hardware-oriented
+-   simple to operate
+-   fast to access
+-   musically focused
+-   minimal menu depth
+-   low runtime overhead
 
-As of 2026-06-03, a first working implementation has been tested. The system can load Combi definitions from JSON, apply multiple FluidR3_GM presets to internal MIDI channels, duplicate incoming keyboard performance data, support layer/split behavior, preserve CH10 drum-pad input, and display the currently loaded Combi on the Home screen.
+The current implementation loads Combi definitions from a single JSON
+file, applies bank/program/volume settings to internal FluidSynth MIDI
+channels, duplicates incoming CH1 keyboard performance data to the
+required parts, filters notes by key range, supports transpose, honors
+mute/solo flags, forwards performance controllers and Pitch Bend, and
+preserves CH10 drum-pad input.
 
-The Combi system remains intentionally lightweight and avoids becoming a full DAW-like environment.
+A major architectural change from the early v0.1 design is that **the
+Combi JSON no longer contains a SoundFont filename or SoundFont-specific
+preset ID**. The same Combi definition can therefore be used with any of
+the supported resident GM SoundFonts selected at runtime.
 
----
+The Combi system remains intentionally lightweight and avoids becoming a
+full DAW-like environment.
+
+------------------------------------------------------------------------
 
 # 1. Definition of Combination Sound
 
-A **Combination (Combi)** is a performance configuration consisting of multiple sound layers and/or keyboard splits.
+A **Combination (Combi)** is a performance configuration consisting of
+multiple sound layers and/or keyboard splits.
 
-Internally, a Combination is implemented as a collection of MIDI routing rules and SoundFont preset references.
+Internally, a Combination is implemented as a collection of MIDI routing
+rules and GM-compatible bank/program references.
 
 The Combination system includes both:
 
-- layered sounds
-- keyboard splits
+-   layered sounds
+-   keyboard splits
 
 Therefore:
 
-```text
+``` text
 Layer
 = overlapping key ranges
 
@@ -48,394 +67,491 @@ Combination
 
 No separate "Layer Mode" or "Split Mode" is required.
 
----
+------------------------------------------------------------------------
 
 # 2. Implementation Status
 
-## 2.1 Implemented in v0.1
+## 2.1 Current implementation
 
-The current experimental implementation supports:
+The current implementation supports:
 
-- `~/sf2/user_combis.json`
-- 10 sample Combi definitions
-- FluidR3_GM.sf2-based Combi loading
-- up to 4 parts per Combi (experimental)
-- channel-based part assignment
-- Program Change and volume setup per part
-- CH1 keyboard input duplication to Combi part channels
-- key range filtering using `key_low` and `key_high`
-- transpose-aware note routing
-- Note Off tracking for stable split/transpose behavior
-- CC forwarding from input keyboard to Combi part channels
-- Pitch Bend forwarding to Combi part channels
-- CH10 drum-pad input preservation
-- Combi Preview / Load workflow
-- Combi Loaded information screen
-- Home screen display of the currently loaded Combi name
+-   `/home/pi/sf2/user_combis.json`
+-   `fluid-ardule-combi-list` format version 1
+-   up to 4 parts per Combi
+-   SoundFont-independent Combi definitions
+-   runtime selection of a resident GM SoundFont for Combi playback
+-   bank/program-based sound assignment
+-   channel-based part assignment
+-   per-part volume
+-   `key_low` / `key_high` range filtering
+-   transpose-aware note routing
+-   Note Off tracking for stable split/transpose behavior
+-   per-part `mute` and `solo` flags
+-   CH1 keyboard input duplication to Combi part channels
+-   CC forwarding from the input keyboard to active Combi part channels
+-   Pitch Bend forwarding
+-   CH10 drum-pad preservation
+-   Combi browsing and audible preview
+-   Combi load/confirmation workflow
+-   Home-screen display of the currently loaded Combi
 
-## 2.1a Stability Notes
+## 2.2 Stability notes
 
-Current testing suggests:
+Current testing and implementation history indicate:
 
-- 2-part and 3-part layers are generally stable
-- 4-part layers remain experimental
-- Heavy 4-part layering may trigger MIDI routing or serial communication instability
-- Additional optimization is required before 4-part layers can be considered production-ready
+-   2-part and 3-part layers are the normal operating range.
+-   Up to 4 parts are supported by the format and runtime.
+-   Heavy multi-part routing increases Python-side MIDI processing load.
+-   Direct ALSA MIDI routes to FluidSynth must be disconnected while the
+    Python Combi router is active, otherwise unfiltered notes can bypass
+    split logic.
+-   Serial traffic and unnecessary TFT redraws should be kept out of
+    high-frequency MIDI paths.
 
-## 2.2 Still Future Work
+## 2.3 Future work
 
-The following are not yet implemented or should be treated as future work:
+Possible future extensions include:
 
-- Combi save/edit UI
-- per-part mute/solo UI
-- User Preset reference-based Combi parts
-- cross-SoundFont Combi
-- per-part Sound Edit restoration
-- velocity curves
-- zone crossfade
-- drum remap
-- advanced MIDI effects
+-   Combi save/edit UI
+-   interactive per-part mute/solo controls
+-   part volume editing
+-   key-range editing
+-   transpose editing
+-   velocity curves
+-   zone crossfade
+-   drum remap
+-   advanced MIDI effects
 
----
+------------------------------------------------------------------------
 
 # 3. Fundamental Design Principles
 
-## 3.1 Current v0.1: Based on SoundFont Preset IDs
+## 3.1 SoundFont-independent Combi definitions
 
-The original design proposed that Combinations should reference User Presets.
+The current Combi file deliberately does **not** identify a SoundFont.
 
-For the first working implementation, Combi parts directly reference FluidR3_GM preset information using:
+A part is defined by ordinary MIDI-oriented parameters such as:
 
-- `preset_id`
-- `bank`
-- `program`
-- `name`
+-   `bank`
+-   `program`
+-   `channel`
+-   `volume`
+-   `key_low`
+-   `key_high`
+-   `transpose`
 
-This was chosen because `FluidR3_GM.presets.json` already provides stable preset metadata and allows immediate implementation without depending on the User Preset editor.
+The `label` field is human-readable metadata. It does not bind the part
+to a particular SoundFont file.
 
 Example:
 
-```json
+``` json
 {
-  "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
-  "name": "Yamaha Grand Piano",
+  "role": "layer",
+  "label": "Warm Pad",
   "bank": 0,
-  "program": 0
+  "program": 89,
+  "channel": 2,
+  "volume": 68,
+  "key_low": 21,
+  "key_high": 127,
+  "transpose": 0,
+  "mute": false,
+  "solo": false
 }
 ```
 
-## 3.2 Future Direction: User Preset References
+This means that the Combi stores the **musical/routing structure**, not
+a dependency on a specific SF2 file.
 
-The longer-term architecture should still move toward referencing User Presets or Edited User Presets.
+## 3.2 Resident GM SoundFont architecture
 
-Future example:
+Fluid Ardule keeps a GM SoundFont resident in FluidSynth. The current
+runtime provides the following Combi SoundFont choices:
 
-```text
-Combi
- ├ Piano (existing User Preset)
- ├ Warm Pad ed1 (edited User Preset)
- └ Finger Bass (existing User Preset)
+``` text
+FluidR3_GM
+GeneralUser_GS
+Arachno_GM
 ```
 
-This keeps the architecture clean and modular.
+The selected Combi SoundFont is a **runtime choice**, not a property
+stored in `user_combis.json`.
 
-## 3.3 Single SoundFont Limitation
+When a Combi part is applied, Fluid Ardule selects its bank/program on
+the resident GM SoundFont ID. Therefore the same FCxxx Combi definition
+can be auditioned using different supported GM SoundFonts without
+modifying the JSON.
 
-At the current design stage, all Combination parts are assumed to belong to the same SoundFont.
+This design avoids embedding SoundFont filenames in every Combi and
+separates two concerns:
 
-The first implementation is FluidR3_GM.sf2 based.
+``` text
+Combi definition
+= musical structure + MIDI bank/program + routing
 
-This simplifies:
+Resident GM SoundFont
+= actual sample/instrument implementation used to render it
+```
 
-- engine management
-- preset loading
-- startup latency
-- state restoration
-- UI consistency
-- debugging
+## 3.3 Labels versus actual patches
 
-Future cross-SF2 combinations may be explored later.
+A `label` such as `Yamaha Grand Piano`, `Warm Pad`, or `Fingered Bass`
+documents the intended GM sound.
 
-## 3.4 Channel Duplication Architecture
+The authoritative selection values are `bank` and `program`. Because
+different GM SoundFonts may differ slightly in timbre or naming, the
+audible result can vary while the Combi structure remains unchanged.
 
-The Combination engine is implemented by:
+## 3.4 Channel duplication architecture
 
-- reading incoming MIDI performance data
-- treating CH1 as the main keyboard input
-- duplicating notes and controllers to internal MIDI channels
-- filtering notes by key range
-- routing them to each active Combi part
+The Combination engine treats CH1 as the main keyboard performance input
+and routes notes to internal FluidSynth channels.
 
 Example:
 
-```text
+``` text
 Input CH1 note
- → Part 1 → CH1
- → Part 2 → CH2
- → Part 3 → CH3
- → Part 4 → CH4
+  → Part 1 → CH1
+  → Part 2 → CH2
+  → Part 3 → CH3
+  → Part 4 → CH4
 ```
 
-Each channel maintains its own:
+Each part can have its own:
 
-- Program Change
-- CC state
-- Reverb send
-- Chorus send
-- Sound Edit parameters
+-   bank/program
+-   channel
+-   volume
+-   key range
+-   transpose
+-   mute/solo state
 
-This makes Combination implementation relatively lightweight.
-
-## 3.5 CH10 Drum Preservation
+## 3.5 CH10 drum preservation
 
 Some keyboard controllers send drum-pad events on CH10.
 
-In Combi mode, CH10 should not be absorbed into the CH1 layer/split router.
+In Combi mode, CH10 is preserved separately from the CH1 layer/split
+router:
 
-Recommended behavior:
-
-```text
+``` text
 CH1 keyboard notes
- → routed through Combi engine
+  → routed through Combi engine
 
-CH10 drum pad notes
- → passed through to FluidSynth CH10
+CH10 drum-pad notes
+  → passed to FluidSynth CH10
 ```
 
-This preserves drum-pad usability while playing layered/split Combi sounds.
+FluidSynth CH10 is explicitly prepared as a drum channel using the
+resident GM SoundFont.
 
----
+------------------------------------------------------------------------
 
 # 4. JSON Structure
 
-## 4.1 Combination File
+## 4.1 Combination file
 
 Current file:
 
-```text
+``` text
 /home/pi/sf2/user_combis.json
 ```
 
-## 4.2 Current v0.1 JSON Example
+Top-level structure:
 
-```json
+``` json
 {
-  "name": "Piano + Pad",
-  "sf2": "FluidR3_GM.sf2",
+  "format": "fluid-ardule-combi-list",
+  "version": 1,
+  "engine": "fluidsynth",
+  "max_parts": 4,
+  "input_channel": 1,
+  "combinations": []
+}
+```
+
+There is intentionally **no `sf2` field** at the top level or inside
+individual Combi definitions.
+
+## 4.2 Layer example
+
+``` json
+{
+  "id": "FC001",
+  "name": "Piano + Warm Pad",
+  "description": "Basic full-range piano layer with soft pad.",
   "parts": [
     {
-      "role": "Main",
-      "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
-      "name": "Yamaha Grand Piano",
+      "role": "base",
+      "label": "Yamaha Grand Piano",
       "bank": 0,
       "program": 0,
       "channel": 1,
-      "volume": 100,
+      "volume": 105,
       "key_low": 21,
       "key_high": 127,
-      "transpose": 0
+      "transpose": 0,
+      "mute": false,
+      "solo": false
     },
     {
-      "role": "Layer",
-      "preset_id": "sf2:FluidR3_GM.sf2:0:89:Warm-Pad",
-      "name": "Warm Pad",
+      "role": "layer",
+      "label": "Warm Pad",
       "bank": 0,
       "program": 89,
       "channel": 2,
-      "volume": 72,
+      "volume": 68,
       "key_low": 21,
       "key_high": 127,
-      "transpose": 0
+      "transpose": 0,
+      "mute": false,
+      "solo": false
     }
   ]
 }
 ```
 
-## 4.3 Split Example
+## 4.3 Split example
 
-```json
+``` json
 {
+  "id": "FC007",
   "name": "Bass / Piano Split",
-  "sf2": "FluidR3_GM.sf2",
+  "description": "Lower fingered bass and upper piano.",
   "parts": [
     {
-      "role": "Lower",
-      "preset_id": "sf2:FluidR3_GM.sf2:0:33:Fingered-Bass",
-      "name": "Fingered Bass",
+      "role": "lower",
+      "label": "Fingered Bass",
       "bank": 0,
       "program": 33,
       "channel": 1,
-      "volume": 100,
+      "volume": 105,
       "key_low": 21,
       "key_high": 47,
-      "transpose": 0
+      "transpose": 0,
+      "mute": false,
+      "solo": false
     },
     {
-      "role": "Upper",
-      "preset_id": "sf2:FluidR3_GM.sf2:0:0:Yamaha-Grand-Piano",
-      "name": "Yamaha Grand Piano",
+      "role": "upper",
+      "label": "Yamaha Grand Piano",
       "bank": 0,
       "program": 0,
       "channel": 2,
-      "volume": 100,
+      "volume": 105,
       "key_low": 48,
       "key_high": 127,
-      "transpose": 0
+      "transpose": 0,
+      "mute": false,
+      "solo": false
     }
   ]
 }
 ```
 
----
+------------------------------------------------------------------------
 
 # 5. Combination Parameters
 
-## 5.1 Implemented Parameters
+## 5.1 Top-level parameters
 
-| Parameter | Description |
-|---|---|
-| name | Combi name shown in the UI |
-| sf2 | Required SoundFont filename |
-| parts | List of Combi parts |
-| role | UI-facing part role such as Main, Layer, Upper, Lower |
-| preset_id | Stable preset identifier from FluidR3_GM.presets.json |
-| name | Human-readable preset name |
-| bank | MIDI bank number |
-| program | MIDI program number |
-| channel | Internal FluidSynth MIDI channel |
-| volume | Per-part channel volume |
-| key_low | Lowest allowed MIDI note |
-| key_high | Highest allowed MIDI note |
-| transpose | Semitone offset |
+  Parameter         Description
+  ----------------- -----------------------------------------------
+  `format`          Format identifier: `fluid-ardule-combi-list`
+  `version`         Combi-list format version
+  `engine`          Playback engine; currently `fluidsynth`
+  `max_parts`       Maximum number of parts defined by the format
+  `input_channel`   Main keyboard input channel
+  `combinations`    List of Combi definitions
 
-## 5.2 Planned Parameters
+## 5.2 Combi parameters
 
-| Parameter | Description |
-|---|---|
-| mute | Temporarily disable a part |
-| solo | Temporarily isolate a part |
-| pan | Optional per-part pan |
-| reverb | Optional per-part reverb send |
-| chorus | Optional per-part chorus send |
+  Parameter       Description
+  --------------- -----------------------------------------
+  `id`            Stable Combi identifier such as `FC001`
+  `name`          Combi name shown in the UI
+  `description`   Human-readable description
+  `parts`         List of Combi parts
 
-## 5.3 Parameters Deliberately Excluded from v0.1
+## 5.3 Part parameters
 
-The following are intentionally excluded from the first design stage:
+  Parameter     Description
+  ------------- -----------------------------------------------------------
+  `role`        Musical/UI role such as `base`, `layer`, `upper`, `lower`
+  `label`       Human-readable intended instrument name
+  `bank`        MIDI bank number
+  `program`     MIDI program number
+  `channel`     Internal FluidSynth MIDI channel, 1-based in the JSON
+  `volume`      Per-part channel volume, 0--127
+  `key_low`     Lowest accepted MIDI note
+  `key_high`    Highest accepted MIDI note
+  `transpose`   Semitone offset
+  `mute`        Exclude this part when true
+  `solo`        If any part is soloed, only soloed parts remain eligible
 
-- velocity curves
-- independent per-part Sound Edit override
-- arpeggiator
-- zone crossfade
-- drum remap
-- MIDI effects processing
+## 5.4 Parameters deliberately not stored
 
-These features can greatly increase state complexity.
+The current format deliberately does not store:
 
----
+-   SoundFont filename
+-   SoundFont ID
+-   SoundFont-specific `preset_id`
+-   synth-engine process state
+
+This keeps Combi definitions portable across the supported resident GM
+SoundFonts.
+
+------------------------------------------------------------------------
 
 # 6. MIDI Routing Behavior
 
 ## 6.1 Notes
 
-Incoming CH1 Note On/Off events are routed to Combi parts according to:
+Incoming CH1 Note On/Off events are routed to active Combi parts
+according to:
 
-```text
+``` text
 key_low <= note <= key_high
 ```
 
 If the note is inside the part range:
 
-```text
+``` text
 output_note = input_note + transpose
 output_channel = part.channel
 ```
 
-Note Off events must be sent to the same output channel and transposed note used by the original Note On.
+Note Off must be sent to the same output channel and transposed note
+used by the corresponding Note On. The router therefore tracks active
+note mappings.
 
-Therefore, the router should remember active note mappings.
+## 6.2 Mute and Solo filtering
 
-## 6.2 Controllers
+Part eligibility is evaluated before key-range routing.
 
-The Combi router should forward normal performance controllers from CH1 to all active Combi part channels.
+``` text
+If one or more parts have solo=true:
+    keep only soloed parts
 
-Examples:
-
-- CC1 Modulation
-- CC64 Sustain
-- CC11 Expression
-- CC10 Pan, if needed
-- other keyboard performance CC messages
-
-However, CC7 Volume should generally be excluded from raw forwarding because Combi part volume is defined by the Combi itself.
-
-## 6.3 Pitch Bend
-
-Pitch Bend should be forwarded from CH1 to all active Combi part channels.
-
-This allows keyboard pitch bend wheels to work naturally in layered sounds.
-
-## 6.4 CH10 Drum Input
-
-CH10 input should be preserved and passed through to FluidSynth CH10.
-
-This allows drum pads on keyboard controllers to keep working while Combi mode is active.
-
----
-
-# 7. SoundFont Loading Behavior
-
-Combi loading should avoid unnecessary SoundFont reloads.
-
-Recommended behavior:
-
-```text
-Combi Load
-  ↓
-Check required sf2
-  ↓
-If required sf2 is already loaded:
-    do not reload SoundFont
-    apply channel programs/volumes
-  ↓
-If required sf2 is different:
-    load required SoundFont once
-    then apply channel programs/volumes
+Then:
+    discard any part with mute=true
+    apply key-range filtering
 ```
 
-Important implementation note:
+Thus mute/solo are part of the current data model and routing behavior,
+even though a complete interactive edit UI may still be expanded later.
 
-When switching from RAW MIDI mode to ALSA/Combi routing mode, engine/routing preparation must happen before applying Program Change and volume settings.
+## 6.3 Controllers
 
-Correct order:
+Normal performance controllers from CH1 are forwarded to active Combi
+channels as appropriate.
 
-```text
-Prepare engine and MIDI routing
-Apply Program Change / Volume
-Start or update Combi router
+Examples include:
+
+-   CC1 Modulation
+-   CC64 Sustain
+-   CC11 Expression
+-   other keyboard performance CC messages
+
+Per-part CC7 volume is established from the Combi definition and should
+not be unintentionally overwritten by raw controller forwarding.
+
+## 6.4 Pitch Bend
+
+Pitch Bend from CH1 is forwarded to active Combi part channels so
+layered and split sounds respond naturally to the keyboard pitch-bend
+wheel.
+
+## 6.5 CH10 drum input
+
+CH10 is preserved for drum-pad use and is prepared as a standard GM drum
+channel on the resident GM SoundFont.
+
+------------------------------------------------------------------------
+
+# 7. SoundFont Behavior
+
+## 7.1 Combi does not own a SoundFont
+
+Earlier versions of this design associated a Combi directly with a
+specific SF2 file. That model is obsolete.
+
+The current rule is:
+
+> **A Combi definition does not select, name, or reload a SoundFont.**
+
+`user_combis.json` contains no SoundFont filename. SoundFont selection
+is handled separately by the Fluid Ardule runtime.
+
+## 7.2 Runtime Combi SoundFont selection
+
+The current runtime provides a set of GM SoundFont choices for Combi
+playback:
+
+``` text
+FluidR3_GM
+GeneralUser_GS
+Arachno_GM
 ```
 
-Wrong order:
+Changing this selection changes the resident GM SoundFont used to render
+the same bank/program-based Combi definitions.
 
-```text
-Apply Program Change / Volume
-Restart FluidSynth
-→ settings are lost
+Conceptually:
+
+``` text
+user_combis.json
+        │
+        │  bank / program / channel / range
+        ▼
+   Combi router
+        │
+        ▼
+selected resident GM SoundFont
+        │
+        ▼
+    FluidSynth
 ```
 
----
+## 7.3 Channel setup
+
+For each part, the runtime applies:
+
+``` text
+resident GM SoundFont ID
++ bank
++ program
++ channel volume
+```
+
+A part therefore does not require a SoundFont-specific preset
+identifier.
+
+## 7.4 Why this architecture is preferred
+
+Advantages include:
+
+-   no SF2 filename duplication in Combi data
+-   no SoundFont-specific `preset_id` dependency
+-   easier comparison of GM SoundFonts using the same Combi
+-   simpler Combi JSON
+-   clearer separation of musical configuration from synthesis resources
+-   less unnecessary SoundFont reloading during normal Combi selection
+
+------------------------------------------------------------------------
 
 # 8. UI Design Philosophy
 
-## 8.1 Avoid Exposing "Parts"
+## 8.1 Avoid exposing unnecessary implementation detail
 
-Internally, Combination uses part-based routing.
+Internally, Combination uses part-based routing and resident SoundFont
+IDs.
 
-However, the user interface should avoid overly technical wording.
+The user interface should remain musical rather than
+engineering-oriented. Preferred role language includes:
 
-Preferred UI language:
-
-```text
-Main
+``` text
+Base
 Layer
 Upper
 Lower
@@ -444,289 +560,274 @@ Pad
 Strings
 ```
 
-instead of:
+rather than unnecessary technical labels such as `Zone A`.
 
-```text
-Part 1
-Part 2
-Zone A
-```
+## 8.2 SoundFont choice is separate from Combi identity
 
-The instrument should feel musical rather than engineering-oriented.
+The selected Combi SoundFont may be shown in the Combi browser/runtime
+UI, but it is not part of the saved Combi identity.
 
----
+For example, `FC001 Piano + Warm Pad` remains FC001 whether rendered
+with Arachno_GM, FluidR3_GM, or GeneralUser_GS.
+
+------------------------------------------------------------------------
 
 # 9. Current UI Structure
 
-## 9.1 Top-Level Entry
+## 9.1 Top-level entry
 
-The former `Sound Source` menu should be renamed to `Sound`.
+The Sound area provides access to ordinary sounds, presets, and Combi
+operation. Exact menu wording may evolve, but Combi remains a
+performance-level sound configuration rather than a separate synthesis
+engine.
 
-Current structure:
+## 9.2 Combi browser
 
-```text
-Home
- ├ Sound
- ├ Media Player
- ├ Controls
- ├ MIDI Mode
- ├ DAC
- └ Extension
-```
+In the current runtime, entering the Combi browser immediately previews
+the highlighted Combi so the audible state matches the current
+highlight. Subsequent navigation likewise allows rapid auditioning.
 
-Recommended Sound submenu:
+The browser also maintains a separate Combi SoundFont selection. Cycling
+the Combi SoundFont keeps the same Combi ID highlighted where possible
+and re-auditions the definition using the newly selected resident GM
+SoundFont.
 
-```text
-Sound
- ├ SoundFonts
- ├ User Preset
- ├ Combi
- └ Refresh Sound
-```
+This differs from the early design in which `RIGHT` was proposed as an
+explicit Preview command. That proposal is no longer the authoritative
+behavior.
 
-## 9.2 Combi List
+## 9.3 Load behavior
 
-Combi list behavior:
+A Combi can be confirmed as the active performance configuration after
+auditioning. The loaded state records the Combi identity and the runtime
+SoundFont choice separately.
 
-```text
-ENC       Move highlight
-RIGHT     Preview
-SELECT    Load / confirm
-LEFT      Exit / cancel
-```
+## 9.4 Home-screen display
 
-Rationale:
+When a Combi is active, the Home screen should represent the Combi as
+the current performance state rather than merely displaying the last
+ordinary preset.
 
-- `SELECT` should mean real selection/load.
-- `RIGHT` is suitable for a secondary action such as Preview.
-- `LEFT` should return to the Sound menu.
+------------------------------------------------------------------------
 
-The Combi list should show a persistent hint line such as:
+# 10. Relationship with Sound Edit and User Presets
 
-```text
-R Preview   SEL Load   L Exit
-```
+The early design proposed that each Combi part would reference a User
+Preset, which in turn could restore its own Sound Edit state.
 
-The hint line should have a stable background strip to avoid flicker.
+The current architecture is deliberately simpler:
 
-## 9.3 Preview Behavior
-
-Preview is temporary.
-
-Recommended behavior:
-
-```text
-RIGHT
- → temporarily apply highlighted Combi
- → remain in Combi list
- → show PREVIEW state
-```
-
-Preview should not automatically occur during list navigation, because Combi loading is heavier than single preset preview.
-
-## 9.4 Load Behavior
-
-Load is confirmed selection.
-
-Recommended behavior:
-
-```text
-SELECT
- → load highlighted Combi
- → show Combi Loaded screen
-```
-
-## 9.5 Combi Loaded Screen
-
-After a Combi is loaded, the UI should not immediately jump to Home.
-
-Instead, it should show a summary of the loaded Combi:
-
-```text
-Combi Loaded
-
-Piano + Pad
-
-Main  : Yamaha Grand Piano
-Layer : Warm Pad
-
-L Sound   SEL List
-```
-
-The screen should show the active Combi structure and provide a natural path to later edit functions.
-
-Future extension:
-
-```text
-L Sound
-SEL List
-R Edit
-```
-
-## 9.6 Home Screen Display
-
-When a Combi is loaded, the Home screen `Sound` field should show the current Combi name rather than the last ordinary SoundFont/Preset.
-
-Example:
-
-```text
-Sound
-Combi: Piano + Pad
-```
-
-This better represents the current performance state.
-
----
-
-# 10. Relationship with Existing Sound Edit
-
-The original design stated:
-
-```text
+``` text
 Combination Part
- → loads User Preset
- → User Preset restores its own CC/Sound Edit state
+  → bank/program on resident GM SoundFont
+  → channel volume
+  → key range
+  → transpose
+  → mute/solo
 ```
 
-This remains the desired long-term architecture.
+This keeps Combi loading lightweight and independent of User Preset
+files.
 
-In the current v0.1 implementation, Combi parts directly apply bank/program/volume to channels. Sound Edit state is not yet restored per part.
+A future version may add richer per-part sound editing, but it should
+not reintroduce unnecessary SoundFont filename coupling into the Combi
+definition.
 
-Future direction:
+------------------------------------------------------------------------
 
-```text
-Combination Part
- → references User Preset
- → User Preset restores Program/Bank and Sound Edit
- → Combi applies key range, transpose, relative volume, mute/solo
-```
+# 11. Reverb, Chorus, and Controller State
 
-This preserves edited sounds, effect settings, and synth identity without duplication.
+FluidSynth is channel-aware, so different Combi channels can in
+principle maintain different controller states.
 
----
+The current runtime establishes a predictable controller baseline for
+Combi part channels when a Combi is applied. This is important because a
+channel may otherwise inherit controller values from previous use.
 
-# 11. Reverb and Chorus Behavior
+Future Combi editing may expose per-part effect sends or related
+parameters, but such extensions should remain optional and should not
+complicate the basic bank/program/range model unnecessarily.
 
-Reverb and Chorus are already channel-aware in FluidSynth.
-
-Therefore:
-
-```text
-Piano (CH1)  → low reverb
-Pad   (CH2)  → high reverb
-Bass  (CH3)  → dry
-```
-
-can work naturally without requiring a special global Combi effect engine.
-
-In v0.1, reverb and chorus are not yet stored as explicit Combi part parameters.
-
----
+------------------------------------------------------------------------
 
 # 12. Mute and Solo
 
-Mute/Solo are considered essential future features.
+`mute` and `solo` are now part of the Combi JSON schema and are honored
+by the routing logic.
 
-Reasons:
+Behavior:
 
-- verifying layers individually
-- balancing layered sounds
-- debugging splits
-- performance preparation
-
-Recommended behavior:
-
-```text
+``` text
 Solo
-= temporarily mute all other active parts
+= if any part is soloed, only soloed parts are considered
 
 Mute
-= temporarily disable only the selected part
+= a muted part is excluded from routing
 ```
 
-These states should remain runtime-only at first and not necessarily be saved.
+These fields are useful for:
 
-Recommended future UI path:
+-   checking layers individually
+-   balancing a Combi during development
+-   debugging split ranges
+-   preparing future runtime edit controls
 
-```text
-Combi Loaded
- ├ Mute/Solo
- ├ Edit
- └ Save As
+A richer panel UI for changing these values interactively can be added
+independently of the underlying format.
+
+------------------------------------------------------------------------
+
+# 13. Current Example Library
+
+The current `user_combis.json` contains ten example definitions:
+
+``` text
+FC001  Piano + Warm Pad
+FC002  Rhodes + Slow Strings
+FC003  Grand + Strings + Choir
+FC004  Big Layer Pad
+FC005  Organ + Choir
+FC006  Rock Organ + Guitar
+FC007  Bass / Piano Split
+FC008  Bass / EP + Pad Split
+FC009  Base Piano + Bass Split
+FC010  Base EP + Brass Split
 ```
 
----
+These examples cover:
 
-# 13. Recommended Development Roadmap
+-   full-range 2-part layers
+-   3-part layers
+-   a 4-part layer
+-   conventional lower/upper splits
+-   full-range base sounds with range-limited added parts
 
-## 13.1 v0.1 Completed / Experimental
+Because the definitions contain no SoundFont filename, the same library
+can be auditioned against each supported resident GM SoundFont.
 
-- Combi JSON load
-- 10 sample Combi sounds
-- Preview / Load workflow
-- Combi Loaded screen
-- Home screen Combi name display
-- layer support
-- split support
-- CH1 note routing
-- CC forwarding
-- Pitch Bend forwarding
-- CH10 drum-pad preservation
-
-## 13.2 v0.2 Recommended
-
-- stabilize split behavior
-- improve 4-part layer stability
-- reduce serial write pressure during Combi routing
-- add Combi part view refinements
-- add mute/solo runtime controls
-- improve router logging and diagnostics
-- ensure no direct MIDI bypass leaks into FluidSynth during Combi mode
-
-## 13.3 v0.3 Recommended
-
-- Combi edit UI
-- Save As
-- part volume editing
-- key range editing
-- transpose editing
-- User Preset reference support
-
----
+------------------------------------------------------------------------
 
 # 14. Runtime Stability Notes
 
-The Combi router increases Python-side MIDI processing load.
+The Combi router increases Python-side MIDI processing compared with a
+direct ALSA MIDI connection.
 
-Observed or plausible stability issues include:
+Important implementation considerations include:
 
-- serial write timeout during heavy routing
-- excessive MIDI LED activity messages
-- UI heartbeat delay
-- direct MIDI connection leakage bypassing split
-- engine restart losing channel settings if order is wrong
+-   disconnect direct MIDI routes to FluidSynth before starting the
+    Combi router
+-   prevent bypass paths that defeat split filtering
+-   keep serial writes out of high-frequency MIDI routing paths
+-   limit unnecessary TFT redraw activity
+-   maintain correct Note On/Note Off mapping after transpose
+-   preserve CH10 drum routing
+-   establish predictable controller state when applying a Combi
+-   avoid unnecessary SoundFont reloads
 
-Recommended mitigation:
+The current runtime also throttles Combi-related background rendering to
+reduce display-side overhead on Raspberry Pi 3B.
 
-- limit `ACT:MIDI` serial messages during Combi mode
-- keep serial writes out of high-frequency MIDI routing paths
-- prepare engine/routing before applying Combi settings
-- avoid automatic preview on list movement
-- use explicit Preview and Load actions
-- keep Split implementation conservative
+------------------------------------------------------------------------
 
----
+# 15. Design Evolution
 
-# 15. Final Notes
+## 15.1 Early v0.1 concept
 
-The Fluid Ardule Combi system has moved from a future proposal to an experimental working feature.
+The original implementation/design assumed:
 
-The design still aims for:
+``` text
+Combi
+  → specific SoundFont
+  → SoundFont-specific preset reference
+```
 
-- workstation-like flexibility
-- lightweight implementation
-- minimal runtime overhead
-- simple hardware operation
-- compatibility with the existing User Preset architecture
+and examples explicitly contained fields such as:
 
-The current v0.1 implementation proves that Fluid Ardule can act not only as a SoundFont player, but also as a lightweight performance workstation with layered and split sounds.
+``` json
+"sf2": "FluidR3_GM.sf2"
+```
+
+and SoundFont-specific `preset_id` values.
+
+## 15.2 Current architecture
+
+The 2026-09 architecture is:
+
+``` text
+Combi
+  → SoundFont-independent MIDI structure
+       ├ bank/program
+       ├ channel
+       ├ volume
+       ├ key range
+       ├ transpose
+       └ mute/solo
+
+Runtime
+  → selects resident GM SoundFont
+  → applies Combi parts to that SoundFont
+```
+
+This is a cleaner separation of concerns and better matches Fluid
+Ardule's role as a lightweight hardware-oriented performance instrument.
+
+------------------------------------------------------------------------
+
+# 16. Recommended Development Roadmap
+
+## 16.1 Current baseline
+
+-   SoundFont-independent `user_combis.json`
+-   10 example Combi definitions
+-   resident GM SoundFont architecture
+-   bank/program-based part selection
+-   up to 4 parts
+-   layer support
+-   split support
+-   CH1 Python-side routing
+-   mute/solo routing semantics
+-   CC forwarding
+-   Pitch Bend forwarding
+-   CH10 drum-pad preservation
+-   audible Combi browsing/preview
+-   active Combi state display
+
+## 16.2 Near-term refinement
+
+-   continue stability testing on Raspberry Pi 3B
+-   verify 4-part behavior under sustained playing
+-   minimize serial and TFT overhead during Combi routing
+-   refine Combi browser UI
+-   add or refine runtime mute/solo controls
+-   improve router diagnostics and logging
+
+## 16.3 Later extensions
+
+-   Combi edit UI
+-   Save As
+-   part volume editing
+-   key-range editing
+-   transpose editing
+-   optional per-part controller/effect editing
+
+------------------------------------------------------------------------
+
+# 17. Final Notes
+
+The Fluid Ardule Combi system has evolved from a FluidR3_GM-specific
+experiment into a more general **SoundFont-independent performance
+structure**.
+
+Its central design rule is now simple:
+
+> **Store the musical structure in the Combi; choose the GM SoundFont at
+> runtime.**
+
+This keeps Combi data compact, portable, and easy to maintain while
+allowing Fluid Ardule to compare or use different resident GM SoundFonts
+without duplicating Combination definitions.
+
+The current implementation demonstrates that Fluid Ardule can function
+not only as a SoundFont/MIDI player, but also as a lightweight
+performance workstation with layers, splits, resident GM sound
+resources, and hardware-oriented operation on Raspberry Pi 3B.
