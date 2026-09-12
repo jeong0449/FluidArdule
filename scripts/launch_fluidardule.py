@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260911c"
+SCRIPT_VERSION = "260912l"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -406,6 +406,7 @@ WIFI_OTHER_PRIORITY = 10
 # Cache Wi-Fi status/config reads to avoid repeated sudo cat during UI redraws.
 WIFI_STATUS_CACHE_SEC = 10.0
 WIFI_KNOWN_SSIDS_CACHE_SEC = 180.0
+WIFI_SCAN_TIMEOUT_SEC = 8.0
 
 
 DEFAULT_RADIO_STATIONS = [
@@ -2149,39 +2150,36 @@ def read_wifi_conf_text(path: str) -> str:
         return ""
 
 
-def parse_wpa_supplicant_networks(conf_path: str | None = None, *, force: bool = False) -> list[str]:
-    """Return SSIDs listed in the active wpa_supplicant config.
+def _decode_wpa_quoted_ssid(value: str) -> str:
+    """Decode only wpa_supplicant backslash escapes without corrupting UTF-8 SSIDs."""
+    value = str(value or "")
+    value = value.replace(r"\\", "\0")
+    value = value.replace(r'\"', '"')
+    value = value.replace(r"\n", "\n").replace(r"\r", "\r").replace(r"\t", "\t")
+    return value.replace("\0", "\\")
 
-    The config is root-protected on this image, so a read may fall back to
-    sudo cat.  Cache the common no-argument path because UI redraws can ask
-    for Wi-Fi labels frequently, and configured SSIDs rarely change during
-    normal performance.  Explicit Wi-Fi actions pass force=True.
-    """
+
+def parse_wpa_supplicant_networks(conf_path: str | None = None, *, force: bool = False) -> list[str]:
+    """Return the union of configured SSIDs from the available wpa_supplicant files."""
     global _wifi_known_ssids_cache_until, _wifi_known_ssids_cache
     now = time.time()
     if conf_path is None and not force and now < _wifi_known_ssids_cache_until:
         return list(_wifi_known_ssids_cache)
 
     paths = [conf_path] if conf_path else wifi_conf_paths()
-    text = ""
+    ssids: list[str] = []
+
     for path in paths:
         text = read_wifi_conf_text(path)
-        if text:
-            break
-    if not text:
-        if conf_path is None:
-            _wifi_known_ssids_cache = []
-            _wifi_known_ssids_cache_until = now + WIFI_KNOWN_SSIDS_CACHE_SEC
-        return []
-
-    ssids: list[str] = []
-    for block in re.findall(r'network\s*=\s*\{(.*?)\}', text, flags=re.S):
-        m = re.search(r'^\s*ssid\s*=\s*"((?:\\.|[^"\\])*)"', block, flags=re.M)
-        if not m:
+        if not text:
             continue
-        ssid = bytes(m.group(1), "utf-8").decode("unicode_escape", errors="ignore")
-        if ssid and ssid not in ssids:
-            ssids.append(ssid)
+        for block in re.findall(r'network\s*=\s*\{(.*?)\}', text, flags=re.S):
+            m = re.search(r'^\s*ssid\s*=\s*"((?:\\.|[^"\\])*)"', block, flags=re.M)
+            if not m:
+                continue
+            ssid = _decode_wpa_quoted_ssid(m.group(1))
+            if ssid and ssid not in ssids:
+                ssids.append(ssid)
 
     if conf_path is None:
         _wifi_known_ssids_cache = list(ssids)
@@ -2200,8 +2198,13 @@ def wifi_current_ssid() -> str:
     code, out = run_cmd(["iwgetid", WIFI_INTERFACE, "-r"])
     if code == 0 and out.strip():
         return out.strip()
-    # Do not depend on wpa_cli here. Some interface-specific wpa_supplicant
-    # setups connect normally but do not expose the default control socket.
+
+    # Robust fallback when wireless-tools reports nothing although iw sees a link.
+    code, out = run_cmd(["iw", "dev", WIFI_INTERFACE, "link"])
+    if code == 0 and out:
+        m = re.search(r"^\s*SSID:\s*(.+?)\s*$", out, flags=re.M)
+        if m:
+            return m.group(1).strip()
     return ""
 
 
@@ -2268,11 +2271,33 @@ def set_wifi_enabled(enabled: bool) -> bool:
     return state.wifi_enabled == enabled
 
 
-def scan_wifi_ssids() -> list[str]:
-    """Show configured SSIDs that are currently visible on the air.
+def _collect_ssids_from_scan_output(out: str, detected: set[str]) -> None:
+    """Accept output from iw, iwlist, or wpa_cli scan_results."""
+    if not out:
+        return
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SSID: "):
+            ssid = stripped.split("SSID: ", 1)[1].strip()
+            if ssid:
+                detected.add(ssid)
+    for ssid in re.findall(r'ESSID:"(.*?)"', out):
+        if ssid:
+            detected.add(ssid)
+    # wpa_cli scan_results: bssid / frequency / signal / flags / ssid
+    for line in out.splitlines():
+        if "\t" not in line or line.lower().startswith("bssid"):
+            continue
+        parts = line.split("\t", 4)
+        if len(parts) == 5 and parts[4].strip():
+            detected.add(parts[4].strip())
 
-    Prefer iw/iwlist because this project should not depend on wpa_cli control
-    sockets; automatic OS connection already works through systemd.
+
+def scan_wifi_ssids() -> list[str]:
+    """Return configured SSIDs that are currently visible.
+
+    Try multiple scan paths because an associated wlan0 may reject one scanner
+    while another still has useful results. The current SSID is always retained.
     """
     known = parse_wpa_supplicant_networks(force=True)
     state.wifi_known_ssids = known
@@ -2282,24 +2307,37 @@ def scan_wifi_ssids() -> list[str]:
         return []
 
     detected: set[str] = set()
+    current = wifi_current_ssid()
+    if current:
+        detected.add(current)
 
-    code, out = run_cmd(["sudo", "-n", "iw", "dev", WIFI_INTERFACE, "scan"])
-    if code == 0 and out:
-        for line in out.splitlines():
-            line = line.strip()
-            if line.startswith("SSID: "):
-                ssid = line.split("SSID: ", 1)[1].strip()
-                if ssid:
-                    detected.add(ssid)
-
-    if not detected:
-        code, out = run_cmd(["sudo", "-n", "iwlist", WIFI_INTERFACE, "scan"])
-        if code == 0:
-            for ssid in re.findall(r'ESSID:"(.*?)"', out):
-                if ssid:
-                    detected.add(ssid)
+    scan_commands = [
+        ["sudo", "-n", "iw", "dev", WIFI_INTERFACE, "scan"],
+        ["sudo", "-n", "iwlist", WIFI_INTERFACE, "scan"],
+        ["sudo", "-n", "wpa_cli", "-i", WIFI_INTERFACE, "scan_results"],
+    ]
+    for cmd in scan_commands:
+        try:
+            p = subprocess.run(
+                cmd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                timeout=WIFI_SCAN_TIMEOUT_SEC,
+            )
+            if p.returncode == 0:
+                _collect_ssids_from_scan_output(p.stdout or "", detected)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+        except Exception as exc:
+            log(f"Wi-Fi scan failed ({' '.join(cmd)}): {exc}")
 
     visible_known = [ssid for ssid in known if ssid in detected]
+    # Never hide the active configured network just because an active scan failed.
+    if current in known and current not in visible_known:
+        visible_known.insert(0, current)
+
     state.wifi_scan_results = visible_known
     refresh_wifi_status(force=True)
     return visible_known
@@ -2316,7 +2354,7 @@ def update_priorities_in_wpa_text(text: str, selected_ssid: str) -> tuple[str, b
         m = re.search(r'^\s*ssid\s*=\s*"((?:\\.|[^"\\])*)"', body, flags=re.M)
         if not m:
             return block
-        ssid = bytes(m.group(1), "utf-8").decode("unicode_escape", errors="ignore")
+        ssid = _decode_wpa_quoted_ssid(m.group(1))
         if not ssid:
             return block
         priority = WIFI_SELECTED_PRIORITY if ssid == selected_ssid else WIFI_OTHER_PRIORITY
@@ -9885,7 +9923,14 @@ def apply_current_submenu_selection() -> None:
         idx = clamp_index(state.submenu_index, len(GM_SOUNDFONT_CHOICES))
         filename = GM_SOUNDFONT_CHOICES[idx]
         if choose_runtime_gm_soundfont(filename, persist=True, restart=True):
-            leave_submenu(f"GM: {source_name_for_index(gm_soundfont_index())}")
+            # GM SoundFont is a child of Extension.  After confirming a choice,
+            # return explicitly to Extension and keep the cursor on GM SoundFont.
+            state.ui_mode = "submenu"
+            state.submenu_key = "extension"
+            state.submenu_index = 1
+            state.submenu_return_mode = None
+            invalidate_full_display()
+            mark_dirty(f"GM: {source_name_for_index(gm_soundfont_index())}")
         return
     if key == "external_midi_device":
         ports = list_external_midi_seq_ports()
