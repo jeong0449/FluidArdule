@@ -833,8 +833,8 @@ sudo nano /etc/systemd/system/fluid_ardule.service
 ```ini
 [Unit]
 Description=FluidArdule Main Service
-After=multi-user.target sound.target
-Wants=multi-user.target
+After=sound.target
+Wants=sound.target
 
 [Service]
 Type=simple
