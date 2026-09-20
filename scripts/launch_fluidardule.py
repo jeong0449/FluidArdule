@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260912l"
+SCRIPT_VERSION = "260920c"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
@@ -365,6 +365,7 @@ ADP_PATTERN_DIR = "/home/pi/sf2/ADP"
 ADP_SLOT_MAP_PATH = "/home/pi/sf2/slot_map_definitions.json"
 ADP_ACCENT_LEVELS_PATH = "/home/pi/sf2/accent_levels.json"
 ADP_DEFAULT_BPM = 120
+ADP_DEFAULT_DRUM_VOLUME_PERCENT = 85
 ADP_NOTE_LENGTH_SEC = 0.040
 ADP_TAP_MIN_BPM = 40
 ADP_TAP_MAX_BPM = 300
@@ -708,6 +709,8 @@ class RuntimeState:
     adp_accent_velocities: list[int] = field(default_factory=list)
     adp_steps: list[list[tuple[int, int]]] = field(default_factory=list)
     adp_bpm: int = ADP_DEFAULT_BPM
+    adp_drum_volume_percent: int = ADP_DEFAULT_DRUM_VOLUME_PERCENT
+    adp_drum_volume_captured: bool = False
     adp_playing: bool = False
     adp_error: str = ""
     adp_drum_kits: list[dict] = field(default_factory=list)
@@ -982,6 +985,25 @@ def handle_pot_value(raw_value: str) -> None:
         return
     raw = max(0, min(1023, raw))
     state.last_pot_raw = raw
+
+    # Play with Drums can temporarily give the physical POT to CH10.  It uses
+    # the same soft-takeover rule as master volume: the knob must first cross
+    # the current drum level before it becomes active, preventing level jumps.
+    if state.pot_mode == "DRUM" and state.ui_mode == "play_with_drums":
+        percent = int(round(raw * 100 / 1023))
+        if not state.adp_drum_volume_captured:
+            if abs(percent - state.adp_drum_volume_percent) <= POT_VOLUME_PICKUP_THRESHOLD:
+                state.adp_drum_volume_captured = True
+                state.last_volume_display_time = time.time()
+                mark_dirty(f"DRM {state.adp_drum_volume_percent}%")
+            else:
+                maybe_pulse_pot_led(percent)
+                return
+        if abs(percent - state.adp_drum_volume_percent) < POT_VOLUME_PERCENT_THRESHOLD:
+            return
+        set_adp_drum_volume(percent, announce=True)
+        maybe_pulse_pot_led(percent)
+        return
 
     # B: POT keeps volume as the default, but LEFT long can temporarily switch
     # it to PARAM mode. In PARAM mode, the full physical travel maps directly
@@ -1481,6 +1503,36 @@ def supported_adp_soundfont() -> bool:
     return base in {"fluidr3_gm.sf2", "generaluser_gs.sf2", "arachno_gm.sf2"}
 
 
+def set_adp_drum_volume(percent: int, *, announce: bool = False) -> bool:
+    """Set CH10 drum level with MIDI CC7 while leaving other channels unchanged."""
+    percent = max(0, min(100, int(percent)))
+    value = int(round(percent * 127 / 100))
+    ok = send_fluidsynth_command(f"cc 9 7 {value}")
+    if ok:
+        state.adp_drum_volume_percent = percent
+        if announce:
+            # Use the common volume footer so the active POT target is obvious:
+            # VOL xx% for master, DRM xx% for CH10 drum level.
+            state.last_volume_display_time = time.time()
+            mark_dirty(f"DRM {percent}%")
+    elif announce:
+        show_footer_message("Drum Volume send failed", 1.2)
+    return ok
+
+
+def toggle_adp_drum_pot_mode() -> None:
+    """Toggle POT between master volume and CH10 drum volume with pickup."""
+    if state.pot_mode == "DRUM":
+        state.pot_mode = "VOL"
+        state.pot_volume_captured = False
+        show_footer_message(f"POT: VOL {state.volume_percent}%", POT_MODE_FOOTER_HOLD_SEC)
+    else:
+        state.pot_mode = "DRUM"
+        state.adp_drum_volume_captured = False
+        state.pot_volume_captured = False
+        show_footer_message(f"POT: DRUM {state.adp_drum_volume_percent}%", POT_MODE_FOOTER_HOLD_SEC)
+
+
 def load_adp_drum_kits() -> None:
     """Build the CH10 drum-kit list from the active SoundFont preset JSON."""
     kits = [p for p in load_presets_for_sf2(state.sf_index)
@@ -1514,6 +1566,9 @@ def apply_adp_drum_kit(index: int, *, announce: bool = True) -> bool:
     ok = send_fluidsynth_command(f"bank 9 {bank}") or ok
     ok = send_fluidsynth_command(f"prog 9 {program}") or ok
     ok = send_fluidsynth_command(f"select 9 {RESIDENT_GM_SFID} {bank} {program}") or ok
+    # Program/bank changes may reset channel controllers in some SoundFonts;
+    # keep the user's Play with Drums balance stable across kit changes.
+    set_adp_drum_volume(state.adp_drum_volume_percent, announce=False)
     state.adp_drum_kit_index = idx
     state.adp_pending_drum_kit_index = None
     if announce:
@@ -1636,8 +1691,14 @@ def enter_play_with_drums() -> None:
     state.adp_selected_field = 0
     state.adp_pending_pattern = None
     state.adp_bpm = ADP_DEFAULT_BPM
+    # Enter in normal master-volume mode. Drum balance is retained in runtime
+    # and can be picked up explicitly with LEFT long.
+    state.pot_mode = "VOL"
+    state.pot_volume_captured = False
+    state.adp_drum_volume_captured = False
     load_adp_drum_kits()
     apply_adp_drum_kit(0, announce=False)
+    set_adp_drum_volume(state.adp_drum_volume_percent, announce=False)
     scan_adp_patterns()
     path = find_first_adp_file()
     if path is None:
@@ -1659,6 +1720,10 @@ def enter_play_with_drums() -> None:
 
 def leave_play_with_drums() -> None:
     stop_adp_playback(announce=False)
+    if state.pot_mode == "DRUM":
+        state.pot_mode = "VOL"
+        state.pot_volume_captured = False
+        state.adp_drum_volume_captured = False
     restore_quick_snapshot()
 
 
@@ -3537,6 +3602,10 @@ class TFTDisplay:
         """
         if state.ui_mode == "main":
             return "▶"
+        # Quick Menu is a launcher/shortcut menu.  Keep its visual language
+        # consistent with Home: every highlighted shortcut uses the enter glyph.
+        if state.ui_mode == "quick_menu":
+            return "▶"
         if state.ui_mode == "file_source":
             return "▶"
         if state.ui_mode == "file_browser":
@@ -4504,9 +4573,9 @@ class TFTDisplay:
         base_fill = (58, 95, 168)
         buttons = [
             {"label": "EXIT", "x": 18,  "y": 208, "w": 74,  "h": 44},
-            {"label": "+",    "x": 122, "y": 188, "w": 96,  "h": 38},
-            {"label": "-",    "x": 122, "y": 230, "w": 96,  "h": 38},
-            {"label": "NEXT", "x": 248, "y": 208, "w": 74,  "h": 44},
+            {"label": "NEXT",     "x": 122, "y": 188, "w": 96,  "h": 38},
+            {"label": "PREVIOUS", "x": 122, "y": 230, "w": 96,  "h": 38},
+            {"label": "FOCUS",    "x": 248, "y": 208, "w": 74,  "h": 44},
             {"label": "STOP" if state.adp_playing else "START", "x": 350, "y": 200, "w": 108, "h": 58},
         ]
         for btn in buttons:
@@ -4593,6 +4662,8 @@ class TFTDisplay:
         return "UNO READY" if connected else "UNO ---"
 
     def _volume_footer_text(self) -> str:
+        if state.ui_mode == "play_with_drums" and state.pot_mode == "DRUM":
+            return f"DRM {int(state.adp_drum_volume_percent):02d}%"
         return f"VOL {int(state.volume_percent):02d}%"
 
     def _normal_footer_left_text(self, now: float) -> str:
@@ -9893,7 +9964,7 @@ def apply_current_submenu_selection() -> None:
                 enter_submenu("external_midi_out")
                 mark_dirty("External MIDI OUT")
             return
-        if state.submenu_index == 3:
+        if state.submenu_index == 4:
             enter_submenu("external_midi_pc")
             mark_dirty("External MIDI PC Send")
             return
@@ -10244,10 +10315,8 @@ def restore_quick_snapshot() -> None:
 
 
 def enter_home() -> None:
-    if combi_locked():
-        warn_combi_quick_blocked()
-        return_to_sound_submenu("Combi active")
-        return
+    # Home is UI navigation only.  An active Combi is a persistent performance
+    # state and must not prevent returning to the launcher.
     state.ui_mode = "main"
     state.menu_index = 0
     invalidate_full_display()
@@ -10265,9 +10334,9 @@ def enter_now_playing() -> None:
 
 def quick_menu_select() -> None:
     item = QUICK_MENU_ITEMS[clamp_index(state.quick_menu_index, len(QUICK_MENU_ITEMS))]
-    if state.combi_active and item not in {"MIDI Panic", "Play with Drums"}:
-        warn_combi_quick_blocked()
-        return
+    # Do not globally lock Quick Menu while a Combi is active.  Individual
+    # destinations/actions remain responsible for protecting operations that
+    # would actually replace or disrupt the active performance state.
     if item == "MIDI Panic":
         midi_panic()
         return
@@ -10638,6 +10707,8 @@ def handle_button_event(btn_value: str) -> None:
             pulse_button_activity(); move_adp_selected_value(-1); return
         if btn == "RIGHT":
             pulse_button_activity(); cycle_adp_field(); return
+        if btn == "LEFT_LP":
+            pulse_button_activity(); toggle_adp_drum_pot_mode(); return
         if btn == "RIGHT_LP":
             pulse_button_activity(); enter_quick_menu(); return
         if btn == "DOWN_LP":
@@ -11975,7 +12046,7 @@ def encoder_position_snapshot() -> str:
             return f"quick_index={state.quick_menu_index}({label})"
 
         if state.ui_mode == "play_with_drums":
-            return f"adp=({state.adp_name}) playing={state.adp_playing} bpm={state.adp_bpm}"
+            return f"adp=({state.adp_name}) playing={state.adp_playing} bpm={state.adp_bpm} drum={state.adp_drum_volume_percent}% pot={state.pot_mode}"
 
         if state.ui_mode == "sound_edit":
             if SOUND_EDIT_PARAMS:
