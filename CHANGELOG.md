@@ -8,6 +8,28 @@ Version identifiers such as `260715f` refer to the version of the main Fluid Ard
 
 ---
 
+## 2026-09-20 --- Quick Menu and Play with Drums UI Update (260920c)
+
+### Added
+
+- Added POT-controlled drum volume in **Play with Drums**.
+  - LEFT long toggles the POT between master volume (`VOL`) and drum volume (`DRM`).
+  - Soft takeover is applied when switching between the two volume controls.
+- Added `VOL` / `DRM` identification to the footer volume display.
+
+### Changed
+
+- Refined **Play with Drums** control labels to `FOCUS`, `PREVIOUS`, and `NEXT`.
+- Standardized Quick Menu and menu navigation markers.
+- The POT returns to normal master-volume control when leaving **Play with Drums**.
+
+### Fixed
+
+- Fixed **Quick Menu → Home** navigation while a Combi is active.
+- Preserved the active Combi while navigating to Home and other UI areas.
+
+---
+
 ## 2026-09-10 --- Sound Architecture, Combi Workflow, and UI Responsiveness Update (260910u)
 
 ### Added
