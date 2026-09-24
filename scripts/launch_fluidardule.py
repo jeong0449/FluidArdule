@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260920c"
+SCRIPT_VERSION = "260924a"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
+# 260924a: Standardize stacked transport navigation: NEXT above PREV in
+#          Now Playing and Play with Drums; align player button actions accordingly.
 # 260910e: Sound menu is a CH1 source selector again. The title bar shows
 # CH2-16 resident SoundFont status at right; it dims while Yoshimi is active.
 # 260910b: resident Salamander + GM SoundFont retained; Yoshimi uses reliable
@@ -4222,8 +4224,8 @@ class TFTDisplay:
             # 260703b: Radio now supports adjacent-station switching in
             # Now Playing mode, so show the same PREV/NEXT labels that the
             # buttons actually perform.  RIGHT remains Favorite toggle.
-            up_label = "PREV"
-            down_label = "NEXT"
+            up_label = "NEXT"
+            down_label = "PREV"
             try:
                 is_fav = bool(state.player_radio_station_id and state.player_radio_station_id in load_radio_favorites())
             except Exception:
@@ -4234,8 +4236,8 @@ class TFTDisplay:
                 name = "★ " + name
             right_label = "FAV"
         else:
-            up_label = "PREV"
-            down_label = "NEXT"
+            up_label = "NEXT"
+            down_label = "PREV"
             right_label = "-"
 
         draw.rounded_rectangle((12, 70, self.width - 12, 122), radius=12, fill=BOX_BG)
@@ -4574,7 +4576,7 @@ class TFTDisplay:
         buttons = [
             {"label": "EXIT", "x": 18,  "y": 208, "w": 74,  "h": 44},
             {"label": "NEXT",     "x": 122, "y": 188, "w": 96,  "h": 38},
-            {"label": "PREVIOUS", "x": 122, "y": 230, "w": 96,  "h": 38},
+            {"label": "PREV",     "x": 122, "y": 230, "w": 96,  "h": 38},
             {"label": "FOCUS",    "x": 248, "y": 208, "w": 74,  "h": 44},
             {"label": "STOP" if state.adp_playing else "START", "x": 350, "y": 200, "w": 108, "h": 58},
         ]
@@ -11023,15 +11025,15 @@ def handle_button_event(btn_value: str) -> None:
             return
         if btn == "UP":
             if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
-                play_adjacent_radio_station(-1)
-            else:
-                play_adjacent(-1)
-            return
-        if btn == "DOWN":
-            if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
                 play_adjacent_radio_station(+1)
             else:
                 play_adjacent(+1)
+            return
+        if btn == "DOWN":
+            if state.player_proc_kind == "radio" or state.player_return_mode == "radio_browser":
+                play_adjacent_radio_station(-1)
+            else:
+                play_adjacent(-1)
             return
         mark_dirty(f"BTN ignored: {btn}")
         return
@@ -12142,7 +12144,9 @@ def handle_encoder_navigation_step(step: int) -> bool:
     # Player screen when stopped has side-effectful UP/DOWN actions; keep that
     # path conservative and let the existing button handler decide one action.
     if state.ui_mode == "player":
-        handle_button_event("DOWN" if step > 0 else "UP")
+        # Stacked player navigation uses NEXT above PREV: positive encoder
+        # movement follows NEXT, negative movement follows PREV.
+        handle_button_event("UP" if step > 0 else "DOWN")
         return True
 
     pulse_button_activity()
