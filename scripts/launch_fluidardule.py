@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-SCRIPT_VERSION = "260924a"
+SCRIPT_VERSION = "260925a"
 
 # =========================================================
 # Fluid Ardule main UI/runtime script
+# 260925a: Give resident Salamander C5 Lite a CH1-only Reverb default of 80;
+#          show the last selected Sound Edit parameter/value on Home > Controls.
 # 260924a: Standardize stacked transport navigation: NEXT above PREV in
 #          Now Playing and Play with Drums; align player button actions accordingly.
 # 260910e: Sound menu is a CH1 source selector again. The title bar shows
@@ -437,6 +439,8 @@ CONSOLE_HELPER = "/usr/local/sbin/fluidardule-console"
 
 # Sound Edit is a volatile, non-saving performance edit page.
 # CC7 Volume is intentionally excluded because the hardware pot controls volume.
+SALAMANDER_REVERB_DEFAULT = 80
+
 SOUND_EDIT_PARAMS = [
     {"label": "Expression", "name": "Expression", "cc": 11, "default": 127},
     {"label": "Modulation", "name": "Modulation", "cc": 1,  "default": 0},
@@ -3570,6 +3574,12 @@ class TFTDisplay:
         if label == "Media Player":
             return media_player_home_label()
         if label == "Controls":
+            if SOUND_EDIT_PARAMS:
+                idx = clamp_index(state.sound_edit_index, len(SOUND_EDIT_PARAMS))
+                item = SOUND_EDIT_PARAMS[idx]
+                cc = int(item["cc"])
+                value = int(state.sound_edit_values.get(cc, item["default"]))
+                return f"{item['name']} {value}"
             return "Sound Edit"
         if label == "MIDI Mode":
             return state.midi_display_text
@@ -7960,6 +7970,21 @@ def apply_preset(bank: int, program: int, name: str | None = None, *, engine: st
     else:
         send_fluidsynth_command("drums 9 off")
     defaults_ok = apply_sound_edit_defaults_to_engine(announce=False)
+
+    # Salamander C5 Lite is intentionally a little wetter than the global
+    # Sound Edit defaults.  Keep this override CH1-only so the resident GM
+    # SoundFont on CH2-16 is not altered.  Mirror the live CC91 value into the
+    # Sound Edit state so the editor and Home > Controls show what is heard.
+    if state.sf_index == piano_soundfont_index():
+        reverb_cc = 91
+        reverb_value = clamp_cc_value(SALAMANDER_REVERB_DEFAULT)
+        reverb_ok = send_fluidsynth_command(f"cc 0 {reverb_cc} {reverb_value}")
+        state.sound_edit_values[reverb_cc] = reverb_value
+        state.sound_edit_a_values[reverb_cc] = reverb_value
+        if reverb_value != next(int(item["default"]) for item in SOUND_EDIT_PARAMS if int(item["cc"]) == reverb_cc):
+            state.sound_edit_modified.add(reverb_cc)
+        defaults_ok = reverb_ok or defaults_ok
+
     mark_dirty(f"Preset -> {state.current_preset_name}" if (ok or defaults_ok) else f"Preset queued: {state.current_preset_name}")
 
 def apply_soundfont_with_default_preset(sf_index: int) -> None:
